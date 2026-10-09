@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import TorqueSurface, { useReducedMotion } from "./TorqueSurface.jsx";
 import {
   createDemoState,
   stepDemo,
@@ -529,6 +530,24 @@ export default function App() {
   const [samples, setSamples] = useState([]);
   const [view, setView] = useState("bench");
   const [settings, setSettings] = useState(false);
+  const [effectsEnabled, setEffectsEnabled] = useState(() => {
+    try {
+      return localStorage.getItem("inntorque.visual-effects") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const reducedMotion = useReducedMotion();
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "inntorque.visual-effects",
+        effectsEnabled ? "on" : "off",
+      );
+    } catch {
+      // The switch remains usable when browser storage is unavailable.
+    }
+  }, [effectsEnabled]);
   const [metric, setMetric] = useState("torque");
   const [windowSeconds, setWindowSeconds] = useState(30);
   const [frozen, setFrozen] = useState(null);
@@ -777,6 +796,21 @@ export default function App() {
             </p>
           </div>
           <div className="header-actions">
+            <button
+              className="button motion-toggle"
+              aria-label="视觉动效"
+              aria-pressed={effectsEnabled && !reducedMotion}
+              disabled={reducedMotion}
+              onClick={() => setEffectsEnabled((value) => !value)}
+              title={
+                reducedMotion
+                  ? "已遵循系统的减少动态效果设置"
+                  : "扭矩卡片背景动效；记录试验时自动暂停"
+              }
+            >
+              <span className="motion-indicator" aria-hidden="true" />
+              视觉动效
+            </button>
             <label className="profile-select">
               <span>设备量程</span>
               <select
@@ -855,6 +889,14 @@ export default function App() {
                   <article
                     className={`reading torque-reading ${!state.sensorConnected ? "stale" : ""}`}
                   >
+                    <TorqueSurface
+                      enabled={effectsEnabled && !reducedMotion}
+                      paused={
+                        Boolean(activeRecord) ||
+                        settings ||
+                        !state.sensorConnected
+                      }
+                    />
                     <div className="reading-label">
                       <span>减速箱输出扭矩</span>
                       <Icon name="sensor" size={20} />

@@ -309,6 +309,22 @@ h1 {
 .settings-button {
   height: 40px;
 }
+.motion-toggle {
+  background: transparent;
+  border-color: transparent;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+.motion-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #aab5c2;
+}
+.motion-toggle[aria-pressed="true"] .motion-indicator {
+  background: #3b8290;
+  box-shadow: 0 0 0 3px #3b829015;
+}
 .icon-button {
   background: transparent;
   border-radius: 5px;
@@ -502,6 +518,37 @@ h1 {
   border-color: #22334b;
   position: relative;
   overflow: hidden;
+  isolation: isolate;
+}
+.torque-reading > :not(.torque-surface) {
+  position: relative;
+  z-index: 1;
+}
+.torque-surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 95% 0%, #426a76 0%, transparent 65%),
+    linear-gradient(130deg, #172c46 20%, #294252 70%, #685342 140%);
+}
+.torque-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(100deg, #13283de6 0%, #142b40bb 70%),
+    linear-gradient(0deg, #172d48cc, transparent 50%);
+}
+.torque-surface canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+.torque-surface[data-enabled="true"][data-state="running"] canvas,
+.torque-surface[data-enabled="true"][data-state="paused"] canvas {
+  opacity: 0.85;
 }
 .torque-reading .reading-label {
   color: #c2cddd;

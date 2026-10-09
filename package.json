@@ -8,14 +8,16 @@
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
-    "test:ui": "node tests/ui-smoke.mjs"
+    "test:ui": "node tests/ui-smoke.mjs",
+    "test:shader": "node tests/shader-ui.mjs"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "dependencies": {
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "shaders": "4.0.3"
   },
   "devDependencies": {
     "playwright": "1.64.0",
