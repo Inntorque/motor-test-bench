@@ -34,13 +34,13 @@ const CHANNELS = [
     key: "supplyConnected",
     name: "制动电源",
     icon: "power",
-    detail: "制动加载 · 独立 RS485",
+    detail: "网口 → 独立 RS485",
   },
   {
     key: "motorSupply",
     name: "电机电源",
     icon: "power",
-    detail: "电机供电 · 独立 RS485",
+    detail: "网口 → 独立 RS485",
     pending: true,
   },
 ];
@@ -447,8 +447,8 @@ function Settings({ onClose, state, toggleConnection, stopAll }) {
                     <dd>与制动电源同类型，独立接入</dd>
                   </div>
                   <div>
-                    <dt>接入计划</dt>
-                    <dd>独立 RS485 · 按网关协议适配</dd>
+                    <dt>接入方式</dt>
+                    <dd>网口 → 独立 RS485</dd>
                   </div>
                   <div>
                     <dt>作用</dt>
@@ -468,7 +468,7 @@ function Settings({ onClose, state, toggleConnection, stopAll }) {
                   </div>
                   <div>
                     <dt>待确认</dt>
-                    <dd>具体型号、协议、额定电压与电流</dd>
+                    <dd>电源与网关型号、协议、额定电压与电流</dd>
                   </div>
                 </>
               ) : (
@@ -478,12 +478,12 @@ function Settings({ onClose, state, toggleConnection, stopAll }) {
                     <dd>与电机电源同类型，独立接入</dd>
                   </div>
                   <div>
-                    <dt>接入计划</dt>
-                    <dd>网口转独立 RS485 · 按网关协议适配</dd>
+                    <dt>接入方式</dt>
+                    <dd>网口 → 独立 RS485</dd>
                   </div>
                   <div>
                     <dt>待确认</dt>
-                    <dd>电源、网关型号，电流范围与反馈</dd>
+                    <dd>电源与网关型号、协议、电流范围与反馈</dd>
                   </div>
                 </>
               )}
@@ -501,8 +501,9 @@ function Settings({ onClose, state, toggleConnection, stopAll }) {
         <div className="demo-note">
           <strong>两路电源</strong>
           <p>
-            电机电源和制动电源是同类型设备，分别给驱动侧和制动线圈供电。
-            电机侧负责供电，制动侧通过电流调节负载；接入时分别配置端口和允许的电压、电流范围，分别显示设定值与输出状态。
+            电机电源和制动电源是同类型设备，两路均经网口转 RS485
+            接入，分别给驱动侧和制动线圈供电。
+            电机侧负责供电，制动侧通过电流调节负载；接入时分别配置网关地址、端口或通道，以及允许的电压、电流范围，分别显示设定值与输出状态。
           </p>
         </div>
         <div className="demo-note">
