@@ -27,6 +27,22 @@ try {
     await page.getByText("所有读数与操作均为模拟，未连接真实设备").count(),
     1,
   );
+  assert.equal(await page.locator(".connections .connection").count(), 4);
+  assert.equal(
+    await page
+      .locator(".connections .connection")
+      .filter({ hasText: "电机电源" })
+      .getByText("待接入", { exact: true })
+      .count(),
+    1,
+  );
+  assert.equal(
+    await page
+      .locator(".torque-reading")
+      .getByText("减速箱输出扭矩", { exact: true })
+      .count(),
+    1,
+  );
   await page.screenshot({ path: "output/workbench-idle.png", fullPage: true });
 
   await page.getByRole("button", { name: "运行加载演示", exact: true }).click();
@@ -52,8 +68,21 @@ try {
 
   await page.getByRole("button", { name: "设备设置", exact: true }).click();
   const sensor = page.locator(".device-setup").filter({
-    has: page.getByRole("heading", { name: "扭矩传感器", exact: true }),
+    has: page.getByRole("heading", { name: "动态扭矩传感器", exact: true }),
   });
+  const motorSupply = page
+    .locator(".device-setup")
+    .filter({
+      has: page.getByRole("heading", { name: "电机电源", exact: true }),
+    });
+  assert.equal(
+    await motorSupply
+      .getByRole("button", { name: "等待协议", exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(await motorSupply.getByText("— V", { exact: true }).count(), 1);
+  assert.equal(await motorSupply.getByText("— A", { exact: true }).count(), 1);
   await sensor.getByRole("button", { name: "模拟断开", exact: true }).click();
   await page.waitForTimeout(450); // collect disconnected samples, not a UI readiness wait
   await page.getByRole("button", { name: "完成", exact: true }).click();
@@ -73,6 +102,10 @@ try {
   assert.ok(download.suggestedFilename().startsWith("SIMULATION_"));
   const csv = await readFile(await download.path(), "utf8");
   assert.match(csv, /source,receivedAt/);
+  assert.match(
+    csv,
+    /gearboxOutputTorqueNm,gearboxOutputSpeedRpm,brakeCurrentA/,
+  );
   assert.match(csv, /simulation,/);
   assert.ok(
     csv

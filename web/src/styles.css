@@ -357,7 +357,7 @@ h1 {
 }
 .connections {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border: 1px solid var(--border);
   background: white;
   border-radius: 8px;
@@ -1474,7 +1474,7 @@ h1 {
     width: calc(100% - 77px);
   }
   .connections {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .connection {
     flex-wrap: wrap;
@@ -2099,5 +2099,56 @@ h1 {
   .control-foot {
     padding-top: 8px;
     padding-bottom: 8px;
+  }
+}
+
+/* Four equipment roles; the motor power supply remains a pending interface. */
+.connections .connection {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  column-gap: 9px;
+  row-gap: 5px;
+}
+.connections .connection .device-icon {
+  grid-row: 1 / 3;
+  width: 30px;
+}
+.connections .connection-info {
+  grid-column: 2;
+}
+.connections .connection-info > span {
+  white-space: normal;
+  font-size: 11px;
+}
+.connections .connection-status {
+  grid-column: 2;
+  margin: 0;
+  width: auto;
+  font-size: 11px;
+}
+.demo-note + .demo-note {
+  margin-top: 18px;
+}
+@media (max-width: 1120px) {
+  .connections .connection:nth-child(3) {
+    border-left: 0;
+  }
+  .connections .connection:nth-child(n + 3) {
+    border-top: 1px solid #edf0f4;
+  }
+}
+@media (max-width: 850px) {
+  .connections .connection {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .connections .connection-info,
+  .connections .connection-status {
+    grid-column: 1;
+  }
+  .connections .connection-info strong {
+    font-size: 13px;
+  }
+  .connections .connection-info > span {
+    min-height: 0;
   }
 }

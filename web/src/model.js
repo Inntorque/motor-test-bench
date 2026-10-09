@@ -6,17 +6,17 @@ const DEMO_LIMITS = {
 };
 
 const CSV_FIELDS = [
-  "source",
-  "receivedAt",
-  "t",
-  "torque",
-  "speed",
-  "current",
-  "targetSpeed",
-  "targetCurrent",
-  "motorEnabled",
-  "loadEnabled",
-  "range",
+  ["source", "source"],
+  ["receivedAt", "receivedAt"],
+  ["t", "elapsedSeconds"],
+  ["torque", "gearboxOutputTorqueNm"],
+  ["speed", "gearboxOutputSpeedRpm"],
+  ["current", "brakeCurrentA"],
+  ["targetSpeed", "motorTargetSpeedRpm"],
+  ["targetCurrent", "brakeTargetCurrentA"],
+  ["motorEnabled", "motorEnabled"],
+  ["loadEnabled", "brakeOutputEnabled"],
+  ["range", "torqueSensorRangeNm"],
 ];
 
 export function createDemoState(range = 50) {
@@ -126,9 +126,11 @@ function csvCell(value) {
 }
 
 export function toCsv(samples) {
-  const rows = [CSV_FIELDS.join(",")];
+  // Preserve stored v1 sample keys while making exported shaft location and
+  // electrical source explicit. Legacy demo recordings use the same mapping.
+  const rows = [CSV_FIELDS.map(([, heading]) => heading).join(",")];
   for (const sample of samples) {
-    rows.push(CSV_FIELDS.map((field) => csvCell(sample[field])).join(","));
+    rows.push(CSV_FIELDS.map(([field]) => csvCell(sample[field])).join(","));
   }
   return `\uFEFF${rows.join("\r\n")}\r\n`;
 }

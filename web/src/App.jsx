@@ -19,7 +19,7 @@ const CHANNELS = [
   },
   {
     key: "sensorConnected",
-    name: "扭矩传感器",
+    name: "动态扭矩传感器",
     icon: "sensor",
     detail: "EVG-D200 · RS485",
   },
@@ -28,6 +28,13 @@ const CHANNELS = [
     name: "制动电源",
     icon: "power",
     detail: "电流控制 · 网口转 RS485",
+  },
+  {
+    key: "motorSupply",
+    name: "电机电源",
+    icon: "power",
+    detail: "电机供电 · 暂按 RS485",
+    pending: true,
   },
 ];
 
@@ -172,9 +179,14 @@ function Plot({
     return () => observer.disconnect();
   }, []);
   const meta = {
-    torque: { label: "实测扭矩", unit: "N·m", color: "#3479df", max: range },
+    torque: {
+      label: "减速箱输出扭矩",
+      unit: "N·m",
+      color: "#3479df",
+      max: range,
+    },
     speed: { label: "输出转速", unit: "rpm", color: "#318978", max: 1500 },
-    current: { label: "实际电流", unit: "A", color: "#d28131", max: 2 },
+    current: { label: "制动加载电流", unit: "A", color: "#d28131", max: 2 },
   }[metric];
   const { width, height } = plotSize;
   const tickCount = width < 500 ? 3 : 6;
@@ -397,8 +409,13 @@ function Settings({ onClose, state, toggleConnection }) {
               <button
                 className="button small"
                 onClick={() => toggleConnection(ch.key)}
+                disabled={ch.pending}
               >
-                {state[ch.key] ? "模拟断开" : "模拟连接"}
+                {ch.pending
+                  ? "等待协议"
+                  : state[ch.key]
+                    ? "模拟断开"
+                    : "模拟连接"}
               </button>
             </div>
             <dl>
@@ -428,6 +445,29 @@ function Settings({ onClose, state, toggleConnection }) {
                     <dd>19200 baud、地址 1、停止位与缩放</dd>
                   </div>
                 </>
+              ) : ch.key === "motorSupply" ? (
+                <>
+                  <div>
+                    <dt>作用</dt>
+                    <dd>给电机驱动板供电</dd>
+                  </div>
+                  <div>
+                    <dt>供电电压读回</dt>
+                    <dd>— V</dd>
+                  </div>
+                  <div>
+                    <dt>供电电流读回</dt>
+                    <dd>— A</dd>
+                  </div>
+                  <div>
+                    <dt>反馈状态</dt>
+                    <dd>待接入，不代表电源已关闭</dd>
+                  </div>
+                  <div>
+                    <dt>待确认</dt>
+                    <dd>电源型号、协议与网页控制范围</dd>
+                  </div>
+                </>
               ) : (
                 <>
                   <div>
@@ -444,10 +484,17 @@ function Settings({ onClose, state, toggleConnection }) {
           </section>
         ))}
         <div className="demo-note">
+          <strong>机械链路与测量位置</strong>
+          <p>
+            电机 → 减速箱 → 动态扭矩传感器 →
+            磁粉制动器。制动器只做负载；主读数是减速箱输出扭矩，未换算为电机轴扭矩。电机供电电流来自电源端，不是电机相电流。
+          </p>
+        </div>
+        <div className="demo-note">
           <strong>演示参数</strong>
           <p>
-            转速 0–1500 rpm，电流 0–2 A，演示减速比
-            1:1。这些数值和电流—扭矩关系仅用于体验界面，不代表实际设备规格。切换
+            转速 0–1500 rpm，制动电流 0–2 A，演示减速比
+            1:1。这些数值和电流—扭矩关系仅用于体验界面，不代表实际设备规格。电机电源读回尚未模拟。切换
             50/100 N·m 只切换演示配置。
           </p>
         </div>
@@ -571,7 +618,10 @@ export default function App() {
   const changeRange = (value) => {
     if (recording.current || state.motorEnabled || state.loadEnabled) return;
     const connections = Object.fromEntries(
-      CHANNELS.map((ch) => [ch.key, engine.current[ch.key]]),
+      CHANNELS.filter((ch) => !ch.pending).map((ch) => [
+        ch.key,
+        engine.current[ch.key],
+      ]),
     );
     engine.current = { ...createDemoState(Number(value)), ...connections };
     setState(engine.current);
@@ -778,7 +828,11 @@ export default function App() {
                     className={`connection-status ${state[ch.key] ? "" : "disconnected"}`}
                   >
                     <i />
-                    {state[ch.key] ? "模拟已连接" : "已模拟断开"}
+                    {ch.pending
+                      ? "待接入"
+                      : state[ch.key]
+                        ? "模拟已连接"
+                        : "已模拟断开"}
                   </span>
                 </button>
               ))}
@@ -790,7 +844,7 @@ export default function App() {
                     className={`reading torque-reading ${!state.sensorConnected ? "stale" : ""}`}
                   >
                     <div className="reading-label">
-                      <span>实测扭矩</span>
+                      <span>减速箱输出扭矩</span>
                       <Icon name="sensor" size={20} />
                     </div>
                     <div className="value">
@@ -811,7 +865,7 @@ export default function App() {
                     <div className="reading-foot">
                       <span>
                         {state.sensorConnected
-                          ? "传感器模拟读数"
+                          ? "输出端 · 模拟读数"
                           : "连接已断开 · 数据不可用"}
                       </span>
                       <span>量程 {state.range} N·m</span>
@@ -837,7 +891,7 @@ export default function App() {
                   </article>
                   <article className="reading">
                     <div className="reading-label">
-                      <span>实际加载电流</span>
+                      <span>制动加载电流</span>
                       <Icon name="power" size={18} />
                     </div>
                     <div className="value">
@@ -847,7 +901,7 @@ export default function App() {
                     <div className="reading-foot">
                       <span className={state.loadEnabled ? "running-text" : ""}>
                         {!state.supplyConnected
-                          ? "电源已模拟断开"
+                          ? "制动电源已模拟断开"
                           : state.loadEnabled
                             ? "制动输出已开启"
                             : "制动输出关闭"}
@@ -893,7 +947,7 @@ export default function App() {
                       {[
                         ["torque", "扭矩", "N·m"],
                         ["speed", "转速", "rpm"],
-                        ["current", "电流", "A"],
+                        ["current", "制动电流", "A"],
                       ].map(([key, name, unit]) => (
                         <button
                           key={key}
@@ -929,10 +983,10 @@ export default function App() {
                     <span>
                       <span className={`legend-line ${metric}`} />
                       {metric === "torque"
-                        ? "传感器扭矩"
+                        ? "减速箱输出扭矩"
                         : metric === "speed"
                           ? "输出端转速"
-                          : "电源读回电流"}
+                          : "制动电源读回电流"}
                     </span>
                     <span>时间 / mm:ss · 断开处保留缺口</span>
                   </div>
@@ -1106,13 +1160,13 @@ export default function App() {
                     {state.loadEnabled ? "关闭制动输出" : "开启模拟制动输出"}
                   </button>
                   <div className="control-foot">
-                    <span>加载方式</span>
-                    <strong>电流设定</strong>
+                    <span>磁粉制动器</span>
+                    <strong>仅作为负载</strong>
                   </div>
                 </section>
                 <div className="control-hint">
                   <Icon name="info" size={17} />
-                  <p>电流决定加载设定，实际扭矩以传感器读数为准。</p>
+                  <p>制动电流用于调节负载。传感器测量减速箱输出端扭矩。</p>
                 </div>
               </aside>
             </div>

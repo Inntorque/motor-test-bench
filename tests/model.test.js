@@ -106,7 +106,7 @@ test("CSV has a simulation marker, all fields, blank missing measurements and pr
   const csv = toCsv([sample]);
   assert.ok(
     csv.startsWith(
-      "\uFEFFsource,receivedAt,t,torque,speed,current,targetSpeed,targetCurrent,motorEnabled,loadEnabled,range\r\n",
+      "\uFEFFsource,receivedAt,elapsedSeconds,gearboxOutputTorqueNm,gearboxOutputSpeedRpm,brakeCurrentA,motorTargetSpeedRpm,brakeTargetCurrentA,motorEnabled,brakeOutputEnabled,torqueSensorRangeNm\r\n",
     ),
   );
   assert.ok(
