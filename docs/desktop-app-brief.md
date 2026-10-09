@@ -15,13 +15,13 @@
 
 场景更新：机械链已确定为“电机 → 减速箱 → 动态扭矩传感器 → 磁粉制动器”，磁粉制动器只作负载。两个电源分别给电机驱动侧、制动线圈供电。传感器和制动器均有 50/100 N·m 两种规格，组合与并发需求待定。实测值命名为“减速箱输出扭矩”，不能直接称为电机轴扭矩；电机供电电流也不等于电机相电流。完整设备关系见[试验台设备与接入方案](test-bench.md)。
 
-接入方向更新：LC_CANABLE_V2.1 采用 USB CDC/SLCAN + Web Serial，首轮能力见 [CAN 接口约定 v1](can-interface-contract.md)。首页显示“电机驱动板”“动态扭矩传感器”“制动电源”“电机电源”四个角色。后三者暂按三个 RS485 设备登记，不等于三个独立适配器，也未确定共用总线。两电源可考虑网口转 RS485；驱动板、两电源及网关协议仍待确认，电机电源需读取或控制的功能尚未确定。
+接入方向更新：LC_CANABLE_V2.1 采用 USB CDC/SLCAN + Web Serial，首轮能力见 [CAN 接口约定 v1](can-interface-contract.md)。首页显示“电机驱动板”“动态扭矩传感器”“制动电源”“电机电源”四个角色。后三者各占一路独立 RS485，不共用总线；CAN 也独立接入。独立通道可由独立适配器或多路网关的独立端口提供，具体硬件待定。两电源可考虑网口转 RS485；驱动板、两电源及网关协议仍待确认，电机电源需读取或控制的功能尚未确定。
 
 目标体验：**接好 → 看懂读数 → 开始记录 → 停止并导出**。常用操作留在同一工作界面，串口细节与设备高级参数按需展开。
 
 ## 网页交付方案
 
-GitHub Pages 提供静态 HTML/CSS/JavaScript 托管并支持 HTTPS，适合本项目的浏览器界面。CAN 适配器经 Web Serial 接入；传感器可用独立 USB-RS485，两个电源保留网口转 RS485 路线，实际拓扑待定。网络接入根据网关能力使用 HTTP/WebSocket 或本机、台架侧桥接服务，详见[网络接入条件](test-bench.md#网口转-rs485-的网页接入条件)。GitHub Pages 不运行硬件接入后端。[GitHub Pages 说明](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)、[HTTPS 支持](https://docs.github.com/en/pages/getting-started-with-github-pages/securing-your-github-pages-site-with-https)。
+GitHub Pages 提供静态 HTML/CSS/JavaScript 托管并支持 HTTPS，适合本项目的浏览器界面。CAN 适配器经 Web Serial 接入；传感器可用独立 USB-RS485，两个电源保留网口转 RS485 路线；三路 RS485 分别接线、配置和管理，网关型号与端口分配待定。网络接入根据网关能力使用 HTTP/WebSocket 或本机、台架侧桥接服务，详见[网络接入条件](test-bench.md#网口转-rs485-的网页接入条件)。GitHub Pages 不运行硬件接入后端。[GitHub Pages 说明](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages)、[HTTPS 支持](https://docs.github.com/en/pages/getting-started-with-github-pages/securing-your-github-pages-site-with-https)。
 
 运行链路：GitHub Pages 将网页加载到用户电脑 → 网页通过 Web Serial 访问该电脑的 USB-RS485 → EVG-D200。Modbus 编解码、曲线及记录在浏览器本地完成，方案不上传测量数据。该结构不提供跨互联网远程访问另一台电脑串口的能力。
 
@@ -70,7 +70,7 @@ RS485 直连路线无需安装专用上位机程序；USB-RS485 仍须被操作�
 
 制动电流输入采用数值框和小步增减，编辑后的值点击“应用”才发送；实际制动电流缺失时显示“—”，电流设定不冒充实测扭矩。输出开关区分请求状态与电源确认状态。连接及重连不自动使能输出或恢复旧设定；“停止记录”“关闭制动电源输出”“停止电机”分开操作。自动恒扭矩控制保留为后续能力。
 
-高级标定、恢复出厂、模拟量校准、自动切换通信模式作为后续范围。两套设备同时使用及总线拓扑根据用户配置决定。高速模式应有独立引导，说明需要在设备上改回 Modbus，且该模式下远程清零/参数修改尚无已确认通道。
+高级标定、恢复出厂、模拟量校准、自动切换通信模式作为后续范围。两套设备是否同时使用仍待确认；传感器与两电源的 RS485 均使用独立通道。高速模式应有独立引导，说明需要在设备上改回 Modbus，且该模式下远程清零/参数修改尚无已确认通道。
 
 ## 清零、滤波与标定
 
@@ -108,4 +108,4 @@ RS485 直连路线无需安装专用上位机程序；USB-RS485 仍须被操作�
 - 制动电流设定与实测输出扭矩清楚分开；制动电源写入失败、未确认或断线时不显示已执行，重连不自动加载。
 - 电机电源待接入时没有伪造的电压/电流反馈，不将供电电流显示为相电流或把减速箱输出扭矩显示为电机轴扭矩。
 
-下一步所需信息：两种规格设备的使用方式；两电源及网络网关型号、协议与 RS485 接入拓扑，电机电源需读取或控制的功能，制动线圈电气参数；自家驱动板 CAN 协议及固件；实际测试电脑环境与期望时间分辨率。在当前交互原型上逐路实现真实通信并联调，最后部署到 Inntorque/motor-test-bench 的 GitHub Pages。
+下一步所需信息：两种规格设备的使用方式；两电源及网络网关型号、协议与 独立 RS485 端口分配，电机电源需读取或控制的功能，制动线圈电气参数；自家驱动板 CAN 协议及固件；实际测试电脑环境与期望时间分辨率。在当前交互原型上逐路实现真实通信并联调，最后部署到 Inntorque/motor-test-bench 的 GitHub Pages。

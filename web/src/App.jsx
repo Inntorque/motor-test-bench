@@ -21,19 +21,19 @@ const CHANNELS = [
     key: "sensorConnected",
     name: "动态扭矩传感器",
     icon: "sensor",
-    detail: "EVG-D200 · RS485",
+    detail: "EVG-D200 · 独立 RS485",
   },
   {
     key: "supplyConnected",
     name: "制动电源",
     icon: "power",
-    detail: "电流控制 · 网口转 RS485",
+    detail: "制动加载 · 独立 RS485",
   },
   {
     key: "motorSupply",
     name: "电机电源",
     icon: "power",
-    detail: "电机供电 · 暂按 RS485",
+    detail: "电机供电 · 独立 RS485",
     pending: true,
   },
 ];
@@ -438,7 +438,7 @@ function Settings({ onClose, state, toggleConnection }) {
                   </div>
                   <div>
                     <dt>接入计划</dt>
-                    <dd>USB-RS485 · Modbus RTU</dd>
+                    <dd>独立 USB-RS485 · Modbus RTU</dd>
                   </div>
                   <div>
                     <dt>待验证</dt>
@@ -447,6 +447,10 @@ function Settings({ onClose, state, toggleConnection }) {
                 </>
               ) : ch.key === "motorSupply" ? (
                 <>
+                  <div>
+                    <dt>接入计划</dt>
+                    <dd>独立 RS485 · 按网关协议适配</dd>
+                  </div>
                   <div>
                     <dt>作用</dt>
                     <dd>给电机驱动板供电</dd>
@@ -472,7 +476,7 @@ function Settings({ onClose, state, toggleConnection }) {
                 <>
                   <div>
                     <dt>接入计划</dt>
-                    <dd>网口转 RS485 · 按网关协议适配</dd>
+                    <dd>网口转独立 RS485 · 按网关协议适配</dd>
                   </div>
                   <div>
                     <dt>待确认</dt>
@@ -483,6 +487,14 @@ function Settings({ onClose, state, toggleConnection }) {
             </dl>
           </section>
         ))}
+        <div className="demo-note">
+          <strong>通信通道</strong>
+          <p>
+            传感器、制动电源、电机电源各占一路独立
+            RS485，不共用总线；电机驱动板使用独立
+            CAN。每个设备分别配置连接参数。
+          </p>
+        </div>
         <div className="demo-note">
           <strong>机械链路与测量位置</strong>
           <p>
