@@ -443,6 +443,10 @@ function Settings({ onClose, state, toggleConnection, stopAll }) {
               ) : ch.key === "motorSupply" ? (
                 <>
                   <div>
+                    <dt>设备类型</dt>
+                    <dd>与制动电源同类型，独立接入</dd>
+                  </div>
+                  <div>
                     <dt>接入计划</dt>
                     <dd>独立 RS485 · 按网关协议适配</dd>
                   </div>
@@ -464,11 +468,15 @@ function Settings({ onClose, state, toggleConnection, stopAll }) {
                   </div>
                   <div>
                     <dt>待确认</dt>
-                    <dd>电源型号、协议与网页控制范围</dd>
+                    <dd>具体型号、协议、额定电压与电流</dd>
                   </div>
                 </>
               ) : (
                 <>
+                  <div>
+                    <dt>设备类型</dt>
+                    <dd>与电机电源同类型，独立接入</dd>
+                  </div>
                   <div>
                     <dt>接入计划</dt>
                     <dd>网口转独立 RS485 · 按网关协议适配</dd>
@@ -488,6 +496,13 @@ function Settings({ onClose, state, toggleConnection, stopAll }) {
             传感器、制动电源、电机电源各占一路独立
             RS485，不共用总线；电机驱动板使用独立
             CAN。每个设备分别配置连接参数。
+          </p>
+        </div>
+        <div className="demo-note">
+          <strong>两路电源</strong>
+          <p>
+            电机电源和制动电源是同类型设备，分别给驱动侧和制动线圈供电。
+            电机侧负责供电，制动侧通过电流调节负载；接入时分别配置端口和允许的电压、电流范围，分别显示设定值与输出状态。
           </p>
         </div>
         <div className="demo-note">
