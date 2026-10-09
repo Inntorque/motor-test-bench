@@ -1,5 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  STORE_KEY,
+  readRecords,
+  saveRecords,
+  mergeRecords,
+  relativeSamples,
+  eventCsv,
+} from "./records.js";
+import {
   createDemoState,
   stepDemo,
   sampleFromState,
@@ -8,7 +16,6 @@ import {
   formatDuration,
 } from "./model.js";
 
-const STORE_KEY = "inntorque.demo-recordings.v1";
 const MAX_SAMPLES = 1500;
 const CHANNELS = [
   {
@@ -133,30 +140,6 @@ function Icon({ name, size = 20, ...props }) {
   );
 }
 
-function loadSaved() {
-  try {
-    const data = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
-    if (!Array.isArray(data))
-      return { records: [], error: "本地记录格式无法识别，原始数据未修改。" };
-    const records = data.filter(
-      (r) =>
-        r &&
-        typeof r.id === "string" &&
-        Array.isArray(r.samples) &&
-        r.samples.every((s) => s?.source === "simulation"),
-    );
-    return {
-      records,
-      error:
-        records.length !== data.length
-          ? "部分本地记录无法读取，原始数据未修改。"
-          : "",
-    };
-  } catch {
-    return { records: [], error: "无法读取浏览器本地记录。新记录仍可导出。" };
-  }
-}
-
 function Plot({
   samples,
   metric,
@@ -164,6 +147,7 @@ function Plot({
   paused,
   empty,
   onDemo,
+  demoReady = true,
   windowSeconds,
 }) {
   const svgRef = useRef(null);
@@ -188,6 +172,7 @@ function Plot({
     speed: { label: "输出转速", unit: "rpm", color: "#318978", max: 1500 },
     current: { label: "制动加载电流", unit: "A", color: "#d28131", max: 2 },
   }[metric];
+  const minimum = metric === "torque" ? -meta.max : 0;
   const { width, height } = plotSize;
   const tickCount = width < 500 ? 3 : 6;
   const left = 48,
@@ -209,7 +194,7 @@ function Plot({
       left + ((sample.t - start) / windowSeconds) * (width - left - right);
     const y =
       top +
-      (1 - Math.min(1, Math.max(0, value / meta.max))) *
+      (1 - Math.min(1, Math.max(0, (value - minimum) / (meta.max - minimum)))) *
         (height - top - bottom);
     path += `${drawing ? "L" : "M"}${x.toFixed(2)},${y.toFixed(2)} `;
     drawing = true;
@@ -236,7 +221,7 @@ function Plot({
                 strokeDasharray="4 5"
               />
               <text x={left - 14} y={y + 4} textAnchor="end">
-                {Number(((1 - v) * meta.max).toFixed(1))}
+                {Number((meta.max - v * (meta.max - minimum)).toFixed(1))}
               </text>
             </g>
           );
@@ -253,7 +238,9 @@ function Plot({
                 stroke="#f1f3f6"
               />
               <text x={x} y={height - 11} textAnchor="middle">
-                {formatDuration(start + (v / tickCount) * windowSeconds)}
+                {windowSeconds < 10
+                  ? `${(start + (v / tickCount) * windowSeconds).toFixed(1)} s`
+                  : formatDuration(start + (v / tickCount) * windowSeconds)}
               </text>
             </g>
           );
@@ -269,8 +256,16 @@ function Plot({
       {empty && (
         <div className="plot-empty">
           <span>让第一条加载曲线跑起来</span>
-          <p>从启动电机到调节负载，先体验一次模拟试验。</p>
-          <button className="button primary" onClick={onDemo}>
+          <p>
+            {demoReady
+              ? "从启动电机到调节负载，先体验一次模拟试验。"
+              : "有模拟设备已断开，请先在设备设置中重新连接。"}
+          </p>
+          <button
+            className="button primary"
+            onClick={onDemo}
+            disabled={!demoReady}
+          >
             <Icon name="play" size={16} />
             运行加载演示
           </button>
@@ -358,7 +353,7 @@ function Setpoint({ kind, value, onChange, applied, connected, onApply }) {
   );
 }
 
-function Settings({ onClose, state, toggleConnection }) {
+function Settings({ onClose, state, toggleConnection, stopAll }) {
   const dialog = useRef(null);
   useEffect(() => {
     dialog.current.showModal();
@@ -512,6 +507,13 @@ function Settings({ onClose, state, toggleConnection }) {
         </div>
       </div>
       <div className="dialog-foot">
+        <button
+          className="button stop-all"
+          onClick={stopAll}
+          disabled={!state.motorEnabled && !state.loadEnabled}
+        >
+          停止全部模拟输出
+        </button>
         <button className="button primary" onClick={onClose}>
           完成
         </button>
@@ -521,7 +523,7 @@ function Settings({ onClose, state, toggleConnection }) {
 }
 
 export default function App() {
-  const [initial] = useState(loadSaved);
+  const [initial] = useState(() => readRecords());
   const [records, setRecords] = useState(initial.records);
   const recordsRef = useRef(initial.records);
   const engine = useRef(createDemoState());
@@ -539,42 +541,63 @@ export default function App() {
   ]);
   const [toast, setToast] = useState("");
   const [storageError, setStorageError] = useState(initial.error);
+  const [storageWarning, setStorageWarning] = useState("");
+  const [saving, setSaving] = useState(false);
+  const unsavedIds = useRef(new Set());
   const recording = useRef(null);
   const [activeRecord, setActiveRecord] = useState(null);
   const [recordName, setRecordName] = useState("减速箱加载试验");
   const [selected, setSelected] = useState(null);
+  const [historyMetric, setHistoryMetric] = useState("torque");
   const [hasRun, setHasRun] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
 
-  const addEvent = (text) =>
-    setEvents((prev) => [{ at: new Date(), text }, ...prev].slice(0, 100));
+  const addEvent = (text) => {
+    const at = new Date();
+    setEvents((prev) => [{ at, text }, ...prev].slice(0, 100));
+    if (recording.current) {
+      recording.current.events.push({
+        at: at.toISOString(),
+        t: Math.max(0, engine.current.t - recording.current.engineOrigin),
+        text,
+      });
+    }
+  };
   const update = (patch) => {
     engine.current = { ...engine.current, ...patch };
     setState(engine.current);
   };
-  const saveFinished = (message = "模拟记录已完成") => {
+  const saveFinished = async (message = "模拟记录已完成") => {
     const record = recording.current;
     if (!record) return;
+    addEvent(`${message} · ${record.samples.length} 个数据点`);
     recording.current = null;
     const complete = {
       ...record,
-      duration: Math.max(0, (Date.now() - record.startedAt) / 1000),
+      duration: Math.max(0, engine.current.t - record.engineOrigin),
       finishedAt: Date.now(),
     };
-    const next = [complete, ...recordsRef.current];
+    delete complete.engineOrigin;
+    const next = mergeRecords([complete], recordsRef.current);
     recordsRef.current = next;
+    unsavedIds.current.add(complete.id);
     setRecords(next);
     setActiveRecord(null);
-    try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(next));
-      setStorageError("");
-    } catch {
-      setStorageError(
-        "浏览器本地保存失败，请及时导出；当前记录仍保留在此页面。",
-      );
+    setSaving(true);
+    const result = await saveRecords(next);
+    recordsRef.current = mergeRecords(result.records, recordsRef.current);
+    setRecords(recordsRef.current);
+    setStorageError(result.error);
+    setStorageWarning(result.warning || "");
+    if (result.saved) {
+      unsavedIds.current.clear();
     }
-    addEvent(`${message} · ${complete.samples.length} 个数据点`);
-    setToast(`${message}，可导出 CSV`);
+    setSaving(false);
+    setToast(
+      result.saved
+        ? `${message}，已保存，可导出 CSV`
+        : "记录已结束，本地保存失败，请导出 CSV",
+    );
   };
   const finishRef = useRef(saveFinished);
   finishRef.current = saveFinished;
@@ -590,7 +613,10 @@ export default function App() {
       const sample = sampleFromState(engine.current);
       setSamples((prev) => [...prev, sample].slice(-310));
       if (recording.current) {
-        recording.current.samples.push(sample);
+        recording.current.samples.push({
+          ...sample,
+          t: Math.max(0, sample.t - recording.current.engineOrigin),
+        });
         setActiveRecord({
           ...recording.current,
           count: recording.current.samples.length,
@@ -608,14 +634,36 @@ export default function App() {
   }, [toast]);
   useEffect(() => {
     const warn = (event) => {
-      if (recording.current || storageError) {
+      if (recording.current || saving || unsavedIds.current.size > 0) {
         event.preventDefault();
         event.returnValue = "";
       }
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [storageError]);
+  }, [saving]);
+  useEffect(() => {
+    const syncRecords = (event) => {
+      if (event.key !== STORE_KEY && event.key !== null) return;
+      const latest = readRecords();
+      recordsRef.current = mergeRecords(recordsRef.current, latest.records);
+      const storedIds = new Set(latest.records.map((record) => record.id));
+      unsavedIds.current = new Set(
+        recordsRef.current
+          .filter((record) => !storedIds.has(record.id))
+          .map((record) => record.id),
+      );
+      setRecords(recordsRef.current);
+      setStorageError(
+        latest.error ||
+          (unsavedIds.current.size > 0
+            ? "本地存储在其他页面发生变化，部分记录仅保留在当前页，请导出保存。"
+            : ""),
+      );
+    };
+    window.addEventListener("storage", syncRecords);
+    return () => window.removeEventListener("storage", syncRecords);
+  }, []);
 
   const toggleConnection = (key) => {
     const connected = !engine.current[key];
@@ -645,14 +693,17 @@ export default function App() {
     addEvent(`切换至 ${value} N·m 演示配置，输出保持关闭。`);
   };
   const runDemo = () => {
+    if (
+      !engine.current.sensorConnected ||
+      !engine.current.motorConnected ||
+      !engine.current.supplyConnected
+    )
+      return;
     update({
       targetSpeed: 600,
       targetCurrent: 1.2,
       motorEnabled: true,
       loadEnabled: true,
-      sensorConnected: true,
-      motorConnected: true,
-      supplyConnected: true,
     });
     setSpeedDraft("600");
     setCurrentDraft("1.2");
@@ -666,7 +717,20 @@ export default function App() {
     );
   };
   const toggleOutput = (key) => {
-    const enabled = !state[key];
+    const enabled = !engine.current[key];
+    const motor = key === "motorEnabled";
+    const validation = validateSetpoint(
+      motor ? speedDraft : currentDraft,
+      motor ? "speed" : "current",
+    );
+    if (
+      enabled &&
+      (!engine.current[motor ? "motorConnected" : "supplyConnected"] ||
+        !validation.ok ||
+        validation.value !==
+          engine.current[motor ? "targetSpeed" : "targetCurrent"])
+    )
+      return;
     update({ [key]: enabled });
     if (enabled) setHasRun(true);
     addEvent(
@@ -679,26 +743,61 @@ export default function App() {
           : "模拟制动电源输出已关闭。",
     );
   };
+  const stopAll = () => {
+    update({ motorEnabled: false, loadEnabled: false });
+    addEvent(
+      "已停止全部模拟输出：电机取消使能、制动电源输出关闭；记录状态不变。",
+    );
+    setToast(
+      recording.current
+        ? "模拟输出已关闭，记录继续采集回落过程"
+        : "全部模拟输出已关闭",
+    );
+  };
   const startRecord = () => {
+    if (recording.current || saving || !engine.current.sensorConnected) return;
     const record = {
-      id: `demo-${Date.now()}`,
+      id: `demo-${crypto.randomUUID()}`,
       name: recordName.trim() || "未命名加载试验",
       range: state.range,
       startedAt: Date.now(),
-      samples: [sampleFromState(engine.current)],
+      engineOrigin: engine.current.t,
+      samples: [{ ...sampleFromState(engine.current), t: 0 }],
+      config: {
+        source: "simulation",
+        sensorRangeNm: state.range,
+        motorTargetSpeedRpm: state.targetSpeed,
+        brakeTargetCurrentA: state.targetCurrent,
+        demoGearRatio: 1,
+        sensorConnected: state.sensorConnected,
+        motorConnected: state.motorConnected,
+        brakeSupplyConnected: state.supplyConnected,
+        motorSupply: "pending",
+      },
+      events: [],
     };
     recording.current = record;
     setActiveRecord({ ...record, count: 1 });
     addEvent(`开始模拟记录 · ${record.name}`);
   };
-  const download = (record) => {
-    const blob = new Blob([toCsv(record.samples)], {
-      type: "text/csv;charset=utf-8;",
-    });
+  const download = (record, eventsOnly = false) => {
+    if (
+      !record?.samples?.length ||
+      !Number.isFinite(new Date(record.startedAt).getTime())
+    ) {
+      setToast("此记录无法导出，请检查本地记录提示。");
+      return;
+    }
+    const blob = new Blob(
+      [eventsOnly ? eventCsv(record.events || []) : toCsv(record.samples)],
+      {
+        type: "text/csv;charset=utf-8;",
+      },
+    );
     const url = URL.createObjectURL(blob),
       a = document.createElement("a");
     a.href = url;
-    a.download = `SIMULATION_${record.range}Nm_${new Date(record.startedAt).toISOString().replaceAll(":", "-")}.csv`;
+    a.download = `SIMULATION_${eventsOnly ? "EVENTS_" : ""}${record.range}Nm_${new Date(record.startedAt).toISOString().replaceAll(":", "-")}.csv`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setToast("模拟 CSV 已交给浏览器下载");
@@ -709,8 +808,23 @@ export default function App() {
     activeRecord || state.motorEnabled || state.loadEnabled,
   );
   const duration = activeRecord
-    ? (Date.now() - activeRecord.startedAt) / 1000
+    ? Math.max(0, state.t - activeRecord.engineOrigin)
     : 0;
+  const disconnectedChannels = CHANNELS.filter(
+    (ch) => !ch.pending && !state[ch.key],
+  );
+  const speedValidation = validateSetpoint(speedDraft, "speed");
+  const currentValidation = validateSetpoint(currentDraft, "current");
+  const speedPending =
+    !speedValidation.ok || speedValidation.value !== state.targetSpeed;
+  const currentPending =
+    !currentValidation.ok || currentValidation.value !== state.targetCurrent;
+  const historyValues = selected
+    ? selected.samples.map((s) => s[historyMetric]).filter(Number.isFinite)
+    : [];
+  const historyUnit = { torque: "N·m", speed: "rpm", current: "A" }[
+    historyMetric
+  ];
   const display = (value, digits) =>
     value == null ? "—" : value.toFixed(digits);
 
@@ -814,9 +928,67 @@ export default function App() {
             <Icon name="info" size={15} />
           </button>
         </div>
+        <section className="bench-status" aria-label="当前模拟运行状态">
+          <div className="bench-status-items">
+            <span>
+              <strong>电机</strong>
+              {state.motorEnabled ? "模拟运行" : "未使能"}
+            </span>
+            <span>
+              <strong>制动</strong>
+              {state.loadEnabled ? "输出开启" : "输出关闭"}
+            </span>
+            <span>
+              <strong>记录</strong>
+              {activeRecord
+                ? `采集中 ${formatDuration(duration)}`
+                : saving
+                  ? "正在保存"
+                  : "未记录"}
+            </span>
+          </div>
+          <button
+            className="button stop-all"
+            onClick={stopAll}
+            disabled={!state.motorEnabled && !state.loadEnabled}
+            title="关闭电机与制动的模拟输出，记录继续；不代表硬件急停"
+          >
+            <Icon name="stop" size={15} />
+            停止全部模拟输出
+          </button>
+        </section>
+        {disconnectedChannels.length > 0 && (
+          <div role="alert" className="connection-alert">
+            <p>
+              <strong>
+                {disconnectedChannels.map((ch) => ch.name).join("、")}
+                已模拟断开。
+              </strong>
+              {!state.sensorConnected
+                ? "扭矩和转速不可用；"
+                : "对应设备反馈不可用；"}
+              {state.motorEnabled || state.loadEnabled
+                ? "其他模拟输出仍在运行。"
+                : "模拟输出已关闭。"}
+              {activeRecord
+                ? "记录继续，缺失读数留空。"
+                : !state.sensorConnected
+                  ? "重连传感器后才能开始新记录。"
+                  : "可在设备设置中重新连接。"}
+            </p>
+            <button className="button small" onClick={() => setSettings(true)}>
+              检查连接
+            </button>
+          </div>
+        )}
         {storageError && (
           <div role="alert" className="storage-error">
             {storageError}
+          </div>
+        )}
+        {storageWarning && (
+          <div role="status" className="storage-error">
+            {storageWarning}
           </div>
         )}
 
@@ -990,6 +1162,7 @@ export default function App() {
                     paused={Boolean(frozen)}
                     empty={!hasRun && !frozen}
                     onDemo={runDemo}
+                    demoReady={disconnectedChannels.length === 0}
                   />
                   <div className="chart-footer">
                     <span>
@@ -1044,24 +1217,34 @@ export default function App() {
                       onClick={() =>
                         activeRecord ? saveFinished() : startRecord()
                       }
-                      disabled={!activeRecord && !state.sensorConnected}
+                      disabled={
+                        !activeRecord && (!state.sensorConnected || saving)
+                      }
                     >
                       <Icon name={activeRecord ? "stop" : "plus"} size={16} />
-                      {activeRecord ? "停止记录" : "开始记录"}
+                      {activeRecord
+                        ? "停止记录"
+                        : saving
+                          ? "正在保存"
+                          : "开始记录"}
                     </button>
                     <button
                       className="button"
                       onClick={() => lastRecord && download(lastRecord)}
-                      disabled={!lastRecord || Boolean(activeRecord)}
+                      disabled={!lastRecord || Boolean(activeRecord) || saving}
                     >
                       <Icon name="download" size={16} />
                       导出 CSV
                     </button>
                   </div>
-                  <div className="record-note">
+                  <div
+                    className={`record-note ${!state.sensorConnected && !activeRecord ? "error-text" : ""}`}
+                  >
                     {activeRecord
                       ? "停止记录不会停止电机或关闭制动输出；每次演示最多 1500 点。"
-                      : "完成的记录保存在本浏览器；CSV 中始终标明 simulation。"}
+                      : !state.sensorConnected
+                        ? "传感器已断开，请重新连接后开始记录。"
+                        : "完成的记录保存在本浏览器；CSV 中始终标明 simulation。"}
                   </div>
                 </section>
                 <section className="event-section">
@@ -1126,7 +1309,15 @@ export default function App() {
                   />
                   <button
                     className={`button output-button ${state.motorEnabled ? "motor-stop" : ""}`}
-                    disabled={!state.motorConnected}
+                    disabled={
+                      !state.motorEnabled &&
+                      (!state.motorConnected || speedPending)
+                    }
+                    title={
+                      speedPending && !state.motorEnabled
+                        ? "请先应用有效转速，再启动电机"
+                        : `已应用转速 ${state.targetSpeed} rpm`
+                    }
                     onClick={() => toggleOutput("motorEnabled")}
                   >
                     <Icon
@@ -1165,7 +1356,15 @@ export default function App() {
                   />
                   <button
                     className={`button output-button ${state.loadEnabled ? "load-stop" : ""}`}
-                    disabled={!state.supplyConnected}
+                    disabled={
+                      !state.loadEnabled &&
+                      (!state.supplyConnected || currentPending)
+                    }
+                    title={
+                      currentPending && !state.loadEnabled
+                        ? "请先应用有效电流，再开启制动输出"
+                        : `已应用电流 ${state.targetCurrent.toFixed(2)} A`
+                    }
                     onClick={() => toggleOutput("loadEnabled")}
                   >
                     <Icon name="power" size={16} />
@@ -1233,7 +1432,10 @@ export default function App() {
                         <td>
                           <button
                             className="record-name"
-                            onClick={() => setSelected(record)}
+                            onClick={() => {
+                              setSelected(record);
+                              setHistoryMetric("torque");
+                            }}
                           >
                             {record.name}
                           </button>
@@ -1241,6 +1443,9 @@ export default function App() {
                         <td>
                           {record.range} N·m{" "}
                           <span className="demo-tag">模拟</span>
+                          {unsavedIds.current.has(record.id) && (
+                            <span className="error-text"> · 未保存</span>
+                          )}
                         </td>
                         <td>
                           {new Date(record.startedAt).toLocaleString("zh-CN", {
@@ -1268,12 +1473,12 @@ export default function App() {
               </div>
             )}
             {selected && (
-              <section className="panel history-chart">
+              <section className="panel history-chart history-details">
                 <div className="panel-heading">
                   <div>
                     <h2>{selected.name}</h2>
                     <span className="panel-caption">
-                      完整记录 · 扭矩 N·m · 模拟数据
+                      完整记录 · 相对试验起点计时 · 模拟数据
                     </span>
                   </div>
                   <button
@@ -1284,18 +1489,130 @@ export default function App() {
                     <Icon name="close" />
                   </button>
                 </div>
+                <dl className="record-summary">
+                  <div>
+                    <dt>试验时长</dt>
+                    <dd>{formatDuration(selected.duration)}</dd>
+                  </div>
+                  <div>
+                    <dt>当前指标有效点</dt>
+                    <dd>
+                      {historyValues.length} / {selected.samples.length}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>缺失点</dt>
+                    <dd>{selected.samples.length - historyValues.length}</dd>
+                  </div>
+                  <div>
+                    <dt>峰值绝对值</dt>
+                    <dd>
+                      {historyValues.length
+                        ? historyValues
+                            .reduce(
+                              (peak, value) => Math.max(peak, Math.abs(value)),
+                              0,
+                            )
+                            .toFixed(historyMetric === "current" ? 3 : 2)
+                        : "—"}{" "}
+                      {historyUnit}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="chart-subhead">
+                  <div className="metric-tabs" aria-label="历史曲线指标">
+                    {[
+                      ["torque", "扭矩", "N·m"],
+                      ["speed", "转速", "rpm"],
+                      ["current", "制动电流", "A"],
+                    ].map(([key, name, unit]) => (
+                      <button
+                        key={key}
+                        className={historyMetric === key ? `active ${key}` : ""}
+                        aria-pressed={historyMetric === key}
+                        onClick={() => setHistoryMetric(key)}
+                      >
+                        <i />
+                        {name}
+                        <span>{unit}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <Plot
-                  samples={selected.samples.map((s) => ({
-                    ...s,
-                    t: s.t - selected.samples[0].t,
-                  }))}
-                  metric="torque"
+                  samples={relativeSamples(selected.samples)}
+                  metric={historyMetric}
                   range={selected.range}
                   windowSeconds={Math.max(
                     1,
                     selected.samples.at(-1).t - selected.samples[0].t,
                   )}
                 />
+                <div className="record-config">
+                  <strong>开始时的配置</strong>
+                  {selected.config ? (
+                    <dl>
+                      <div>
+                        <dt>传感器量程</dt>
+                        <dd>{selected.range} N·m</dd>
+                      </div>
+                      <div>
+                        <dt>电机目标转速</dt>
+                        <dd>
+                          {Number.isFinite(selected.config.motorTargetSpeedRpm)
+                            ? selected.config.motorTargetSpeedRpm
+                            : "—"}{" "}
+                          rpm
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>制动目标电流</dt>
+                        <dd>
+                          {Number.isFinite(selected.config.brakeTargetCurrentA)
+                            ? selected.config.brakeTargetCurrentA.toFixed(2)
+                            : "—"}{" "}
+                          A
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>电机电源</dt>
+                        <dd>待接入</dd>
+                      </div>
+                    </dl>
+                  ) : (
+                    <p>此旧记录未保存配置快照。</p>
+                  )}
+                </div>
+                <details className="record-events">
+                  <summary>
+                    操作事件 · {selected.events?.length || 0} 条
+                  </summary>
+                  {selected.events?.length ? (
+                    <>
+                      <div className="record-events-head">
+                        <span>设定、连接和输出变化均按试验时间排列。</span>
+                        <button
+                          className="button small"
+                          onClick={() => download(selected, true)}
+                        >
+                          导出事件 CSV
+                        </button>
+                      </div>
+                      <ol className="event-list">
+                        {selected.events.map((event, index) => (
+                          <li key={index}>
+                            <time title={event.at}>
+                              {formatDuration(event.t)}
+                            </time>
+                            <span>{event.text}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    </>
+                  ) : (
+                    <p>此旧记录未保存操作事件。</p>
+                  )}
+                </details>
               </section>
             )}
           </section>
@@ -1313,6 +1630,7 @@ export default function App() {
           onClose={() => setSettings(false)}
           state={state}
           toggleConnection={toggleConnection}
+          stopAll={stopAll}
         />
       )}
       <div className={`toast ${toast ? "visible" : ""}`} role="status">

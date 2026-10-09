@@ -126,3 +126,13 @@ test("elapsed time formatting is stable and dt must be valid", () => {
   assert.throws(() => stepDemo(createDemoState(), -1), RangeError);
   assert.throws(() => stepDemo(createDemoState(), Infinity), RangeError);
 });
+
+test("CSV elapsed time starts at the trial origin, including legacy records", () => {
+  const first = sampleFromState({ ...createDemoState(), t: 123.5 }, 1000);
+  const second = { ...first, t: 124, receivedAt: new Date(1500).toISOString() };
+  const rows = toCsv([first, second]).trim().split("\r\n");
+  assert.equal(rows[1].split(",")[2], "0");
+  assert.equal(rows[2].split(",")[2], "0.5");
+  assert.equal(rows[1].split(",")[1], first.receivedAt);
+  assert.equal(first.t, 123.5, "export must not mutate saved samples");
+});

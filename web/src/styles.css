@@ -44,7 +44,8 @@ button {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+summary:focus-visible {
   outline: 3px solid #90b7f1;
   outline-offset: 3px;
 }
@@ -403,7 +404,7 @@ h1 {
 }
 .connection-info > span {
   font-size: 12px;
-  color: #919ba9;
+  color: #627187;
   white-space: nowrap;
 }
 .connection-status {
@@ -411,7 +412,7 @@ h1 {
   display: flex;
   gap: 5px;
   align-items: center;
-  color: #5b8c7d;
+  color: #36705d;
   font-size: 12px;
   white-space: nowrap;
 }
@@ -424,7 +425,7 @@ h1 {
   display: inline-block;
 }
 .connection-status.disconnected {
-  color: #b78355;
+  color: #8c5f32;
 }
 .connection-status.disconnected i {
   background: #c68d55;
@@ -456,7 +457,7 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: #8190a3;
+  color: #607087;
   font-size: 14px;
 }
 .reading-label svg {
@@ -481,7 +482,7 @@ h1 {
   font-size: 14px;
   letter-spacing: 0;
   font-weight: 400;
-  color: #8c97a5;
+  color: #647389;
 }
 .reading-foot {
   display: flex;
@@ -489,12 +490,12 @@ h1 {
   justify-content: space-between;
   gap: 4px;
   font-size: 12px;
-  color: #8592a3;
+  color: #627187;
   white-space: nowrap;
 }
 .secondary-line {
   font-size: 11px;
-  color: #a2aab5;
+  color: #637187;
   margin-top: 7px;
 }
 .torque-reading {
@@ -556,7 +557,7 @@ h1 {
 }
 .panel-caption {
   font-size: 12px;
-  color: #7c899a;
+  color: #607087;
   display: block;
   margin-top: 5px;
 }
@@ -568,7 +569,7 @@ h1 {
 .chart-tools select {
   border: 0;
   font-size: 13px;
-  color: #8390a2;
+  color: #607087;
   background: white;
   padding: 6px 3px;
   cursor: pointer;
@@ -588,7 +589,7 @@ h1 {
   gap: 5px;
   align-items: center;
   background: transparent;
-  color: #a2adbc;
+  color: #627187;
   font-size: 13px;
   padding: 5px 0;
 }
@@ -596,7 +597,7 @@ h1 {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #ced5df;
+  background: #8391a5;
 }
 .metric-tabs button span {
   font-size: 11px;
@@ -646,7 +647,7 @@ h1 {
     12px "SFMono-Regular",
     Consolas,
     monospace;
-  fill: #97a3b4;
+  fill: #617187;
 }
 .plot-empty {
   position: absolute;
@@ -687,7 +688,7 @@ h1 {
   justify-content: space-between;
   padding: 12px 21px 16px;
   font-size: 11px;
-  color: #7e8ca0;
+  color: #607087;
   border-top: 1px solid #f0f3f6;
 }
 .chart-footer > span:first-child {
@@ -739,25 +740,25 @@ h1 {
   font-size: 12px;
   margin-left: auto;
   background: #f3f5f7;
-  color: #939eac;
+  color: #657185;
   padding: 4px 7px;
   border-radius: 4px;
   white-space: nowrap;
 }
 .mode-badge.on {
   background: #edf6f3;
-  color: #4e8d7b;
+  color: #326d5a;
 }
 .field-label {
   font-size: 13px;
   display: flex;
   justify-content: space-between;
-  color: #7e8a9c;
+  color: #5c6d83;
   margin-bottom: 8px;
 }
 .field-label span {
   font-size: 12px;
-  color: #a0a9b5;
+  color: #65748a;
 }
 .stepper {
   height: 46px;
@@ -770,7 +771,7 @@ h1 {
   width: 37px;
   flex-shrink: 0;
   background: #f8f9fb;
-  color: #a2adbc;
+  color: #61728a;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -801,11 +802,11 @@ h1 {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #7d8b9e;
+  color: #5f6f86;
   margin: 0 1px;
 }
 .setpoint-hint .pending {
-  color: #b08750;
+  color: #876027;
 }
 .error-text {
   color: #b85e4f;
@@ -831,12 +832,12 @@ h1 {
 }
 .output-button.motor-stop {
   background: #f6f1f0;
-  color: #a7796b;
+  color: #92513f;
   border-color: #ece0dc;
 }
 .output-button.load-stop {
   background: #faf2ec;
-  color: #b1784f;
+  color: #8e582f;
   border-color: #efdccd;
 }
 .control-foot {
@@ -906,7 +907,7 @@ h1 {
   font-size: 14px;
 }
 .record-heading p {
-  color: #7d8a9e;
+  color: #627187;
   font-size: 12px;
   margin-top: 4px;
 }
@@ -948,7 +949,7 @@ h1 {
 }
 .record-note {
   font-size: 11px;
-  color: #8290a3;
+  color: #607087;
   margin-top: 9px;
 }
 .is-recording {
@@ -1259,7 +1260,7 @@ h1 {
   background: #f9fafc;
   font-size: 13px;
   font-weight: 500;
-  color: #8b99ac;
+  color: #5d6d83;
 }
 .records-table td,
 .records-table th {
@@ -1267,7 +1268,7 @@ h1 {
   border-bottom: 1px solid #edf1f5;
 }
 .records-table td {
-  color: #74859e;
+  color: #5e7089;
 }
 .records-table tr:last-child td {
   border-bottom: 0;
@@ -2150,5 +2151,318 @@ h1 {
   }
   .connections .connection-info > span {
     min-height: 0;
+  }
+}
+
+/* Output controls remain available while reviewing or scrolling a trial. */
+.bench-status {
+  position: sticky;
+  top: 8px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  min-width: 0;
+  margin-bottom: 12px;
+  padding: 6px 10px 6px 13px;
+  border: 1px solid #dce3ec;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 2px 7px #24354b08;
+}
+.bench-status-items {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  min-width: 0;
+  color: #52647b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.bench-status-items > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.bench-status-items strong {
+  margin-right: 6px;
+  color: #253b54;
+  font-weight: 600;
+}
+.button.stop-all {
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 7px 11px;
+  border-color: #d9aaa2;
+  background: #fff4f1;
+  color: #8b3f32;
+  font-size: 13px;
+}
+.button.stop-all:hover:not(:disabled) {
+  border-color: #b46f61;
+  background: #fae8e3;
+}
+.button.stop-all:disabled {
+  border-color: #e0e5eb;
+  background: #f6f8fa;
+  color: #788395;
+  opacity: 1;
+}
+.connection-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 18px;
+  margin-bottom: 12px;
+  padding: 10px 13px;
+  border: 1px solid #e6c3b4;
+  border-left: 3px solid #b46e48;
+  border-radius: 6px;
+  background: #fff7f1;
+  color: #824625;
+  font-size: 13px;
+}
+.connection-alert p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.connection-alert button {
+  flex-shrink: 0;
+  min-height: 34px;
+}
+.record-note.error-text {
+  color: #9b4636;
+}
+
+.history-details {
+  margin-top: 20px;
+  min-width: 0;
+}
+.history-details .history-chart {
+  margin-top: 15px;
+}
+.record-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px 18px;
+  margin: 0;
+  padding: 15px 18px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: white;
+  color: #334961;
+  font-size: 14px;
+}
+.record-summary > div,
+.record-summary > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.record-summary dt {
+  margin-bottom: 5px;
+  color: #627187;
+  font-size: 12px;
+}
+.record-summary dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.history-details > .metric-tabs {
+  margin: 16px 0 5px;
+}
+.history-details .metric-tabs {
+  flex-wrap: wrap;
+}
+.record-config {
+  margin-top: 14px;
+  padding: 14px 17px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #f9fbfd;
+  font-size: 13px;
+}
+.record-config > strong,
+.record-config h3 {
+  color: #344961;
+  font-size: 13px;
+  font-weight: 600;
+}
+.record-config dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px 22px;
+  margin: 10px 0 0;
+}
+.record-config dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.record-config dt {
+  flex-shrink: 0;
+  color: #627187;
+}
+.record-config dd {
+  min-width: 0;
+  margin: 0;
+  color: #344961;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.record-events {
+  margin-top: 14px;
+  padding: 13px 17px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: white;
+}
+.record-events > summary {
+  cursor: pointer;
+  color: #40566f;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.8;
+}
+.record-events-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 12px 0;
+  color: #627187;
+  font-size: 12px;
+}
+.record-events > .event-list {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #fbfcfd;
+}
+.record-events .event-list li > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 1121px) and (max-height: 950px) {
+  .simulation-banner {
+    margin-bottom: 8px;
+  }
+  .bench-status {
+    margin-bottom: 10px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .connections {
+    margin-bottom: 13px;
+  }
+}
+@media (max-width: 850px) {
+  .bench-status {
+    top: 0;
+  }
+  .bench-status-items {
+    gap: 3px 12px;
+  }
+  .stepper button {
+    width: 40px;
+  }
+  .stepper {
+    min-height: 44px;
+  }
+  .output-button {
+    min-height: 44px;
+    white-space: normal;
+    line-height: 1.45;
+  }
+  .metric-tabs button {
+    min-height: 32px;
+  }
+}
+@media (max-width: 580px) {
+  .bench-status {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    margin-left: -14px;
+    margin-right: -14px;
+    padding: 8px 14px;
+    border-left: 0;
+    border-right: 0;
+    border-radius: 0;
+  }
+  .bench-status-items {
+    display: grid;
+    gap: 2px;
+    font-size: 11px;
+  }
+  .button.stop-all {
+    min-height: 44px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .connection-alert {
+    align-items: flex-start;
+    gap: 9px;
+    padding: 10px;
+    font-size: 12px;
+  }
+  .connection-alert button {
+    min-height: 40px;
+    padding: 7px 9px;
+    font-size: 12px;
+  }
+  .setpoint-hint {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 0 6px;
+    padding: 5px 0;
+    min-height: 40px;
+    font-size: 11px;
+  }
+  .stepper input {
+    font-size: 20px;
+  }
+  .mode-badge,
+  .control-title .mode-badge,
+  .connections .connection-status {
+    font-size: 11px;
+  }
+  .record-note {
+    font-size: 11px;
+  }
+  .record-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    padding: 14px;
+  }
+  .record-summary dd {
+    font-size: 14px;
+  }
+  .record-config,
+  .record-events {
+    padding: 12px;
+  }
+  .record-config dl {
+    grid-template-columns: minmax(0, 1fr);
+    font-size: 12px;
+  }
+  .record-events .event-list li {
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font-size: 12px;
+  }
+}
+@media (max-width: 380px) {
+  .control-area {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .control-title .mode-badge {
+    margin-left: auto;
   }
 }

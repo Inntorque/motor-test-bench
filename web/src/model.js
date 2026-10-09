@@ -129,8 +129,13 @@ export function toCsv(samples) {
   // Preserve stored v1 sample keys while making exported shaft location and
   // electrical source explicit. Legacy demo recordings use the same mapping.
   const rows = [CSV_FIELDS.map(([, heading]) => heading).join(",")];
+  const origin = samples[0]?.t ?? 0;
   for (const sample of samples) {
-    rows.push(CSV_FIELDS.map(([field]) => csvCell(sample[field])).join(","));
+    rows.push(
+      CSV_FIELDS.map(([field]) =>
+        csvCell(field === "t" ? sample.t - origin : sample[field]),
+      ).join(","),
+    );
   }
   return `\uFEFF${rows.join("\r\n")}\r\n`;
 }
