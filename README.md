@@ -26,9 +26,6 @@ npm run dev
 - **试验工作台**：四个设备角色，减速箱输出扭矩 / 输出转速 / 实际制动电流三张读数卡，实时曲线，电机与制动电流两组控制，记录与事件。
 - **试验记录**：完成的模拟记录保存在当前浏览器，可回看扭矩曲线或导出 CSV。正在记录的数据暂存内存，页面退出前会提示；每场演示最多 1500 点，达到后自动结束记录。正式长时采集的增量存储尚未实现。
 - **设备与连接**：抽屉中查看接入计划；原有 CAN、传感器、制动电源可模拟断开 / 重连，新增电机供电读回占位，待协议与功能范围确认。切换 50/100 N·m 保留连接状态，运行或记录时禁止切换。
-- **视觉动效**：扭矩卡片使用 [shaders](https://github.com/shader-effects-inc/shaders) 的 `FlowingGradient`，顶部开关会记住选择。记录期间、设备设置打开、传感器断开、卡片离开视口或页面隐藏时停止持续动画。遵循系统“减少动态效果”偏好；无 WebGPU 或 GPU 初始化/运行失败时使用静态背景。装饰层不读取测量数据。
-
-动效库固定为 `shaders@4.0.3`，通过独立的动态导入加载，关闭遥测。当前可选动效代码约 2.54 MB（gzip 约 709 kB），不并入首屏应用代码；没有 WebGPU 或初始关闭动效时不下载该模块。依赖许可随构建附带在 `third-party-notices.txt`，无需注册编辑器账号或加载远程预设。
 
 CSV 文件名以 `SIMULATION_` 开头，每行 `source=simulation`；导出列明确区分 `gearboxOutputTorqueNm`、`gearboxOutputSpeedRpm`、`brakeCurrentA`、`motorTargetSpeedRpm`、`brakeTargetCurrentA`，`receivedAt` 是电脑时间。内部存储字段保持原样以兼容历史模拟记录。演示的电流范围、传动比、响应曲线不代表实际设备参数；电机供电电流也不等于电机相电流。
 
@@ -46,10 +43,9 @@ npm test
 ```sh
 npx playwright install chromium
 npm run test:ui
-npm run test:shader
 ```
 
-也可通过 `CHROME_PATH` 指向已有 Chrome 可执行文件，`TEST_URL` 指定测试地址。流程测试覆盖暂停曲线继续记录、断线缺口、输入应用、量程切换、CSV 导出、记录恢复及四种视口宽度；动效测试单独使用软件 WebGPU 验证渲染、记录时暂停、开关持久化、页面切换及静态降级。测试使用的 GPU 启动参数仅作用于临时浏览器，不改变用户浏览器设置。截图写入被忽略的 `output/`。
+也可通过 `CHROME_PATH` 指向已有 Chrome 可执行文件，`TEST_URL` 指定测试地址。测试覆盖暂停曲线继续记录、断线缺口、输入应用、量程切换、CSV 导出、记录恢复及四种视口宽度，截图写入被忽略的 `output/`。
 
 源文件：`web/src/App.jsx` 为界面与交互，`web/src/styles.css` 为响应式布局，`web/src/model.js` 为纯模拟模型。真实接入按 CAN、传感器、制动电源、电机电源分别适配；电机电源功能范围待确认，不将模拟关系用于硬件控制。
 
