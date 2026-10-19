@@ -3,7 +3,7 @@ name: Deploy workbench to GitHub Pages
 on:
   push:
     branches:
-      - codex/workbench-cross-platform-20261019
+      - main
   workflow_dispatch:
 
 permissions:
