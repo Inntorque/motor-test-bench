@@ -50,8 +50,9 @@ def save(entries):
 def command_line(pid):
     if WIN:
         result = subprocess.run(['powershell', '-NoProfile', '-Command',
+            '[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); '
             f'(Get-CimInstance Win32_Process -Filter "ProcessId={int(pid)}").CommandLine'],
-            capture_output=True, text=True)
+            capture_output=True, text=True, encoding='utf-8')
         return result.stdout.strip()
     try:
         return Path(f'/proc/{pid}/cmdline').read_bytes().replace(b'\0', b' ').decode()

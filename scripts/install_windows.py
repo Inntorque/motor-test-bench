@@ -23,8 +23,9 @@ def installed_running(target):
         pid = entry.get('pid')
         if pid:
             result = subprocess.run(['powershell', '-NoProfile', '-Command',
+                '[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); '
                 f'(Get-CimInstance Win32_Process -Filter "ProcessId={int(pid)}").CommandLine'],
-                capture_output=True, text=True)
+                capture_output=True, text=True, encoding='utf-8')
             if result.returncode:
                 raise RuntimeError('无法确认已有服务是否停止，暂不覆盖安装')
             if entry.get('identity', '').lower() in result.stdout.lower() and result.stdout.strip():
@@ -74,7 +75,10 @@ def install(args):
     (target / 'LAN-ACCESS.txt').write_text(info + '\n', encoding='utf-8-sig')
     (target / '局域网访问说明.txt').write_text(info + '\n', encoding='utf-8-sig')
     python = target / 'runtime/python/python.exe'
-    subprocess.run([str(python), '-X', 'utf8', '-c', 'import serial, can, wrapt; import hardware_bridge; print("Runtime ready")'], cwd=target, check=True)
+    subprocess.run([str(python), '-X', 'utf8', '-c',
+        'import sys; print("Runtime paths:", sys.path, flush=True); '
+        'import serial, can, wrapt; import hardware_bridge, zqwl, run_recorder; print("Runtime ready")'],
+        cwd=target, check=True)
     if not args.skip_firewall:
         result = subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(target / 'scripts/windows_firewall.ps1')])
         if result.returncode:

@@ -54,7 +54,11 @@ def build(output, cached_python=None):
     runtime = package / 'runtime/python'
     runtime.mkdir(parents=True)
     extract(archive, runtime)
-    (runtime / 'python313._pth').write_text('python313.zip\n.\nLib/site-packages\n../..\nimport site\n', encoding='ascii')
+    # The Windows path bootstrap uses native separators when resolving parent paths.
+    # Isolated embedded Python does not automatically add the executed script's folder.
+    (runtime / 'python313._pth').write_text(
+        'python313.zip\n.\nLib\\site-packages\n..\\..\n..\\..\\vendor\\xige_foc\\scripts\nimport site\n',
+        encoding='ascii')
     wheels = cache / 'wheels'
     subprocess.run([sys.executable, '-m', 'pip', 'download', '--only-binary=:all:', '--platform', 'win_amd64',
                     '--python-version', '313', '--implementation', 'cp', '--abi', 'cp313',

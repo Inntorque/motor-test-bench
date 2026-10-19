@@ -51,6 +51,10 @@ def main():
                 assert json.load(response)['lan'] is True
             assert subprocess.run(installer, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).returncode != 0
             print('PASS: install/update preservation, start three real services, HTTP/API, no simulated devices, refuse live overwrite')
+        except Exception:
+            for log in (target / '.runtime').glob('*.log'):
+                print(log.name + ':\n' + log.read_text(encoding='utf-8', errors='replace')[-12000:])
+            raise
         finally:
             try:
                 subprocess.run([python, '-X', 'utf8', launcher, 'stop'], check=started, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
