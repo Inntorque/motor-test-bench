@@ -15,6 +15,7 @@ import webbrowser
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workbench_config import local_config, xige_root, motor_arguments
+from scripts.lan_access import credentials, lan_urls
 RUNTIME = ROOT / '.runtime'
 STATE = RUNTIME / 'services.json'
 WIN = os.name == 'nt'
@@ -88,7 +89,7 @@ def spawn(name, argv, port, entries, cwd=ROOT, env=None):
                                    stdout=log, stderr=log, **options)
     finally:
         log.close()
-    entries[name] = {'pid': process.pid, 'identity': argv[2] if argv[1] == '-u' else argv[1]}
+    entries[name] = {'pid': process.pid, 'identity': next((arg for arg in argv if arg.endswith('.py')), argv[1])}
     save(entries)
     for _ in range(100):
         if listening(port):
@@ -106,11 +107,23 @@ def start():
     if not (ROOT / 'dist' / 'index.html').exists():
         raise RuntimeError('缺少网页构建产物，请先执行 npm ci 和 npm run build；部署时携带 dist 目录')
     python = ROOT / '.venv' / ('Scripts/python.exe' if WIN else 'bin/python')
-    python = str(python if python.exists() else Path(sys.executable))
+    bundled = ROOT / 'runtime' / 'python' / 'python.exe'
+    python = str(bundled if WIN and bundled.exists() else python if python.exists() else Path(sys.executable))
     if subprocess.run([python, '-c', 'import serial'], capture_output=True).returncode:
         raise RuntimeError(f'缺少 pySerial，请执行 "{python}" -m pip install -r requirements.txt')
     env = dict(os.environ)
     config = local_config()
+    lan = bool(config.get('web', {}).get('lan', False))
+    if lan:
+        credentials(ROOT)
+        if listening(5173):
+            try:
+                with urllib.request.urlopen('http://127.0.0.1:5173/__workbench/status', timeout=3) as response:
+                    web_status = json.load(response)
+                if web_status.get('app') != 'motor-bench-web' or not web_status.get('lan') or Path(web_status.get('directory', '')).resolve() != ROOT:
+                    raise ValueError('different service')
+            except Exception:
+                raise RuntimeError('5173 已由其他或非局域网服务占用，请先关闭原工作台再启动') from None
     xige = xige_root(config)
     env['MOTORBENCH_XIGE_ROOT'] = str(xige.resolve())
     foc = xige / 'scripts/foc_web.py'
@@ -119,13 +132,22 @@ def start():
         motor_python = str(foc_python) if foc_python.exists() else python
         if not listening(8892) and subprocess.run([motor_python, '-c', 'import serial, can'], capture_output=True).returncode:
             raise RuntimeError(f'电机服务缺少依赖，请执行 "{motor_python}" -m pip install pyserial python-can')
-        spawn('motor', [motor_python, '-u', str(foc), '--port', '8892', *motor_arguments(config)],
+        spawn('motor', [motor_python, '-X', 'utf8', '-u', str(foc), '--port', '8892', *motor_arguments(config)],
               8892, entries, cwd=xige, env=env)
     else:
         print('提示：未找到 xige_foc，请设置 MOTORBENCH_XIGE_ROOT；电源和传感器仍可使用。', flush=True)
-    spawn('bridge', [python, '-u', str(ROOT / 'hardware_bridge.py')], 8766, entries, env=env)
-    spawn('web', [python, '-u', str(ROOT / 'scripts' / 'web_server.py')], 5173, entries)
-    webbrowser.open('http://127.0.0.1:5173/')
+    spawn('bridge', [python, '-X', 'utf8', '-u', str(ROOT / 'hardware_bridge.py')], 8766, entries, env=env)
+    spawn('web', [python, '-X', 'utf8', '-u', str(ROOT / 'scripts' / 'web_server.py'), *(['--lan'] if lan else [])], 5173, entries)
+    if not os.environ.get('MOTORBENCH_NO_BROWSER'):
+        webbrowser.open('http://127.0.0.1:5173/')
+    if lan:
+        info = '\n'.join(['扭矩工作台 · 局域网访问', *lan_urls(),
+            '口令：' + credentials(ROOT)['password'],
+            '其他电脑连接同一专用局域网，在浏览器打开上述地址并输入口令。',
+            '试验记录保存于本机 recordings；硬件接在本机。只使用信任的局域网，不向公网映射端口。'])
+        (ROOT / '局域网访问说明.txt').write_text(info + '\n', encoding='utf-8-sig')
+        (ROOT / 'LAN-ACCESS.txt').write_text(info + '\n', encoding='utf-8-sig')
+        print(info)
     print('扭矩工作台：http://127.0.0.1:5173/（连接后由操作者开启输出）')
 
 

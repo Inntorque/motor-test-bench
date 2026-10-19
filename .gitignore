@@ -24,3 +24,8 @@ Thumbs.db
 
 # Per-machine paths and CAN adapter selection
 /workbench.local.json
+/runtime/
+/LAN-ACCESS.txt
+/局域网访问说明.txt
+/vendor/xige_foc/logs/
+/vendor/xige_foc/motor_profile.txt

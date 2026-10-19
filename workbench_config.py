@@ -18,7 +18,7 @@ def xige_root(config=None):
         path = Path(configured).expanduser()
         return (path if path.is_absolute() else ROOT / path).resolve()
     # Supports a portable sibling checkout and the existing Desktop layout.
-    for base in (ROOT / 'vendor', ROOT.parent, ROOT.parent.parent, Path.home() / 'Desktop'):
+    for base in (ROOT.parent, ROOT.parent.parent, Path.home() / 'Desktop', ROOT / 'vendor'):
         for path in (base / 'xige_foc', base / 'xige_foc' / 'xige_foc'):
             if (path / 'scripts' / 'foc_web.py').is_file():
                 return path.resolve()

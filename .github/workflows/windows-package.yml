@@ -1,0 +1,63 @@
+name: Windows deployment package
+
+on:
+  push:
+    tags: ['windows-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - run: npm ci
+      - run: npm run build
+      - run: python scripts/build_windows_package.py
+      - name: Verify one-click deployment with the bundled Windows interpreter
+        shell: pwsh
+        run: |
+          & .\output\windows\TorqueWorkbench-Windows-x64\runtime\python\python.exe -X utf8 .\output\windows\TorqueWorkbench-Windows-x64\scripts\verify_windows_package.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-deployment-package
+          path: |
+            output/windows/TorqueWorkbench-Windows-x64.zip
+            output/windows/SHA256SUMS.txt
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/windows-v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download verified package and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh run download "$RUN_ID" -n windows-deployment-package -D release
+          cat > release-notes.txt <<'EOF'
+          Windows 10/11 x64 一键部署包。下载并完整解压 ZIP，双击 INSTALL-Windows.bat。
+          内含独立 Python、通信依赖、网页及 ZQWL 电机主机通信模块，无需安装 Node.js/Python/Git。
+          完成后自动打开本机工作台；其他电脑使用安装生成的局域网地址和口令访问。
+          防火墙只开放专用局域网 TCP 5173。记录保存在安装电脑，更新保留记录和本机配置。
+          已通过 GitHub Windows 环境的安装、更新保留、服务启动/停止与局域网认证检查。
+          USB/CAN 实物通信未在云端验证；未被 Windows 识别的适配器需厂家驱动。
+          EOF
+          gh release create "$RELEASE_TAG" release/* --verify-tag --title "扭矩工作台 Windows 一键部署包 $RELEASE_TAG" --notes-file release-notes.txt

@@ -1,0 +1,4 @@
+-r requirements-motor.txt
+wrapt==1.17.3
+packaging==26.3
+typing_extensions==4.16.0

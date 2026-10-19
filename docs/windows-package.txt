@@ -1,0 +1,50 @@
+扭矩工作台 Windows x64 一键部署包
+
+适用：Windows 10 / 11 x64；其他客户端使用现代浏览器。
+
+一、首次使用
+1. 从 GitHub Releases 下载 TorqueWorkbench-Windows-x64.zip，先完整解压。
+2. 双击 INSTALL-Windows.bat。
+3. 允许防火墙配置的管理员提示。安装范围为当前用户，默认目录：
+   %LOCALAPPDATA%\Inntorque\TorqueWorkbench
+4. 安装完成后自动启动本机网页。桌面生成启动、停止、访问说明三个快捷方式。
+5. 打开“Workbench LAN Access”或安装目录的 LAN-ACCESS.txt，取得局域网地址和访问口令。
+6. 其他电脑接入同一局域网，在浏览器打开该地址，输入口令。
+7. 设备接在安装电脑上。在原工作台中选择这台 Windows 的实际 COM 端口并连接设备。
+
+包内已经包含独立 Python、通信依赖、已构建网页、电机参考工程的主机通信模块。
+不需要另装 Node.js、Git、Python，不需要复制整个 xige_foc 工程；日常运行不需要联网下载。
+安装与启动不会打开电源输出、启动电机或开始试验记录。
+首次设备连接需在页面确认串口和实际接线；未连接的设备保持未连接。
+
+二、局域网条件
+安装电脑的 Windows 网络类型应设为“专用网络”。防火墙规则仅开放专用网络内
+本地子网到 TCP 5173 的访问，不开放 CAN 服务和设备通信桥端口。
+本机地址：http://127.0.0.1:5173/
+其他电脑：使用 LAN-ACCESS.txt 中 http://安装电脑局域网IP:5173/。
+GitHub Pages 是在线前端展示，不是实际设备通信入口。
+访问口令位于安装目录 .runtime/lan-access.json；重装更新保留原口令。
+请仅在可信任局域网中使用，不要将端口映射到公网。同一试验由一位操作者控制。
+若安装电脑 IP 改变，重新启动工作台后查看新生成的访问说明。
+防火墙步骤被拒绝时，可重新运行 scripts/windows_firewall.ps1。
+若无可用局域网地址，请检查网线/Wi-Fi、Windows 网络设置。
+
+三、USB/CAN 驱动
+安装程序检查并列出 Windows 已识别的串口。当前电机默认 ZQWL USB-CAN、500000、节点0，
+自动发现适配器。多个同类适配器时，在 workbench.local.json 的 motor 中设置 channel，例如 COM4。
+USB 驱动属于具体硬件：Windows 未自动识别时，使用厂家签名驱动/Windows Update；
+本部署包不会下载未知来源驱动，也不会将未识别设备显示成已连接。
+当前包面向已调通的 ZQWL 串口 CAN，其他 CAN 型号需另外安装相应驱动与依赖。
+
+四、更新、数据与关闭
+完成试验、停止记录并关闭输出，运行“Stop Torque Workbench”关闭服务。
+下载新版部署包，解压后再次运行 INSTALL-Windows.bat，安装到同一目录。
+更新会保留 recordings、.runtime、workbench.local.json 和访问口令；不会清空试验数据。
+正在运行时拒绝覆盖安装。更新后其他电脑刷新网页即可载入新版本。
+记录保存在安装电脑 recordings，服务日志在 .runtime；请定期备份 recordings。
+关闭浏览器不等于关闭电源输出。关闭工作台脚本会按现有逻辑检查输出并结束后台记录。
+
+五、版本与校验
+GitHub Release 附带 SHA256SUMS.txt，包内 package-manifest.json 记录源代码提交、
+Python 官方来源与哈希、各依赖和文件哈希；安装前自动校验所有文件。
+运行时保留 Python 和第三方依赖的许可证文件。

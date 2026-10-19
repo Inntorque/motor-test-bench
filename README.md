@@ -59,7 +59,7 @@ py -3 -m venv .venv
 启动工作台-Windows.bat
 ```
 
-部署时携带构建好的 `dist/`、本工程 Python 文件、`scripts/` 及电机参考工程；两种系统的 `.venv` 和驱动必须分别安装，不能相互复制。有 `dist/` 时，一键脚本日常启动只需要 Python 运行环境；修改网页后重新 `npm run build`。仍可用 `npm run hardware` 和 `npm run dev` 分别启动开发服务。启动入口会复用已运行且身份匹配的本机服务，不强行替换现场服务。
+部署时携带构建好的 `dist/`、本工程 Python 文件、`scripts/` 及 `vendor/xige_foc` 主机通信模块；两种系统的 `.venv` 和驱动必须分别安装，不能相互复制。有 `dist/` 时，一键脚本日常启动只需要 Python 运行环境；修改网页后重新 `npm run build`。仍可用 `npm run hardware` 和 `npm run dev` 分别启动开发服务。启动入口会复用已运行且身份匹配的本机服务，不强行替换现场服务。
 
 电源面板模式需设为 485 / Modbus RTU，寄存器地址与 `SSJ_Control` 工作版本相同。设定值和额定范围由操作者按具体电源面板及铭牌核对。断开通讯不会关闭电源输出；停止供电需在连接状态下点击 OFF 并确认实际状态。
 
@@ -99,7 +99,7 @@ npm run test:requirements
 
 依赖安装与构建见上面的“启动”。Windows 需要适配器驱动，并在页面选择实际 COM 串口；Ubuntu 需要当前用户具备串口访问权限，页面选择实际 `/dev/ttyUSB*` 或 `/dev/ttyACM*`。串口选择仍在现有界面完成。
 
-电机服务复用已经调通的 `xige_foc` 参考工程，必须保留其中 `scripts/foc_web.py` 及其依赖文件。优先读取环境变量 `MOTORBENCH_XIGE_ROOT`，其次读取工程根目录 `workbench.local.json` 的 `xigeRoot`；未配置时查找相邻的 `xige_foc` / `xige_foc/xige_foc` 及用户桌面同名目录，不再写死用户名和系统路径。
+电机服务复用已经调通的 `xige_foc` 主机通信模块。`vendor/xige_foc` 已包含所需主机源码，不包含固件、调试工具和现场日志；也可继续使用原独立参考工程。优先读取环境变量 `MOTORBENCH_XIGE_ROOT`，其次读取工程根目录 `workbench.local.json` 的 `xigeRoot`；未配置时优先查找相邻的 `xige_foc` / `xige_foc/xige_foc` 及用户桌面同名目录，最后使用 `vendor/xige_foc`，不再写死用户名和系统路径。
 
 可复制 `workbench.example.json` 为 `workbench.local.json`，配置参考工程路径（相对本工程根目录，或绝对路径）和 CAN 适配器：
 
@@ -127,3 +127,15 @@ npm run test:requirements
 电源后台读数与用户操作分开管理：按钮操作显示忙碌并等待已有读取完成，不再因后台读数占用而丢弃点击。电机/制动状态轮询在控制请求期间继续维持心跳，但旧轮询应答不能覆盖控制结果。正式运行使用静态资源缓存，接口继续禁止缓存。
 
 本机 6 万点数据基准：曲线分桶约 2.45 → 1.45 ms，缓存追加约 0.67 → 0.36 ms；该数据仅代表这些计算步骤，不代表整页帧率或整机 CPU 降幅。全页面初始服务端渲染结果与优化前一致。当前现场开发服务保持运行，新启动入口下次启动时使用正式静态网页服务。
+
+## Windows 一键部署包与局域网访问
+
+从 [Releases](https://github.com/Inntorque/motor-test-bench/releases) 下载 `TorqueWorkbench-Windows-x64.zip`，完整解压后双击 `INSTALL-Windows.bat`。包内提供经过 SHA-256 校验的 Python 3.13.16 x64 独立环境、固定版本通信依赖、编译好的网页和电机主机通信模块，目标电脑不需要安装 Node.js、Python 或 Git。安装前校验包内文件，默认安装到 `%LOCALAPPDATA%\Inntorque\TorqueWorkbench`。
+
+安装器生成桌面快捷方式、随机访问口令，启用局域网网页入口，并请求管理员配置专用网络 TCP 5173 防火墙规则。完成后自动打开本机工作台。其他电脑打开安装电脑 `LAN-ACCESS.txt` 中的局域网地址，输入口令使用；电源/传感器/CAN 必须接在安装电脑上，记录也写在安装电脑的 `recordings/`。主界面及原控制方式不变。网络 IP 变化后重新启动，地址说明会更新。
+
+后端 8766 和 CAN 服务 8892 仍仅监听本机；局域网入口验证访问口令、签名会话和请求来源后转发现有 API。只适用于信任的专用局域网，不向公网转发端口。USB/CAN 驱动与具体硬件相关，未被 Windows 自动识别时仍需厂家驱动；包内默认支持当前 ZQWL 串口 CAN。
+
+下载新包并再次运行安装器即可更新，保留 `recordings/`、本机配置与访问口令。运行中拒绝覆盖，请先结束试验、关闭输出和工作台服务。旧版 `xigeRoot` 自定义路径保留。详细说明见 [Windows 使用说明](docs/windows-package.txt)。
+
+维护者推送 `windows-v*` 标签后，GitHub Actions 在 Windows 环境构建包，并使用包内 Python 实际检查安装、重复安装保留数据、三个服务启动/停止和局域网认证；通过后自动发布 Release 附件及 SHA256SUMS。源码日常更新到 main 只自动更新 Pages，Windows 部署包通过版本标签发布。云端没有真实 USB/CAN，软件验证不能代替实物接线验收。

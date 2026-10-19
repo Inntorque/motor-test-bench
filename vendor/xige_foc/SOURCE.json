@@ -1,0 +1,11 @@
+{
+  "source": "User-provided, working xige_foc host runtime, copied 2026-10-19",
+  "purpose": "Host CAN communication only; no firmware, binaries, logs or device sessions copied",
+  "files": {
+    "usb_gs.py": "85306619c384753a97d93240b42ae9269cb28fdbf3eb82ae9fdba5ae7a5bccbc",
+    "run_recorder.py": "3cf5f2c4130beced2b0fae7f7e22f613f966b5db9d57e6e3c5b9e531204c946a",
+    "foc_web.py": "027423dfedb4bb82776707788834cba0f415d45e385fe6c18b24df6d71f0e673",
+    "web_client.py": "2b04a2e6ed6b86d320dbb7a5e8793263be70c4f52ef38f5c4c0539b611677a03",
+    "zqwl.py": "2251d232da26fd6fb7eb84e77bdf64f512d2adccb22db016487a98192dd6dcb8"
+  }
+}
