@@ -18,3 +18,9 @@ __pycache__/
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Launcher process state
+/.runtime/
+
+# Per-machine paths and CAN adapter selection
+/workbench.local.json

@@ -5,11 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "hardware": "python3 hardware_bridge.py",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
     "test:ui": "node tests/ui-smoke.mjs",
-    "test:requirements": "node tests/requirements-ui.mjs"
+    "test:requirements": "node tests/requirements-ui.mjs",
+    "start": "node scripts/launch.mjs start",
+    "stop": "node scripts/launch.mjs stop"
   },
   "engines": {
     "node": ">=22.12.0"

@@ -1,138 +1,86 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  createDemoState,
-  stepDemo,
-  validateSetpoint,
-  sampleFromState,
-  toCsv,
-  formatDuration,
-} from "../web/src/model.js";
+import { toCsv, formatDuration } from "../web/src/model.js";
 
-test("disabled outputs stay at rest even with non-zero setpoints", () => {
-  const initial = {
-    ...createDemoState(),
-    targetSpeed: 1200,
-    targetCurrent: 1.5,
+test("historical CSV export retains fields and leaves unmeasured PSU channels blank", () => {
+  const sample = {
+    source: "simulation",
+    receivedAt: "2026-10-09T00:00:00.000Z",
+    t: 123.5,
+    torque: null,
+    speed: null,
+    current: null,
+    targetSpeed: 300,
+    targetCurrent: 0.5,
+    motorEnabled: false,
+    loadEnabled: false,
+    range: 50,
   };
-  const next = stepDemo(initial, 10);
-  assert.equal(next.t, 10);
-  assert.equal(next.speed, 0);
-  assert.equal(next.current, 0);
-  assert.equal(next.torque, 0);
-  assert.equal(initial.t, 0);
-});
-
-test("sensor disconnection hides measurements without stopping the simulation", () => {
-  const initial = {
-    ...createDemoState(),
-    motorEnabled: true,
-    loadEnabled: true,
-    sensorConnected: false,
-  };
-  const next = stepDemo(initial, 1);
-  assert.ok(next.speed > 0 && next.current > 0 && next.torque > 0);
-  const sample = sampleFromState(next, "2026-10-09T00:00:00Z");
-  assert.equal(sample.torque, null);
-  assert.equal(sample.speed, null);
-  assert.ok(sample.current > 0);
-  assert.equal(sample.receivedAt, "2026-10-09T00:00:00.000Z");
-});
-
-test("disconnected motor and supply cannot energize the demo, with supply readback missing", () => {
-  const state = stepDemo(
-    {
-      ...createDemoState(100),
-      motorEnabled: true,
-      loadEnabled: true,
-      motorConnected: false,
-      supplyConnected: false,
-    },
-    1,
-  );
-  assert.equal(state.speed, 0);
-  assert.equal(state.current, 0);
-  assert.equal(state.torque, 0);
-  assert.equal(sampleFromState(state, 0).current, null);
-});
-
-test("setpoints reject empty and non-finite values and enforce fixed demo boundaries", () => {
-  for (const value of ["", "  ", null, true, NaN, Infinity, "not a number"]) {
-    assert.equal(validateSetpoint(value, "speed").ok, false);
-  }
-  for (const [kind, max] of [
-    ["speed", 1500],
-    ["current", 2],
-  ]) {
-    assert.equal(validateSetpoint(0, kind).ok, true);
-    assert.deepEqual(validateSetpoint(String(max), kind), {
-      ok: true,
-      value: max,
-      error: "",
-    });
-    assert.equal(validateSetpoint(-0.01, kind).ok, false);
-    assert.equal(validateSetpoint(max + 0.01, kind).ok, false);
-  }
-  assert.equal(validateSetpoint(1, "torque").ok, false);
-});
-
-test("current setpoints use hundredths without rejecting normal floating-point noise", () => {
-  for (const value of [0.504, "0.504", 0.001, 1.999]) {
-    const result = validateSetpoint(value, "current");
-    assert.equal(result.ok, false);
-    assert.equal(result.value, null);
-    assert.match(result.error, /最多保留两位小数/);
-  }
-  for (const [input, expected] of [
-    ["0.5000", 0.5],
-    ["1.01", 1.01],
-    [0.1 + 0.2, 0.3],
-    [2, 2],
-  ]) {
-    assert.deepEqual(validateSetpoint(input, "current"), {
-      ok: true,
-      value: expected,
-      error: "",
-    });
-  }
-  assert.equal(validateSetpoint(0.504, "speed").ok, true);
-});
-
-test("CSV has a simulation marker, all fields, blank missing measurements and proper escaping", () => {
-  const sample = sampleFromState(
-    { ...createDemoState(), sensorConnected: false, supplyConnected: false },
-    0,
-  );
   const csv = toCsv([sample]);
-  assert.ok(
-    csv.startsWith(
-      "\uFEFFsource,receivedAt,elapsedSeconds,gearboxOutputTorqueNm,gearboxOutputSpeedRpm,brakeCurrentA,motorTargetSpeedRpm,brakeTargetCurrentA,motorEnabled,brakeOutputEnabled,torqueSensorRangeNm\r\n",
-    ),
-  );
-  assert.ok(
-    csv.includes(
-      "simulation,1970-01-01T00:00:00.000Z,0,,,,300,0.5,false,false,50\r\n",
-    ),
-  );
-  const escaped = toCsv([{ ...sample, source: 'simulation,"demo"\r\nrow' }]);
-  assert.ok(escaped.includes('"simulation,""demo""\r\nrow"'));
+  assert.ok(csv.startsWith("\uFEFFsource,receivedAt,elapsedSeconds,gearboxOutputTorqueNm,gearboxOutputSpeedRpm,calculatedOutputPowerKW,brakeCurrentA,motorSupplyVoltageV,motorSupplyCurrentA,motorSupplyPowerW,brakeSupplyVoltageV,brakeSupplyCurrentA,brakeSupplyPowerW,motorTargetSpeedRpm,brakeTargetCurrentA,motorEnabled,brakeOutputEnabled,torqueSensorRangeNm\r\n"));
+  assert.ok(csv.includes("simulation,2026-10-09T00:00:00.000Z,0,,,,,,,,,,,300,0.5,false,false,50\r\n"));
+  assert.ok(toCsv([{ ...sample, source: 'demo,"old"\nrow' }]).includes('"demo,""old""\nrow"'));
 });
 
-test("elapsed time formatting is stable and dt must be valid", () => {
+test("hardware CSV exports only supplied live readings and leaves other channels empty", () => {
+  const csv = toCsv([{
+    source: "hardware",
+    receivedAt: "2026-10-09T00:00:00.000Z",
+    t: 8,
+    torque: null,
+    speed: null,
+    current: null,
+    motorSupplyVoltage: 24,
+    motorSupplyCurrent: 0.25,
+    motorSupplyPower: 6,
+    brakeSupplyVoltage: null,
+    brakeSupplyCurrent: null,
+    brakeSupplyPower: null,
+    targetSpeed: null,
+    targetCurrent: null,
+    motorEnabled: null,
+    loadEnabled: null,
+    range: 50,
+  }]);
+  assert.ok(csv.includes("hardware,2026-10-09T00:00:00.000Z,0,,,,,24,0.25,6,,,,,,,,50\r\n"));
+});
+
+test("CSV includes calculated shaft power from the real torque sensor", () => {
+  const csv = toCsv([{
+    source: "hardware",
+    receivedAt: "2026-10-09T00:00:00.000Z",
+    t: 1,
+    torque: -12.34,
+    speed: 250,
+    shaftPowerKw: 0.323,
+    current: null,
+    motorSupplyVoltage: null,
+    motorSupplyCurrent: null,
+    motorSupplyPower: null,
+    brakeSupplyVoltage: null,
+    brakeSupplyCurrent: null,
+    brakeSupplyPower: null,
+    targetSpeed: null,
+    targetCurrent: null,
+    motorEnabled: null,
+    loadEnabled: null,
+    range: 50,
+  }]);
+  assert.ok(csv.includes("hardware,2026-10-09T00:00:00.000Z,0,-12.34,250,0.323,,,,,,,,,,,,50\r\n"));
+});
+
+test("historical elapsed time starts at the first saved sample", () => {
+  const csv = toCsv([
+    { t: 123.5, receivedAt: "2026-10-09T00:00:00.000Z" },
+    { t: 124, receivedAt: "2026-10-09T00:00:00.500Z" },
+  ]).split("\r\n");
+  assert.equal(csv[1].split(",")[2], "0");
+  assert.equal(csv[2].split(",")[2], "0.5");
+});
+
+test("duration formatting handles invalid and fractional input", () => {
   assert.equal(formatDuration(0), "00:00");
   assert.equal(formatDuration(125.9), "02:05");
   assert.equal(formatDuration(-3), "00:00");
-  assert.equal(formatDuration(3600), "60:00");
-  assert.throws(() => stepDemo(createDemoState(), -1), RangeError);
-  assert.throws(() => stepDemo(createDemoState(), Infinity), RangeError);
-});
-
-test("CSV elapsed time starts at the trial origin, including legacy records", () => {
-  const first = sampleFromState({ ...createDemoState(), t: 123.5 }, 1000);
-  const second = { ...first, t: 124, receivedAt: new Date(1500).toISOString() };
-  const rows = toCsv([first, second]).trim().split("\r\n");
-  assert.equal(rows[1].split(",")[2], "0");
-  assert.equal(rows[2].split(",")[2], "0.5");
-  assert.equal(rows[1].split(",")[1], first.receivedAt);
-  assert.equal(first.t, 123.5, "export must not mutate saved samples");
+  assert.equal(formatDuration(Infinity), "00:00");
 });

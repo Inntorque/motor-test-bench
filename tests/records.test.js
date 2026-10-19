@@ -8,11 +8,23 @@ import {
   relativeSamples,
   eventCsv,
 } from "../web/src/records.js";
-import { createDemoState, sampleFromState } from "../web/src/model.js";
 
 const START = Date.parse("2026-10-09T00:00:00.000Z");
 
 function record(id = "trial-1", startedAt = START) {
+  const oldSample = (t, receivedAt) => ({
+    source: "simulation",
+    receivedAt: new Date(receivedAt).toISOString(),
+    t,
+    torque: 0,
+    speed: 0,
+    current: 0,
+    targetSpeed: 300,
+    targetCurrent: 0.5,
+    motorEnabled: false,
+    loadEnabled: false,
+    range: 50,
+  });
   return {
     id,
     name: "加载试验",
@@ -20,10 +32,7 @@ function record(id = "trial-1", startedAt = START) {
     startedAt,
     finishedAt: startedAt + 1000,
     duration: 1,
-    samples: [
-      sampleFromState({ ...createDemoState(), t: 10 }, startedAt),
-      sampleFromState({ ...createDemoState(), t: 11 }, startedAt + 1000),
-    ],
+    samples: [oldSample(10, startedAt), oldSample(11, startedAt + 1000)],
   };
 }
 
@@ -58,7 +67,7 @@ test("rejects unsafe record and sample shapes before rendering or export", () =>
     (r) => (r.finishedAt = null),
     (r) => (r.duration = -1),
     (r) => (r.range = 75),
-    (r) => (r.samples[0].source = "hardware"),
+    (r) => (r.samples[0].source = "unknown"),
     (r) => (r.samples[0].receivedAt = "0"),
     (r) => (r.samples[0].receivedAt = "2026-02-30T00:00:00.000Z"),
     (r) => (r.samples[0].t = "10"),
@@ -87,6 +96,66 @@ test("rejects unsafe record and sample shapes before rendering or export", () =>
     false,
     "disconnected readbacks remain valid records",
   );
+});
+
+test("accepts hardware records with live PSU measurements and empty mechanical channels", () => {
+  const hardware = record("hardware-trial");
+  hardware.config = { source: "hardware", motorSupply: { transport: "serial" } };
+  hardware.samples = hardware.samples.map((sample) => ({
+    ...sample,
+    source: "hardware",
+    torque: null,
+    speed: null,
+    current: null,
+    targetSpeed: null,
+    targetCurrent: null,
+    motorEnabled: null,
+    loadEnabled: null,
+    motorSupplyVoltage: 24,
+    motorSupplyCurrent: 0.25,
+    motorSupplyPower: 6,
+    brakeSupplyVoltage: null,
+    brakeSupplyCurrent: null,
+    brakeSupplyPower: null,
+  }));
+  assert.equal(readRecords(storageWith(JSON.stringify([hardware]))).blocked, false);
+  const withoutLiveReadback = structuredClone(hardware);
+  for (const sample of withoutLiveReadback.samples) {
+    sample.motorSupplyVoltage = null;
+    sample.motorSupplyCurrent = null;
+    sample.motorSupplyPower = null;
+  }
+  assert.equal(readRecords(storageWith(JSON.stringify([withoutLiveReadback]))).blocked, true);
+});
+
+test("accepts real sensor-only hardware records and rejects them when measurements are empty", () => {
+  const hardware = record("sensor-hardware-trial");
+  hardware.samples = hardware.samples.map((sample) => ({
+    ...sample,
+    source: "hardware",
+    torque: -12.34,
+    speed: 250,
+    shaftPowerKw: 0.323,
+    current: null,
+    targetSpeed: null,
+    targetCurrent: null,
+    motorEnabled: null,
+    loadEnabled: null,
+    motorSupplyVoltage: null,
+    motorSupplyCurrent: null,
+    motorSupplyPower: null,
+    brakeSupplyVoltage: null,
+    brakeSupplyCurrent: null,
+    brakeSupplyPower: null,
+  }));
+  assert.equal(readRecords(storageWith(JSON.stringify([hardware]))).blocked, false);
+  const withoutSensorData = structuredClone(hardware);
+  for (const sample of withoutSensorData.samples) {
+    sample.torque = null;
+    sample.speed = null;
+    sample.shaftPowerKw = null;
+  }
+  assert.equal(readRecords(storageWith(JSON.stringify([withoutSensorData]))).blocked, true);
 });
 
 test("accepts optional configuration and validates event fields and order", () => {

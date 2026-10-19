@@ -79,18 +79,44 @@ function isRecord(record) {
     return false;
 
   const validSamples = record.samples.every(
-    (sample) =>
+    (sample) => {
+      const validSource =
+        sample?.source === "simulation" ||
+        (sample?.source === "hardware" && [
+          sample.current,
+          sample.torque,
+          sample.speed,
+          sample.shaftPowerKw,
+          sample.motorSupplyVoltage,
+          sample.motorSupplyCurrent,
+          sample.motorSupplyPower,
+          sample.brakeSupplyVoltage,
+          sample.brakeSupplyCurrent,
+          sample.brakeSupplyPower,
+        ].some(Number.isFinite));
+      return (
       isObject(sample) &&
-      sample.source === "simulation" &&
+      validSource &&
       isIsoDate(sample.receivedAt) &&
       Number.isFinite(sample.t) &&
       sample.t >= 0 &&
-      ["torque", "speed", "current", "targetSpeed", "targetCurrent"].every(
+      [
+        "torque", "speed", "current", "targetSpeed", "targetCurrent",
+      ].every(
         (key) => sample[key] === null || Number.isFinite(sample[key]),
       ) &&
-      typeof sample.motorEnabled === "boolean" &&
-      typeof sample.loadEnabled === "boolean" &&
-      sample.range === record.range,
+      (sample.shaftPowerKw == null || Number.isFinite(sample.shaftPowerKw)) &&
+      [
+        "motorSupplyVoltage", "motorSupplyCurrent", "motorSupplyPower",
+        "brakeSupplyVoltage", "brakeSupplyCurrent", "brakeSupplyPower",
+      ].every(
+        (key) => sample[key] == null || Number.isFinite(sample[key]),
+      ) &&
+      (typeof sample.motorEnabled === "boolean" || sample.motorEnabled === null) &&
+      (typeof sample.loadEnabled === "boolean" || sample.loadEnabled === null) &&
+      sample.range === record.range
+      );
+    },
   );
   return (
     validSamples &&

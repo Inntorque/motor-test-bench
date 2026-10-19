@@ -1,0 +1,8 @@
+{
+  "xigeRoot": "../xige_foc",
+  "motor": {
+    "interface": "zqwl",
+    "baud": 500000,
+    "node": 0
+  }
+}
