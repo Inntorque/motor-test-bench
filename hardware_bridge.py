@@ -14,6 +14,8 @@ import socket
 import struct
 import threading
 import time
+import signal
+from contextlib import contextmanager
 from collections import deque
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +30,10 @@ from automatic_tests import AutomaticTests
 from workbench_recordings import WorkbenchRecordings
 from background_recording import BackgroundRecording
 from brake_current import BrakeCurrent
+from device_connections import ConnectionManager
+from coupled_current import CoupledCurrent
+from safety_control import SafetyControl
+from power_limits import MOTOR_SUPPLY_CURRENT_LIMIT, MOTOR_SUPPLY_PRESET_CURRENT_A, power_problem, power_evidence
 
 
 HOST = "127.0.0.1"
@@ -45,6 +51,11 @@ CURRENT_MOTOR = CurrentMotor()
 
 class BridgeError(ValueError):
     """An error that is safe to return to the local UI."""
+
+
+class PowerOperationCancelled(BridgeError):
+    """An OFF/stop preempted this transaction; not a failed device reply."""
+    operation_cancelled = True
 
 
 class DeviceLinkError(BridgeError):
@@ -128,6 +139,43 @@ class PowerSupplyChannel:
         self.connected = False
         self.last_io = 0.0
         self.logs = deque(maxlen=12)
+        self.io_epoch = 0
+        self.epoch_lock = threading.Lock()
+        self.io_context = threading.local()
+        self.output_uncertain = False
+        self.start_guard = None
+        self.powered_at = 0
+        self.on_power_on = None
+        self.usb_identity = None
+        self.verifying_power = False
+        self.power_check = None
+
+    def cancel_pending(self):
+        # Lock-free invalidation: finish at most the current RTU exchange, then
+        # abandon ordinary reads/writes so OFF can take the bus next.
+        with self.epoch_lock:self.io_epoch += 1
+
+    def _bound_config(self, config):
+        if config.get('transport')!='serial' or not self.usb_identity:return config
+        vid,pid,serial_number=self.usb_identity
+        if not serial_number:raise BridgeError('原 USB 设备没有唯一序列号，禁止自动重开，请人工核对原连接')
+        matches=[port for port in list_ports.comports() if (port.vid,port.pid,port.serial_number)==(vid,pid,serial_number)]
+        if len(matches)!=1:raise BridgeError('原绑定的 USB 电源不在或标识重复，不能向其他串口发送关闭')
+        return {**config,'device':matches[0].device}
+
+    @contextmanager
+    def transaction(self, *, emergency=False, cancel=None):
+        epoch = self.io_epoch
+        with self.lock:
+            if not emergency and epoch != self.io_epoch:raise PowerOperationCancelled('操作已被停止取消')
+            previous = getattr(self.io_context, 'epoch', None)
+            previous_cancel = getattr(self.io_context,'cancel',None)
+            self.io_context.epoch = None if emergency else epoch
+            self.io_context.cancel = cancel
+            try:yield
+            finally:
+                self.io_context.epoch = previous
+                self.io_context.cancel = previous_cancel
 
     def _open_transport(self, config):
         if config["transport"] == "serial":
@@ -149,6 +197,7 @@ class PowerSupplyChannel:
             raise BridgeError(f"RTU透明TCP连接失败：{error}") from None
 
     def _close_unlocked(self):
+        if self.snapshot and self.snapshot.get('status',0) & 128:self.output_uncertain = True
         transport, self.transport = self.transport, None
         self.connected = False
         self.snapshot = None
@@ -160,25 +209,37 @@ class PowerSupplyChannel:
 
     def disconnect(self):
         with self.lock:
+            if self.output_uncertain or (self.snapshot or {}).get('status',0) & 128:
+                raise BridgeError('输出仍开启或关闭未确认，请先关闭电源输出')
             self._close_unlocked()
             self.config = None
             self.logs.clear()
             return self.status()
 
     def status(self):
-        with self.lock:
-            return self.cached_status()
+        return self.cached_status()
 
     def cached_status(self):
         # Snapshot objects are replaced after a complete read. Acquisition must not
         # wait on a slow serial transaction while draining the sensor frame ring.
         transport, config, snapshot = self.transport, self.config, self.snapshot
-        return {"connected": bool(self.connected and transport and transport.is_open),
+        stale = bool(snapshot and time.time()-snapshot.get('receivedAt',0)>3.5)
+        return {"connected": bool(self.connected and transport and transport.is_open and not stale),
                 "config": dict(config) if config else None,
-                "snapshot": dict(snapshot) if snapshot else None}
+                "snapshot": dict(snapshot) if snapshot else None,
+                'stale':stale,'outputUncertain':self.output_uncertain,'powerCheck':self.power_check}
 
     def connect(self, config):
-        with self.lock:
+        with self.transaction():
+            previous_config=self.config
+            if self.output_uncertain:config=self._bound_config(config)
+            changed=previous_config and (endpoint_key(config)!=endpoint_key(previous_config) or any(
+                config.get(key)!=previous_config.get(key) for key in ('protocol','address','voltageDecimals','currentDecimals')))
+            if self.output_uncertain and self.usb_identity and config.get('transport')=='serial':
+                # A matching unique USB identity may acquire a new port number.
+                changed=any(config.get(key)!=previous_config.get(key) for key in ('protocol','address','voltageDecimals','currentDecimals')) if previous_config else False
+            if self.output_uncertain and changed:
+                raise BridgeError('原电源关闭未确认，不可更换绑定')
             self._close_unlocked()
             self.config = config
             self.logs.clear()
@@ -187,10 +248,13 @@ class PowerSupplyChannel:
                 snapshot = self._read_snapshot_unlocked()
             except Exception:
                 self._close_unlocked()
-                self.config = None
+                self.config = previous_config
                 raise
             self.connected = True
             self.snapshot = snapshot
+            self.output_uncertain = bool(snapshot['status'] & 128)
+            port=next((port for port in list_ports.comports() if port.device==config.get('device')),None)
+            self.usb_identity=(port.vid,port.pid,port.serial_number) if port and port.vid is not None else None
             return self.status()
 
     def _ensure_open(self):
@@ -198,10 +262,16 @@ class PowerSupplyChannel:
             raise BridgeError("电源未连接")
 
     def _exchange(self, function, register, count=1, values=None):
+        cancel=getattr(self.io_context,'cancel',None)
+        if cancel and cancel.is_set():raise PowerOperationCancelled('操作已被停止取消')
+        epoch = getattr(self.io_context,'epoch',None)
+        if epoch is not None and epoch != self.io_epoch:raise PowerOperationCancelled('操作已被停止取消')
         self._ensure_open()
         pause = 0.15 - (time.monotonic() - self.last_io)
         if pause > 0:
             time.sleep(pause)
+        if cancel and cancel.is_set():raise PowerOperationCancelled('操作已被停止取消')
+        if epoch is not None and epoch != self.io_epoch:raise PowerOperationCancelled('操作已被停止取消')
         address = self.config["address"]
         if function == 16:
             if not values or not 1 <= len(values) <= 123:
@@ -263,8 +333,15 @@ class PowerSupplyChannel:
         measured = self._exchange(4, 1000, 3)
         status = self._exchange(4, 1007)[0]
         settings = self._exchange(3, 2000, 6)
+        # Motor SSJ readback is 0.001 A, confirmed against the physical panel.
+        # Do not infer a change to the independently configured write scaling.
+        actual_scale = 10**self.config.get('measuredCurrentDecimals', self.config['currentDecimals'])
+        calculated = (measured[0]/10**self.config['voltageDecimals'] * measured[1]/actual_scale
+                      if self.key == 'motor-supply' else None)
         return {
-            "measured": measured,
+            "measured": measured,  # original registers, including device power
+            "calculatedPowerW": calculated,
+            "powerCalculated": calculated is not None,
             "status": status,
             "settings": settings,
             "connected": True,
@@ -281,7 +358,7 @@ class PowerSupplyChannel:
             ratings = self._exchange(4, 103, 2)
             if any(value <= 0 for value in ratings):
                 raise DeviceLinkError('RU 电源返回的额定电压/电流无效')
-            self.config.update(voltageDecimals=decimals[0], currentDecimals=decimals[1],
+            self.config.update(voltageDecimals=decimals[0], currentDecimals=decimals[1], measuredCurrentDecimals=decimals[1],
                                ratedVoltage=ratings[0]/10**decimals[0], ratedCurrent=ratings[1]/10**decimals[1],
                                ratingsVerified=True)
             self._validate_limits(self.config.get('maxVoltage'), self.config.get('maxCurrent'))
@@ -326,7 +403,7 @@ class PowerSupplyChannel:
                 self._close_unlocked()
                 raise
             scale_v,scale_a=scale_config(self.config)
-            if snapshot['status'] & 0x80 and (snapshot['settings'][1]/scale_v>voltage or snapshot['settings'][2]/scale_a>current or snapshot['measured'][0]/scale_v>voltage or snapshot['measured'][1]/scale_a>current):
+            if snapshot['status'] & 0x80 and (snapshot['settings'][1]/scale_v>voltage or snapshot['settings'][2]/scale_a>current or snapshot['measured'][0]/scale_v>voltage or snapshot['measured'][1]/10**self.config.get('measuredCurrentDecimals',self.config['currentDecimals'])>current):
                 raise BridgeError('当前输出或设定高于新限幅，请先降低设定或关闭输出')
             self.config.update(maxVoltage=voltage,maxCurrent=current)
             snapshot['config']=dict(self.config)
@@ -334,18 +411,36 @@ class PowerSupplyChannel:
             return self.status()
 
     def read(self):
-        with self.lock:
+        with self.transaction():
             self._ensure_open()
             try:
                 result = self._read_snapshot_unlocked()
+                issue=power_problem(self.key,self.config,result)
+                if issue and issue['kind']!='hardware':
+                    # Read independently on the same verified transport, without
+                    # re-opening, reconfiguring or re-enabling either output.
+                    self.verifying_power=True
+                    first=power_evidence(result)
+                    first_issue=issue
+                    self.power_check=dict(state='verifying',first=first,issue=issue,firstIssue=first_issue)
+                    result=self._read_snapshot_unlocked()
+                    issue=power_problem(self.key,self.config,result)
+                    self.power_check=dict(state='confirmed' if issue else 'recovered',
+                                          first=first,second=power_evidence(result),issue=issue,firstIssue=first_issue)
+                elif issue:
+                    self.power_check=dict(state='device_protection',first=power_evidence(result),issue=issue)
             except Exception:
+                self.verifying_power=False
+                if getattr(self.io_context,'epoch',None) != self.io_epoch:raise
                 self._close_unlocked()
                 raise
             self.connected = True
             self.snapshot = result
+            self.output_uncertain = bool(result['status'] & 128)
+            self.verifying_power=False
             return self.status()
 
-    def _settings_write_unlocked(self, voltage, current):
+    def _settings_write_unlocked(self, voltage, current, *, verify=True):
         scale_v, scale_a = scale_config(self.config)
         if not math.isfinite(voltage) or not math.isfinite(current) or voltage < 0 or current < 0:
             raise BridgeError("请填写有效的非负电压和电流限值")
@@ -366,18 +461,25 @@ class PowerSupplyChannel:
             raise BridgeError('数值按电源精度取整后超过限幅，请降低设定')
         register = 149 if self.config.get('protocol') == 'ru' else 2001
         self._exchange(16, register, values=[raw_v, raw_a])
-        actual = self._exchange(3, register, 2)
+        actual = self._exchange(3, register, 2) if verify else [raw_v, raw_a]
         if actual != [raw_v, raw_a]:
             raise BridgeError("V/A 读回与设定不一致")
+        return [raw_v, raw_a]
 
-    def set_values(self, data):
-        with self.lock:
+    def set_values(self, data, *, cancel=None):
+        with self.transaction(cancel=cancel):
+            if self.start_guard:self.start_guard()
             self._ensure_open()
             voltage = finite_number(data, "voltage", 0, 65535)
             current = finite_number(data, "current", 0, 65535)
             try:
-                self._settings_write_unlocked(voltage, current)
+                # The SSJ snapshot already reads 2001/2002. Use that real
+                # readback to verify the write instead of reading them twice.
+                ssj = self.config.get('protocol', 'ssj') == 'ssj'
+                expected = self._settings_write_unlocked(voltage, current, verify=not ssj)
                 result = self._read_snapshot_unlocked()
+                if ssj and result['settings'][1:3] != expected:
+                    raise BridgeError("V/A 读回与设定不一致")
             except DeviceLinkError:
                 self._close_unlocked()
                 raise
@@ -390,25 +492,48 @@ class PowerSupplyChannel:
             self.snapshot = result
             return result
 
-    def set_output(self, enabled, data=None):
+    def set_output(self, enabled, data=None, *, cancel=None):
         if type(enabled) is not bool:
             raise BridgeError("输出开关参数无效")
-        with self.lock:
+        if not enabled:self.cancel_pending()
+        with self.transaction(emergency=not enabled,cancel=cancel if enabled else None):
+            # A failed read may have closed the handle; retain the verified
+            # binding and reconnect only to send OFF, never an implicit ON.
+            if not enabled and (not self.transport or not self.transport.is_open) and self.config:
+                self.config=self._bound_config(self.config)
+                self.transport = self._open_transport(self.config)
             self._ensure_open()
             try:
                 if enabled:
+                    if self.start_guard:self.start_guard()
                     if not isinstance(data, dict):
                         raise BridgeError("开启输出前必须填写电压与电流限值")
                     voltage = finite_number(data, "voltage", 0, 65535)
                     current = finite_number(data, "current", 0, 65535)
-                    if self.config.get('protocol') == 'ru':
+                    if self.config.get('protocol') == 'ru' or self.key == 'motor-supply':
                         fresh=self._read_snapshot_unlocked()
+                        # Publish the completed preflight read while the command
+                        # holds the serial lock, so the independent stale-link
+                        # guard can see real feedback during ON verification.
+                        self.snapshot=fresh
+                    if self.config.get('protocol') == 'ru':
                         if any(fresh['ruStatus'][key] for key in ('ovp','ocp','otp')):
                             raise BridgeError('RU 电源保护已触发，请检查设备后再开启')
-                    self._settings_write_unlocked(voltage, current)
+                    if self.key == 'motor-supply':
+                        # Preserve the operator's panel preset. ON must never
+                        # silently rewrite V/A (old scaling changed 20 A to 2 A).
+                        sv,sa=scale_config(self.config)
+                        if (abs(fresh['settings'][1]-round(voltage*sv))>1
+                                or abs(fresh['settings'][2]-round(current*sa))>1):
+                            raise BridgeError(f"电机电源当前预设 {fresh['settings'][1]/sv:g} V / {fresh['settings'][2]/sa:g} A；请在面板设为 {voltage:g} V / {current:g} A。软件未改写预设，未开启输出")
+                    else:
+                        self._settings_write_unlocked(voltage, current)
+                    self.output_uncertain = True
                 if self.config.get('protocol') == 'ru':
+                    if enabled:self.powered_at=time.time()
                     self._exchange(5, 133, values=[0xFF00 if enabled else 0])
                 else:
+                    if enabled:self.powered_at=time.time()
                     self._exchange(16, 2016, values=[65535 if enabled else 0])
                 result = self._read_snapshot_unlocked()
             except DeviceLinkError:
@@ -424,6 +549,9 @@ class PowerSupplyChannel:
             actual = bool(result["status"] & 0x80)
             if actual != enabled:
                 raise BridgeError("电源通信正常，但实际输出状态与请求不一致；请以读回状态为准")
+            self.output_uncertain = actual
+            result['voltageDischarged'] = not actual and result['measured'][0]/10**self.config['voltageDecimals'] <= .5
+            if actual and self.on_power_on:self.on_power_on()
             return result
 
 
@@ -621,6 +749,8 @@ def observe_brake(kind, payload):
     BACKGROUND_RECORDING.observe(kind, payload)
     WORKBENCH_RECORDINGS.observe(kind, payload)
 BRAKE_CURRENT = BrakeCurrent(CHANNELS['brake-supply'], observe_brake)
+COUPLED_CURRENT = CoupledCurrent(CURRENT_MOTOR, BRAKE_CURRENT, TORQUE_SENSOR, CHANNELS['motor-supply'],
+    lambda: AUTOMATIC.active() or CONNECTIONS.active(), observe_brake,recovery=True,recorder=WORKBENCH_RECORDINGS)
 
 
 
@@ -628,7 +758,7 @@ def normalized_config(data, key=None):
     if not isinstance(data, dict):
         raise BridgeError("连接参数无效")
     transport = data.get("transport", "serial")
-    protocol = data.get('protocol', 'ssj')
+    protocol = data.get('protocol', 'ru' if key == 'motor-supply' else 'ssj')
     if protocol not in ('ru','ssj') or (key == 'brake-supply' and protocol != 'ssj'):
         raise BridgeError('电源协议无效')
     if protocol == 'ru':
@@ -652,8 +782,17 @@ def normalized_config(data, key=None):
         'maxCurrent':finite_number(data,'maxCurrent',0,65535,optional=True),
     }
     if key in CHANNEL_NAMES:
+        # 2026-10-21 panel confirmation: SSJ setpoint raw2000 = 2.000 A.
+        # Migrate the old two-decimal host profile without writing the device.
+        if protocol=='ssj' and key=='motor-supply' and config['currentDecimals']==2:
+            config['currentDecimals']=3
+        config['measuredCurrentDecimals']=3 if protocol=='ssj' and key=='motor-supply' else config['currentDecimals']
         config['maxVoltage']=24
-        config['maxCurrent']=10 if key=='motor-supply' else 2.3
+        config['maxCurrent']=MOTOR_SUPPLY_CURRENT_LIMIT if key=='motor-supply' else 2.3
+        if protocol=='ssj':
+            required=3
+            if config['voltageDecimals']!=2 or config['currentDecimals']!=required:
+                raise BridgeError(f'当前 SSJ 接线固定电压小数位 2、电流小数位 {required}，请核对设备后连接')
     if transport == "serial":
         device = data.get("device")
         if not isinstance(device, str) or not device.strip() or len(device) > 256:
@@ -732,17 +871,29 @@ def validate_supply_policy(key, data, *, limits=False):
     if limits:
         voltage=finite_number(data,'maxVoltage',0,65535)
         current=finite_number(data,'maxCurrent',0,65535)
-        if key=='motor-supply' and (voltage!=24 or current!=10):
-            raise BridgeError('电机直流电源固定 24 V、10 A 限流；电机电流请在电机控制区设置')
+        if key=='motor-supply' and (voltage!=24 or current!=MOTOR_SUPPLY_CURRENT_LIMIT):
+            raise BridgeError('电机直流电源固定 24 V、20 A 限流；电机电流请在电机控制区设置')
         return
     voltage=finite_number(data,'voltage',0,65535)
     current=finite_number(data,'current',0,65535)
     if voltage!=24:
         raise BridgeError('工作台电源电压固定为 24 V')
-    if key=='motor-supply' and current!=10:
-        raise BridgeError('电机电源限流固定为 10 A；实际供电电流由负载决定，电机电流由电流环控制')
+    if key=='motor-supply' and current!=MOTOR_SUPPLY_PRESET_CURRENT_A:
+        raise BridgeError(f'电机电源预设固定为 24 V / {MOTOR_SUPPLY_PRESET_CURRENT_A:g} A；开启时只核验预设，不自动改写 V/A')
     if key=='brake-supply' and current>2.3:
         raise BridgeError('制动电源电流最大允许 2.3 A')
+
+
+CONNECTIONS = ConnectionManager(globals(), Path(__file__).resolve().parent / '.runtime/connections.json')
+SAFETY = SafetyControl(CHANNELS,CURRENT_MOTOR,BRAKE_CURRENT,COUPLED_CURRENT,
+                       Path(__file__).resolve().parent/'.runtime/safety.json')
+for _channel in CHANNELS.values():_channel.start_guard=SAFETY.check
+CURRENT_MOTOR.start_guard=BRAKE_CURRENT.start_guard=SAFETY.check
+CURRENT_MOTOR.feedback_after=lambda:CHANNELS['motor-supply'].powered_at
+CURRENT_MOTOR.output_hold=lambda:any(channel.verifying_power for channel in CHANNELS.values())
+CHANNELS['motor-supply'].on_power_on=CURRENT_MOTOR.powered_on
+SAFETY.automatic=AUTOMATIC
+SAFETY.observe=observe_brake
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -763,6 +914,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.send_header('X-Control-Epoch',str(SAFETY.epoch))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -782,8 +934,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self._valid_host():
             return self._send({"error": "仅支持本机访问"}, 403)
         path = urlparse(self.path).path
+        if path == '/api/control/status':return self._send(SAFETY.status())
+        if path == '/api/connections/status':
+            return self._send(CONNECTIONS.status())
+        if path == '/api/coupled-current/status':
+            heartbeat = not SAFETY.started and parse_qs(urlparse(self.path).query).get('heartbeat') == ['1']
+            return self._send({**COUPLED_CURRENT.status(heartbeat=heartbeat),'safety':SAFETY.status()})
         if path == '/api/brake-current/status':
-            return self._send(BRAKE_CURRENT.status(heartbeat=True))
+            return self._send({**BRAKE_CURRENT.status(heartbeat=not SAFETY.started),'safety':SAFETY.status()})
         if path == '/api/recordings/status':
             result = {'current': WORKBENCH_RECORDINGS.status()}
             if parse_qs(urlparse(self.path).query).get('history') != ['0']:
@@ -839,6 +997,7 @@ class Handler(BaseHTTPRequestHandler):
                 "app": "motor-test-bench-hardware",
                 "version": 1,
                 "token": TOKEN,
+                'safety':SAFETY.status(),
                 "channels": {
                     **{key: channel.status() for key, channel in CHANNELS.items()},
                     "torque-sensor": TORQUE_SENSOR.status(),
@@ -846,7 +1005,7 @@ class Handler(BaseHTTPRequestHandler):
                 },
             })
         if path == "/api/motor-current/status":
-            return self._send(CURRENT_MOTOR.read())
+            return self._send({**CURRENT_MOTOR.read(heartbeat=not SAFETY.started),'safety':SAFETY.status()})
         if path == "/api/ports":
             try:
                 ports = [{"port": item.device, "description": item.description} for item in list_ports.comports()]
@@ -857,21 +1016,73 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path.strip('/').split('/')
-        if (path[:3] == ['api','supplies','brake-supply'] or path[:2] == ['api','brake-current']
-                or path == ['api','automatic','start']):
-            with BRAKE_CURRENT.control:
-                return self._do_POST()
-        return self._do_POST()
+        # Validate/read bounded request bodies before taking any command gate.
+        if not self._valid_post():return self._send({'error':'本机页面令牌无效或来源不受允许'},403)
+        try:
+            self.connection.settimeout(2)
+            length=int(self.headers.get('Content-Length','0'))
+            if not 0<=length<=4096 or self.headers.get('Transfer-Encoding'):raise ValueError('请求体长度无效')
+            self.request_data=json.loads(self.rfile.read(length) or b'{}')
+            if not isinstance(self.request_data,dict):raise ValueError('请求参数必须为对象')
+        except (ValueError,OSError) as error:return self._send({'error':str(error)},400)
+        if SAFETY.started:
+            if path == ['api','control','release']:
+                if self.headers.get('X-Workbench-Client') and self.headers.get('X-Workbench-Client')==SAFETY.owner:
+                    SAFETY.stop('控制页面已离开',CHANNELS.keys())
+                return self._send(SAFETY.status())
+            if path == ['api','control','heartbeat']:
+                return self._send(SAFETY.heartbeat(self.headers.get('X-Workbench-Client')))
+            stop = len(path)==3 and path[-1]=='stop' and path[:2] in (['api','control'],['api','coupled-current'],['api','motor-current'],['api','brake-current'],['api','automatic'])
+            off = len(path)==4 and path[:2]==['api','supplies'] and path[2] in CHANNELS and path[-1]=='output' and self.request_data.get('on') is False
+            if stop or off:
+                keys=([path[2]] if off else list(CHANNELS) if path[:2]==['api','control'] else [])
+                return self._send({'safety':SAFETY.stop('操作者停止',keys)},202)
+        # Readback and file recording never take the control gate or delay a stop.
+        if path[-1] == 'read' or path[:2] == ['api', 'recordings']:
+            return self._do_POST()
+        with COUPLED_CURRENT.control:
+            if SAFETY.started:
+                try:
+                    energizing=(path[-1]=='start' and path[:2] in (['api','coupled-current'],['api','motor-current'],['api','brake-current'],['api','automatic'])) or path==['api','coupled-current','load'] or (path[:2]==['api','supplies'] and path[-1]=='output' and self.request_data.get('on') is True)
+                    restoring=path[-1]=='connect' or path==['api','connections','start']
+                    keys=([path[2]] if path[:2]==['api','supplies'] else list(CHANNELS) if path[:2]==['api','coupled-current']
+                          else ['brake-supply'] if path[:2]==['api','brake-current'] else ['motor-supply'])
+                    SAFETY.claim(self.headers.get('X-Workbench-Client'),self.headers.get('X-Control-Epoch'),energizing=energizing,restoring=restoring,power_keys=keys)
+                except (ValueError,OSError) as error:return self._send({'error':str(error),'safety':SAFETY.status()},409)
+            if not COUPLED_CURRENT.blocks_controls() and (path[:3] == ['api','supplies','brake-supply'] or path[:2] == ['api','brake-current']
+                    or path == ['api','automatic','start']):
+                with BRAKE_CURRENT.control:
+                    return self._do_POST()
+            return self._do_POST()
 
     def _do_POST(self):
+        self.recording_request = None
         if not self._valid_post():
             return self._send({"error": "本机页面令牌无效或来源不受允许，请刷新页面后重试"}, 403)
         try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if length < 0 or length > 4096:
-                raise BridgeError("请求体长度无效")
-            data = json.loads(self.rfile.read(length) or b"{}")
+            data = self.request_data
             path = urlparse(self.path).path.strip("/").split("/")
+            if COUPLED_CURRENT.blocks_controls() and path[:2] != ['api', 'coupled-current']:
+                if path == ['api', 'motor-current', 'stop']:
+                    COUPLED_CURRENT.stop(wait=True)
+                    return self._send(CURRENT_MOTOR.status())
+                if path == ['api', 'brake-current', 'stop']:
+                    COUPLED_CURRENT.stop(wait=True)
+                    return self._send(BRAKE_CURRENT.status())
+                off = path[:2] == ['api', 'supplies'] and path[-1] == 'output' and data.get('on') is False
+                restoring = not COUPLED_CURRENT.active() and (
+                    path == ['api', 'connections', 'start'] or
+                    (path[-1] == 'connect' and path[:2] in (['api','supplies'],['api','sensors'],['api','motor-current'])))
+                if off:
+                    # An emergency PSU OFF must not wait for CAN stop confirmation.
+                    COUPLED_CURRENT.stop()
+                elif not restoring and path[-1] != 'read' and path[:2] != ['api', 'recordings']:
+                    raise BridgeError('联动试验正在运行，请使用统一停止后再单独操作')
+            if path == ['api', 'connections', 'start']:
+                return self._send(CONNECTIONS.start(data))
+            if CONNECTIONS.active() and path[-1] not in ('read', 'stop'):
+                if not (path[-1] == 'output' and data.get('on') is False):
+                    raise BridgeError('正在自动连接，请等待扫描完成')
             self.recording_request = None
             if len(path) == 3 and path[:2] == ['api','recordings']:
                 if path[2] == 'start':return self._send({'current':WORKBENCH_RECORDINGS.start(data)})
@@ -879,9 +1090,18 @@ class Handler(BaseHTTPRequestHandler):
                 raise BridgeError('未知记录操作')
             self.recording_started = time.monotonic()
             self.recording_request = {'path':urlparse(self.path).path, 'request':data,
-                                      'requestId':secrets.token_hex(8)}
+                                      'requestId':secrets.token_hex(8),'controlEpoch':SAFETY.epoch,
+                                      'controlClient':self.headers.get('X-Workbench-Client')}
             BACKGROUND_RECORDING.observe('operation_request', self.recording_request)
             WORKBENCH_RECORDINGS.observe('operation_request', self.recording_request)
+            if len(path) == 3 and path[:2] == ['api', 'coupled-current']:
+                try:
+                    if path[2] == 'start':return self._send(COUPLED_CURRENT.start(data))
+                    if path[2] == 'load':return self._send(COUPLED_CURRENT.begin_loading(data))
+                    if path[2] == 'stop':return self._send(COUPLED_CURRENT.stop())
+                    raise BridgeError('未知联动操作')
+                except Exception as error:
+                    return self._send({**COUPLED_CURRENT.status(), 'error':str(error)},400)
             if len(path) == 3 and path[:2] == ['api', 'automatic']:
                 if path[2] == 'start':
                     if BRAKE_CURRENT.active():raise BridgeError('请先停止制动电流步进')
@@ -947,6 +1167,7 @@ class Handler(BaseHTTPRequestHandler):
                             if endpoint_key(other.config) == endpoint_key(config):
                                 raise BridgeError(f"该串口已被{CHANNEL_NAMES.get(other_key, '另一设备')}占用，请为传感器选择独立 RS485 串口")
                         result = channel.connect(config)
+                        CONNECTIONS.remember('torque-sensor', result['config'])
                     return self._send(result)
                 if action == "disconnect":
                     return self._send(channel.disconnect())
@@ -964,12 +1185,19 @@ class Handler(BaseHTTPRequestHandler):
                         if endpoint_key(other.config) == endpoint_key(config):
                             raise BridgeError("该串口或 RTU 网关端点已被另一台电源占用，请为两台电源配置独立通道")
                     result = channel.connect(config)
+                    CONNECTIONS.remember(key, result['config'])
                 return self._send(result)
             if action == "disconnect":
                 return self._send(channel.disconnect())
             if action == "read":
+                # The ramp owns acquisition on this serial link. Browser polls
+                # consume its verified snapshots, never queue extra RTU reads.
+                if SAFETY.started or (key == 'brake-supply' and BRAKE_CURRENT.active()):
+                    return self._send(channel.cached_status())
                 return self._send(channel.read())
             if action == "set":
+                if key == 'motor-supply':
+                    raise BridgeError('电机电源只允许开关输出，V/A 在面板固定设定；软件不改写')
                 validate_supply_policy(key,data)
                 return self._send(channel.set_values(data))
             if action == 'limits':
@@ -1008,6 +1236,13 @@ def serve():
     SPECIALIZED.recover_interrupted()
     AUTOMATIC.recover_interrupted()
     WORKBENCH_RECORDINGS.recover_interrupted()
+    SAFETY.start()
+    # Restore only known device identities, then reconcile any unowned outputs.
+    CONNECTIONS.start({})
+    def terminate(*_):
+        threading.Thread(target=server.shutdown,daemon=True).start()
+    signal.signal(signal.SIGTERM,terminate)
+    if hasattr(signal,'SIGBREAK'):signal.signal(signal.SIGBREAK,terminate)
     print(f"Motor test bench hardware bridge listening at http://{HOST}:{PORT}")
     print("Power supplies start disconnected; output state is only reported after a valid Modbus RTU response.")
     try:
@@ -1015,6 +1250,10 @@ def serve():
     except KeyboardInterrupt:
         pass
     finally:
+        SAFETY.close()
+        if COUPLED_CURRENT.active():
+            try:COUPLED_CURRENT.stop(wait=True)
+            except Exception as error:print(f'Coupled stop not confirmed: {error}')
         if BRAKE_CURRENT.active():
             try:BRAKE_CURRENT.stop()
             except Exception as error:print(f'Brake stop not confirmed: {error}')
@@ -1034,7 +1273,8 @@ def serve():
             except Exception as error:
                 print(f"Motor stop not confirmed: {error}")
         for channel in [*CHANNELS.values(), TORQUE_SENSOR]:
-            channel.disconnect()
+            try:channel.disconnect()
+            except Exception as error:print(f'Output state unknown; preserving safety journal: {error}')
         BACKGROUND_RECORDING.close()
         server.server_close()
 

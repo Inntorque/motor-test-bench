@@ -1,5 +1,7 @@
 """Homepage recording of existing device data. Never starts/stops any device."""
 import json
+import copy
+import queue
 from pathlib import Path
 import re
 import threading
@@ -17,6 +19,8 @@ class WorkbenchRecordings:
         self.control = threading.Lock()
         self.cancel = threading.Event()
         self.thread = self.timeline = self.live = None
+        self.events = queue.Queue(maxsize=4096)
+        self.event_error = ''
 
     def active(self):
         with self.lock:
@@ -51,7 +55,7 @@ class WorkbenchRecordings:
         with self.control:
             if self.active() or (self.thread and self.thread.is_alive()):
                 raise ValueError('已有首页记录，请先停止记录')
-            if not isinstance(data, dict) or data.get('range', 50) not in (50, 100):
+            if not isinstance(data, dict) or data.get('range', 100) not in (50, 100):
                 raise ValueError('记录配置无效')
             source = self.source()
             if not any(SpecializedTests._fresh(channel, 3) for channel in source.values()):
@@ -59,7 +63,7 @@ class WorkbenchRecordings:
             profile = (((source.get('motor') or {}).get('snapshot') or {}).get('motorProfile') or {})
             ratio = (profile.get('nameplate') or {}).get('reduction_ratio')
             report = {'id':uuid.uuid4().hex, 'name':str(data.get('name') or '工作台试验')[:100],
-                      'range':data.get('range', 50), 'startedAt':time.time(), 'running':True,
+                      'range':data.get('range', 100), 'startedAt':time.time(), 'running':True,
                       'state':'recording', 'reason':'', 'elapsedS':0, 'sourceAtStart':source,
                       'notes':['仅记录现有工况，不启动或停止电机，不修改电源、控制参数或保护。',
                                '各接口保留实际更新速度和原有接收时间；其他接口的 CSV 列留空。',
@@ -84,20 +88,25 @@ class WorkbenchRecordings:
                     except Exception:pass
                 raise
             self.cancel = threading.Event()
+            self.events = queue.Queue(maxsize=4096)
+            self.event_error = ''
             with self.lock:self.timeline, self.live = timeline, report
             self.thread = threading.Thread(target=self._run, args=(directory, report, timeline), daemon=True)
             self.thread.start()
             return self.status()
 
     def observe(self, source, payload):
-        # Recording failures must never turn a successful device operation into a failure.
-        with self.lock:
-            timeline = self.timeline if self.live and self.live.get('running') and not self.cancel.is_set() else None
-        if timeline:
-            try:timeline.event(source, payload)
-            except Exception as error:
-                timeline.error = str(error)
-                self.cancel.set()
+        # Never acquire a file/timeline lock on a device-control thread.
+        if not self.live or not self.live.get('running') or self.cancel.is_set():return
+        try:self.events.put_nowait((source, copy.deepcopy(payload), time.time()))
+        except queue.Full:self.event_error = '控制事件队列已满，完整记录中断'
+        except Exception as error:self.event_error = str(error)
+
+    def _drain_events(self, timeline):
+        while True:
+            try:source,payload,stamp = self.events.get_nowait()
+            except queue.Empty:break
+            timeline.event(source,payload,stamp)
 
     def stop(self, identifier):
         with self.control:
@@ -118,6 +127,8 @@ class WorkbenchRecordings:
             if save:SpecializedTests._save(directory/'report.json', report)
         try:
             while not self.cancel.wait(.5):
+                self._drain_events(timeline)
+                if self.event_error:raise ValueError(self.event_error)
                 if timeline.error:raise ValueError(timeline.error)
                 if self.diagnostics and self.diagnostics.error:raise ValueError(f'后台记录异常：{self.diagnostics.error}')
                 publish(save=True)
@@ -125,6 +136,8 @@ class WorkbenchRecordings:
         except Exception as error:
             report.update(state='interrupted', reason=str(error))
         finally:
+            try:self._drain_events(timeline)
+            except Exception as error:report.update(state='interrupted',reason=f'控制事件保存失败：{error}')
             if self.diagnostics:
                 try:self.diagnostics.close()
                 except Exception as error:

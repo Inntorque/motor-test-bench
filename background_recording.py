@@ -53,6 +53,8 @@ class BackgroundRecording:
         project = Path(__file__).resolve().parent
         self.code = {name:hashlib.sha256((project/name).read_bytes()).hexdigest()
                      for name in ('hardware_bridge.py', 'motor_current.py', 'brake_current.py', 'background_recording.py',
+                                  'coupled_current.py','safety_control.py','power_limits.py','web/src/controlClient.js',
+                                  'web/src/CoupledCurrentPanel.jsx','web/src/loadTrial.js','web/src/TorqueCharacteristics.jsx',
                                   'web/src/App.jsx', 'web/src/MotorCurrentPanel.jsx', 'web/src/BrakeCurrentPanel.jsx') if (project/name).is_file()}
         self.cancel.clear()
         self.thread = threading.Thread(target=self._run, name='background-recording', daemon=True)

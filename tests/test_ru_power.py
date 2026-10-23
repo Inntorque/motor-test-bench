@@ -59,6 +59,9 @@ class RuTransport:
 
 class RuPowerTests(unittest.TestCase):
     def setUp(self):
+        remember = patch.object(bridge.CONNECTIONS, 'remember')
+        remember.start()
+        self.addCleanup(remember.stop)
         self.transport=RuTransport()
         self.channel=bridge.PowerSupplyChannel('motor-supply')
         self.channel._open_transport=lambda config:self.transport
@@ -66,12 +69,18 @@ class RuPowerTests(unittest.TestCase):
         self.pause=patch.object(bridge.time,'sleep');self.pause.start()
 
     def tearDown(self):
-        self.channel.disconnect();self.pause.stop()
+        try:
+            # Fixture transport only: production now refuses disconnecting a
+            # live/unknown output. Stop it where possible, then dispose the fake.
+            try:self.channel.set_output(False)
+            except bridge.BridgeError:pass
+            self.channel._close_unlocked()
+        finally:self.pause.stop()
 
     def test_new_motor_defaults_and_serial_requirements(self):
-        config=bridge.normalized_config({'protocol':'ru','transport':'serial','device':'TEST'},'motor-supply')
+        config=bridge.normalized_config({'transport':'serial','device':'TEST'},'motor-supply')
         self.assertEqual((config['protocol'],config['baud'],config['parity'],config['stopbits']),('ru',9600,'N',1))
-        self.assertEqual((config['maxVoltage'],config['maxCurrent']),(24,10))
+        self.assertEqual((config['maxVoltage'],config['maxCurrent']),(24,20))
         for change in ({'parity':'E'},{'stopbits':2}):
             with self.assertRaises(bridge.BridgeError):bridge.normalized_config(self.config|change,'motor-supply')
         with self.assertRaises(bridge.BridgeError):bridge.normalized_config(self.config,'brake-supply')
@@ -89,7 +98,10 @@ class RuPowerTests(unittest.TestCase):
 
     def test_set_and_output_use_new_map_and_echo_readback(self):
         self.channel.connect(self.config)
+        self.channel.set_values({'voltage':36.5,'current':7.25})
+        self.transport.frames.clear()
         self.channel.set_output(True,{'voltage':36.5,'current':7.25})
+        self.assertEqual([frame[1] for frame in self.transport.writes()],[5])
         self.assertEqual(self.transport.holdings[149],3650);self.assertEqual(self.transport.holdings[150],7250)
         self.assertTrue(self.channel.snapshot['status']&128)
         self.channel.set_output(False)
@@ -134,6 +146,27 @@ class RuPowerTests(unittest.TestCase):
             self.transport.bits[register]=False
         self.assertEqual(self.transport.writes(),[])
 
+    def test_output_preflight_keeps_verified_feedback_fresh_during_ru_transactions(self):
+        clock = [100.0]
+        exchange = self.channel._exchange
+        def timed_exchange(*args, **kwargs):
+            clock[0] += .2
+            if self.channel.output_uncertain:
+                self.assertTrue(self.channel.cached_status()['connected'],
+                                'verified preflight feedback must reach the independent stale-link guard')
+            return exchange(*args, **kwargs)
+        with patch.object(bridge.time, 'time', side_effect=lambda: clock[0]), \
+                patch.object(self.channel, '_exchange', side_effect=timed_exchange):
+            self.channel.connect(self.config)
+            clock[0] += 2.0
+            self.channel.set_output(True, {'voltage':24, 'current':5})
+            self.assertTrue(self.channel.snapshot['status'] & 128)
+            self.assertEqual([struct.unpack('>BBHH', frame[:6]) for frame in self.transport.writes()],
+                             [(1,5,133,0xff00)])
+            clock[0] += 3.6
+            self.assertFalse(self.channel.cached_status()['connected'],
+                             'genuinely stale feedback must still fail closed')
+
     def test_crc_error_and_wrong_write_echo_never_claim_success(self):
         self.transport.bad_crc=True
         with self.assertRaises(bridge.DeviceLinkError):self.channel.connect(self.config)
@@ -166,14 +199,21 @@ class RuPowerTests(unittest.TestCase):
                 post('connect',{'protocol':'ru','device':'TEST_RU','transport':'serial'})
                 with self.assertRaises(urllib.error.HTTPError) as failure:post('limits',{'maxVoltage':20,'maxCurrent':2})
                 self.assertEqual(failure.exception.code,400)
-                limits=post('limits',{'maxVoltage':24,'maxCurrent':10})
-                self.assertEqual(limits['config']['maxCurrent'],10)
+                limits=post('limits',{'maxVoltage':24,'maxCurrent':20})
+                self.assertEqual(limits['config']['maxCurrent'],20)
                 with self.assertRaises(urllib.error.HTTPError) as failure:post('output',{'on':True,'voltage':24,'current':1})
                 self.assertEqual(failure.exception.code,400);self.assertEqual(self.transport.writes(),[])
                 with self.assertRaises(urllib.error.HTTPError):post('set',{'voltage':25,'current':10})
                 self.assertEqual(self.transport.writes(),[])
-                result=post('output',{'on':True,'voltage':24,'current':10})
-                self.assertEqual(result['settings'][1:3],[2400,10000])
+                with self.assertRaises(urllib.error.HTTPError) as failure:post('set',{'voltage':24,'current':20})
+                self.assertEqual(failure.exception.code,400)
+                self.assertEqual(self.transport.writes(),[])
+                # Simulate an operator changing the panel, never a software write.
+                self.transport.holdings.update({149:2400,150:20000})
+                self.transport.frames.clear()
+                result=post('output',{'on':True,'voltage':24,'current':20})
+                self.assertEqual(result['settings'][1:3],[2400,20000])
+                self.assertEqual([frame[1] for frame in self.transport.writes()],[5])
                 self.assertTrue(result['status'] & 128)
                 self.assertFalse(post('output',{'on':False})['status'] & 128)
             finally:server.shutdown();server.server_close();worker.join(2)

@@ -10,6 +10,9 @@ from urllib.parse import urlencode
 from specialized_tests import finite, Stats
 from loaded_timeline import LoadedTimeline
 
+# Allow the 300 ms bootstrap phase and the next motor-status polling cycle.
+STARTUP_TIMEOUT_S = 2.0
+
 
 class ScriptEnd(Exception):
     def __init__(self, outcome, reason):
@@ -74,14 +77,19 @@ class AutomaticTests:
                 result['speedSearchDurationS'] = number('speedSearchDurationS', 1, 240, 120)
         else:
             result['loadedMode'] = data.get('loadedMode', 'ramp')
-            if result['loadedMode'] not in ('ramp', 'hold'):
+            if result['loadedMode'] not in ('ramp', 'hold', 'speed_hold'):
                 raise ValueError('带载方式无效')
             if not result['loadConfirmed']:
                 raise ValueError('请确认测功台已接好，并预先设置和开启制动负载')
-            if result['loadedMode'] == 'hold':
-                result['targetIqA'] = number('targetIqA', .001, 5)
-                if abs(result['targetIqA']*1000-round(result['targetIqA']*1000)) > 1e-6:
-                    raise ValueError('目标电流分辨率为 0.001 A')
+            if result['loadedMode'] in ('hold', 'speed_hold'):
+                if result['loadedMode'] == 'speed_hold':
+                    result['targetSpeedRpm'] = number('targetSpeedRpm', -10000, 10000)
+                    if abs(result['targetSpeedRpm']) < .1:
+                        raise ValueError('定速带载目标转速幅值需不低于 0.1 rpm')
+                else:
+                    result['targetIqA'] = number('targetIqA', .001, 5)
+                    if abs(result['targetIqA']*1000-round(result['targetIqA']*1000)) > 1e-6:
+                        raise ValueError('目标电流分辨率为 0.001 A')
                 result['durationS'] = number('durationS', 1, 240, 30)
                 result['settleS'] = number('settleS', 0, 10, 2)
             else:
@@ -106,10 +114,10 @@ class AutomaticTests:
                 raise ValueError('带载脚本要求制动电源已连接且实际反馈输出 ON；负载由操作者预先设置')
             if not self.measurements._fresh(source['sensor'], 1):
                 raise ValueError('带载脚本要求真实扭矩传感器持续在线')
-            if config.get('loadedMode') == 'hold':
+            if config.get('loadedMode') in ('hold', 'speed_hold'):
                 supply = source.get('motorSupply') or {}
                 if not self.measurements._fresh(supply, 3) or not ((supply.get('snapshot') or {}).get('status', 0) & 128):
-                    raise ValueError('恒流带载要求电机电源已连接且实际反馈输出 ON')
+                    raise ValueError('定值带载要求电机电源已连接且实际反馈输出 ON')
         return source
 
     def status(self):
@@ -192,6 +200,8 @@ class AutomaticTests:
                 raise ValueError('没有有效速度反馈')
             if config.get('loadedMode')=='hold' and config['targetIqA']>config['currentMaxA']:
                 raise ValueError('指定 Iq 超过当前电流停止值或设备限值')
+            if config.get('loadedMode')=='speed_hold' and abs(config['targetSpeedRpm'])*ratio>min(300,speed_limit):
+                raise ValueError('指定输出转速超过当前设备速度边界')
             if config.get('loadedMode')=='ramp' and (config['currentStepA']>config['currentMaxA'] or math.ceil(config['currentMaxA']/config['currentStepA'])*config['dwellS']>240):
                 raise ValueError('带载步长不能超过当前电流范围，累计保持时间不能超过 240 秒')
             motor.cancel = threading.Event()
@@ -223,7 +233,7 @@ class AutomaticTests:
             with self.lock:
                 self.live=report
             motor.run={'phase':'automatic','running':True,'scriptId':report['id'],'targetA':None,'steps':0,'elapsed':0,'stopConfirmed':None,
-                       'acquisitionManaged':config.get('loadedMode')=='hold'}
+                       'acquisitionManaged':config.get('loadedMode') in ('hold','speed_hold')}
             self.thread=threading.Thread(target=self._run,args=(directory,report),daemon=True)
             motor.thread=self.thread
             try:
@@ -250,7 +260,7 @@ class AutomaticTests:
         target=None;mode=None;phase='准备';recording_id=None;last_saved=0;drive_stopped=None;enabled_at=0;stage_deadline=None
         source_brake=report['sourceBrakeSettings'];csv_file=None
         timeline=None;poll_cancel=threading.Event();poll_thread=None;poll_errors=[]
-        fixed=config.get('loadedMode')=='hold'
+        fixed=config.get('loadedMode') in ('hold','speed_hold')
         initial_motor_supply=(report.get('sourceAtStart',{}).get('motorSupply',{}).get('snapshot') or {}).get('settings')
         def poll_supplies():
             try:
@@ -296,7 +306,7 @@ class AutomaticTests:
             motor._healthy(snapshot)
             if mode is not None and (state.get('mode')!=mode or state.get('state') not in (1,2) or not state.get('output_on')):
                 raise ScriptEnd('unexpected_stop','电机意外停止或运行模式改变')
-            if mode is not None and state.get('state')==1 and time.monotonic()-enabled_at>1:
+            if mode is not None and state.get('state')==1 and time.monotonic()-enabled_at>STARTUP_TIMEOUT_S:
                 raise ScriptEnd('start_timeout','电机预充电后未进入运行状态')
             if feedback.get('position_stale') is not False or not finite(feedback.get('position_deg')) or not finite(feedback.get('speed_rpm')):
                 raise ScriptEnd('feedback_lost','位置/速度反馈无效或过期')
@@ -442,22 +452,25 @@ class AutomaticTests:
                         if target>=ceiling-1e-9:
                             raise ScriptEnd('controller_limit','已到控制器允许的速度范围，尚未测出电机自身转速上限')
             elif fixed:
-                phase='指定 Iq 带载启动';target=config['targetIqA']
-                command('current_a',0);enable(5,config['durationS']+config['settleS']+2)
-                startup_deadline=time.monotonic()+1
+                speed_hold=config['loadedMode']=='speed_hold'
+                field='speed_rpm' if speed_hold else 'current_a'
+                target=config['targetSpeedRpm'] if speed_hold else config['targetIqA']
+                phase='低速闭环带载启动' if speed_hold else '指定 Iq 带载启动'
+                command(field,0);enable(2 if speed_hold else 5,config['durationS']+config['settleS']+2)
+                startup_deadline=time.monotonic()+STARTUP_TIMEOUT_S
                 while sample() and (motor.snapshot.get('motor') or {}).get('state')!=2:
                     if time.monotonic()>=startup_deadline:raise ScriptEnd('start_timeout','电机未进入运行状态')
                     motor.cancel.wait(.02)
-                command('current_a',target)
-                phase='指定 Iq 运行等待';hold(config['settleS'])
+                command(field,target*ratio if speed_hold else target)
+                phase='低速闭环运行等待' if speed_hold else '指定 Iq 运行等待';hold(config['settleS'])
                 timeline.start_recording()
                 report['recordingStartedAt']=timeline.recording_at
-                phase='恒流带载 · 全参数时间序列记录';publish(save=True)
+                phase='恒速带载 · 全参数时间序列记录' if speed_hold else '恒流带载 · 全参数时间序列记录';publish(save=True)
                 hold(config['durationS'])
                 timeline.end_measurement()
                 report['recordingEndedAt']=timeline.measurement_end
-                report['steps'].append({'targetIqA':target,'durationS':timeline.measurement_end-timeline.recording_at})
-                report.update(state='completed',outcome='duration_complete',reason='指定电流带载记录时长完成，保存全部已接入参数的时间序列')
+                report['steps'].append({'targetSpeedRpm' if speed_hold else 'targetIqA':target,'durationS':timeline.measurement_end-timeline.recording_at})
+                report.update(state='completed',outcome='duration_complete',reason='定值带载记录时长完成，保存全部已接入参数的时间序列')
                 disable()
             else:
                 phase='带载最大转矩/保护触发';target=0

@@ -87,6 +87,22 @@ export function motorTargetCurrentA(device) {
     ? control.iq_target_ma / 1000 : null;
 }
 
+export function motorLiveCurrents(device, now = Date.now() / 1000) {
+  const snapshot = device?.connected ? device.snapshot : null;
+  const elapsed = now - snapshot?.receivedAt;
+  const live = Number.isFinite(elapsed) && elapsed >= 0 && elapsed <= 2;
+  const feedback = snapshot?.feedback;
+  const feedbackAge = now - feedback?.updated_at;
+  const iq = live && feedback?.stale === false && feedbackAge >= 0 && feedbackAge <= 1.5
+    && Number.isFinite(feedback.iq_a) ? feedback.iq_a : null;
+  const phase = snapshot?.phaseCurrent;
+  const phaseAge = now - phase?.updated_at;
+  const phaseLive = live && phase?.stale === false && Number.isFinite(phase.updated_at)
+    && phaseAge >= 0 && phaseAge <= 1.5;
+  const amps = key => phaseLive && Number.isFinite(phase[key]) ? phase[key] / 1000 : null;
+  return { iq, ia: amps('ia_mA'), ib: amps('ib_mA'), ic: amps('ic_mA') };
+}
+
 export function motorOutputFeedback(device) {
   const snapshot = device?.connected ? device.snapshot : null;
   const ratio = snapshot?.motorProfile?.nameplate?.reduction_ratio;

@@ -1,6 +1,7 @@
 import importlib.util
 import pathlib
 import struct
+import time
 import unittest
 from unittest.mock import patch
 
@@ -109,6 +110,10 @@ class FakeSensorTransport:
 
 class BridgeTests(unittest.TestCase):
     def setUp(self):
+        # HTTP connect tests must never overwrite this machine's USB bindings.
+        remember = patch.object(bridge.CONNECTIONS, 'remember')
+        remember.start()
+        self.addCleanup(remember.stop)
         self.motor_transport = FakeTransport()
         self.brake_transport = FakeTransport()
         self.channels = {
@@ -123,6 +128,7 @@ class BridgeTests(unittest.TestCase):
         for channel in self.channels.values():
             channel._open_transport = lambda config, current=channel: open_transport(current, config)
         self.config = {
+            "protocol": "ssj",
             "transport": "serial",
             "device": "COM_TEST",
             "baud": 9600,
@@ -154,7 +160,7 @@ class BridgeTests(unittest.TestCase):
         with patch.object(bridge, 'PORT', port), patch.object(bridge, 'CHANNELS', self.channels), patch.object(bridge.time, 'sleep'):
             worker.start()
             try:
-                result = post('connect', self.config)
+                result = post('connect', {**self.config,'currentDecimals':3})
                 self.assertTrue(result['connected'])
                 self.assertEqual(result['config']['maxCurrent'], 2.3)
                 for action, values in [('set', {'voltage':24, 'current':2.301}), ('output', {'on':True, 'voltage':24, 'current':2.301})]:
@@ -169,7 +175,7 @@ class BridgeTests(unittest.TestCase):
                 self.assertTrue(post('output', {'on':True, 'voltage':24, 'current':1.25})['status'] & 128)
                 self.assertFalse(post('output', {'on':False})['status'] & 128)
                 self.assertEqual(self.brake_transport.registers[2001], 2400)
-                self.assertEqual(post('set', {'voltage':24, 'current':2.3})['settings'][2], 230)
+                self.assertEqual(post('set', {'voltage':24, 'current':2.3})['settings'][2], 2300)
             finally:
                 server.shutdown()
                 server.server_close()
@@ -194,6 +200,8 @@ class BridgeTests(unittest.TestCase):
         motor.set_output(True, {"voltage": 12, "current": 1.25})
         self.assertTrue(motor.snapshot["status"] & 0x80)
         self.assertFalse(brake.snapshot["status"] & 0x80)
+        with self.assertRaises(bridge.BridgeError):motor.disconnect()
+        motor.set_output(False)
         motor.disconnect()
         self.assertFalse(motor.status()["connected"])
         self.assertTrue(brake.status()["connected"])
@@ -209,6 +217,123 @@ class BridgeTests(unittest.TestCase):
         motor.set_output(False)
         self.assertFalse(motor.snapshot["status"] & 0x80)
         self.assertFalse(brake.snapshot["status"] & 0x80)
+
+    def test_ssj_set_verifies_snapshot_without_duplicate_settings_read(self):
+        motor = self.channels['motor-supply']
+        with patch.object(bridge.time,'sleep'):
+            motor.connect(self.config)
+            self.motor_transport.frames.clear()
+            motor.set_values({'voltage':24,'current':1})
+        requests = [struct.unpack('>BBHH',frame[:6])[1:] for frame in self.motor_transport.frames]
+        self.assertEqual(requests,[(16,2001,2),(4,1000,3),(4,1007,1),(3,2000,6)])
+        self.assertEqual(motor.snapshot['settings'][1:3],[2400,100])
+
+    def test_ssj_snapshot_mismatch_still_rejects_write(self):
+        motor = self.channels['motor-supply']
+        transport = self.motor_transport
+        original = transport.write
+        def ignore_setting(frame):
+            original(frame)
+            if frame[1] == 16:transport.registers[2002] = 0
+        transport.write = ignore_setting
+        with patch.object(bridge.time,'sleep'):
+            motor.connect(self.config)
+            with self.assertRaisesRegex(bridge.BridgeError,'读回与设定不一致'):
+                motor.set_values({'voltage':24,'current':1})
+
+    def test_off_after_crc_failure_reopens_saved_binding_and_sends_off(self):
+        channel=self.channels['motor-supply'];transport=self.motor_transport
+        with patch.object(bridge.time,'sleep'):
+            channel.connect(self.config);channel.set_output(True,{'voltage':24,'current':5})
+            original=transport.write
+            def bad_crc(frame):
+                original(frame);transport.reply[-1]^=1
+            transport.write=bad_crc
+            with self.assertRaises(bridge.DeviceLinkError):channel.read()
+            self.assertTrue(channel.output_uncertain)
+            replacement=FakeTransport(output=True)
+            channel._open_transport=lambda _:replacement
+            self.assertFalse(channel.set_output(False)['status']&128)
+            self.assertTrue(any(frame[1]==16 for frame in replacement.frames))
+            self.assertFalse(channel.output_uncertain)
+
+    def test_motor_ssj_set_and_measured_current_scales_are_both_three_decimals(self):
+        config=bridge.normalized_config(self.config,'motor-supply')
+        self.assertEqual((config['currentDecimals'],config['measuredCurrentDecimals']),(3,3))
+        channel=self.channels['motor-supply']
+        self.motor_transport.registers.update({1001:600,1002:144})
+        with patch.object(bridge.time,'sleep'):
+            result=channel.connect(config)
+            self.assertEqual(result['snapshot']['measured'],[2400,600,144])
+            self.assertAlmostEqual(result['snapshot']['calculatedPowerW'],14.4)
+            self.assertTrue(result['snapshot']['powerCalculated'])
+            self.assertFalse(any(f[1] in (5,6,16) for f in self.motor_transport.frames))
+            channel.set_values({'voltage':24,'current':2})
+            self.assertEqual(self.motor_transport.registers[2002],2000)
+            self.assertFalse(channel.snapshot['status']&128)
+        brake=bridge.normalized_config({**self.config,'currentDecimals':3},'brake-supply')
+        self.assertEqual((brake['currentDecimals'],brake['measuredCurrentDecimals']),(3,3))
+
+    def test_motor_on_preserves_panel_24v_10a_and_only_writes_output_register(self):
+        channel=self.channels['motor-supply']
+        config=bridge.normalized_config(self.config,'motor-supply')
+        self.motor_transport.registers.update({2001:2400,2002:10000})
+        with patch.object(bridge.time,'sleep'):
+            channel.connect(config)
+            self.motor_transport.frames.clear()
+            result=channel.set_output(True,{'voltage':24,'current':10})
+        writes=[struct.unpack('>H',f[2:4])[0] for f in self.motor_transport.frames if f[1]==16]
+        self.assertEqual(writes,[2016])
+        self.assertEqual(result['settings'][1:3],[2400,10000])
+        self.assertTrue(result['status']&128)
+        self.assertEqual(self.motor_transport.registers[2004],5003)
+
+    def test_motor_wrong_panel_preset_never_rewrites_va_or_enables(self):
+        channel=self.channels['motor-supply']
+        config=bridge.normalized_config(self.config,'motor-supply')
+        self.motor_transport.registers[2002]=2000
+        with patch.object(bridge.time,'sleep'):
+            channel.connect(config)
+            self.motor_transport.frames.clear()
+            with self.assertRaisesRegex(bridge.BridgeError,'2 A'):
+                channel.set_output(True,{'voltage':24,'current':10})
+        self.assertFalse(any(f[1] in (5,6,16) for f in self.motor_transport.frames))
+        self.assertEqual(self.motor_transport.registers[2002],2000)
+
+    def test_stop_invalidates_queued_on_and_checks_scaling(self):
+        import threading
+        channel=self.channels['motor-supply']
+        with patch.object(bridge.time,'sleep'):channel.connect(self.config)
+        entered=threading.Event();done=threading.Event();errors=[]
+        # Capture the operation generation while another owner holds the wire.
+        def on():
+            entered.set()
+            try:channel.set_output(True,{'voltage':24,'current':1})
+            except bridge.BridgeError as error:errors.append(str(error))
+            finally:done.set()
+        with channel.lock:
+            worker=threading.Thread(target=on);worker.start();entered.wait(1)
+            time.sleep(.03);channel.cancel_pending()
+        self.assertTrue(done.wait(1));worker.join()
+        self.assertTrue(errors)
+        self.assertFalse(any(frame[1]==16 for frame in self.motor_transport.frames))
+        with self.assertRaises(bridge.BridgeError):
+            bridge.normalized_config({**self.config,'currentDecimals':2},'brake-supply')
+
+    def test_emergency_reopen_follows_usb_identity_not_reused_port_number(self):
+        from types import SimpleNamespace
+        channel=self.channels['motor-supply']
+        channel.config={**self.config,'device':'COM_OLD'}
+        channel.usb_identity=(10,20,'ORIGINAL')
+        channel.output_uncertain=True
+        wrong=SimpleNamespace(device='COM_OLD',vid=10,pid=20,serial_number='OTHER')
+        with patch.object(bridge.list_ports,'comports',return_value=[wrong]):
+            with self.assertRaisesRegex(bridge.BridgeError,'原绑定'):channel.set_output(False)
+        correct=SimpleNamespace(device='COM_NEW',vid=10,pid=20,serial_number='ORIGINAL')
+        channel._open_transport=lambda config:self.motor_transport
+        with patch.object(bridge.list_ports,'comports',return_value=[wrong,correct]),patch.object(bridge.time,'sleep'):
+            self.assertFalse(channel.set_output(False)['status']&128)
+            self.assertEqual(channel.config['device'],'COM_NEW')
 
     def test_failed_handshake_never_marks_channel_connected(self):
         channel = bridge.PowerSupplyChannel("motor-supply")

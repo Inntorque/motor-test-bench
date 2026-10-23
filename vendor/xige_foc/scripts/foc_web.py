@@ -166,6 +166,7 @@ from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from web_client import MUTATING_ROUTES
 from run_recorder import RunRecorder
+import max_output
 
 try:
     import zqwl
@@ -226,7 +227,7 @@ MOTOR_PROFILES = {
         "label": "SG-6010HB · FOC调试",
         "nameplate": {
             "vbus_v": 24.0, "pole_pairs": 10,
-            "rs_mohm": None, "line_rs_mohm": None, "ls_uh": None,
+            "rs_mohm": 0.224, "line_rs_mohm": None, "ls_uh": 235,
             "kt_nm_a_rms": None, "ke_vrms_per_krpm_line": None,
             "rated_current_arms": None, "peak_current_arms": None, "peak_current_a": None,
             "rpm_rated": None, "nm_rated": None, "psi_mwb_nominal": None,
@@ -234,7 +235,7 @@ MOTOR_PROFILES = {
             "reduction_ratio": 9.67, "ntc_r25_ohm": 10000, "ntc_beta": 3435,
         },
         "safe_cur_ma_default": 3000,
-        "safe_cur_ma_max": 10000,
+        "safe_cur_ma_max": 30000,
         "safe_volt": 8.0,
     },
 }
@@ -290,7 +291,7 @@ MOTOR_VOLT_MAX = 8.0        # 跟随西格工程电压参数上限
 RPM_MIN = 3                 # 3rpm -> step_ms=333 (下限由固件 5..5000ms 决定)
 RPM_MAX_SAFE = 300          # 与速度环参数的硬件配置上限一致
 RPM_MODE_DEFAULT = 0        # ★ 模式0 = 正弦电压开环
-CONTROL_MODE_MAX_WEB = 6
+CONTROL_MODE_MAX_WEB = 7
 PRSP_ACK = 0x81
 PRSP_NACK = 0x82
 PRSP_PARAM = 0x83
@@ -306,8 +307,13 @@ PRSP_CTRL_POSITION = 0xA7
 PRSP_MOTOR = 0x86
 
 CONTROL_FIELDS = {
+    "max_bus_a": (13, 1000, .1, 20.0),
+    "max_id_min_a": (14, 1000, -30.0, 0.0),
+    "max_phase_a": (15, 1000, 0.0, 30.0),
+    "max_bus_v": (16, 1000, 6.0, 26.4),
+    "max_speed_rpm": (17, 1, 0.0, 20000.0),
     # 2026-10-14: 0.5..3 A 电流环锁定测试; ID 7 同时是相电流跳闸阈值 (0.1..5 A)。
-    "current_a": (1, 1000, -10.0, 10.0),
+    "current_a": (1, 1000, -30.0, 30.0),
     "voltage_v": (2, 1000, -8.0, 8.0),
     "speed_rpm": (3, 1000, -300.0, 300.0),
     # UI uses gearbox output degrees; convert to rotor degrees in the route.
@@ -406,24 +412,35 @@ PARAM_TABLE = [
     {'id': 4, 'name': 'cur_ki', 'def': 100, 'min': 0, 'max': 1000000, 'unit': 'x100'},
     {'id': 5, 'name': 'spd_kp', 'def': 500, 'min': 0, 'max': 10000, 'unit': 'x100'},
     {'id': 6, 'name': 'spd_ki', 'def': 20, 'min': 0, 'max': 10000, 'unit': 'x100'},
-    {'id': 7, 'name': 'i_limit', 'def': 3000, 'min': 100, 'max': 10000, 'unit': 'mA'},
+    {'id': 7, 'name': 'i_limit', 'def': 3000, 'min': 100, 'max': 30000, 'unit': 'mA'},
     {'id': 8, 'name': 'pos_kp', 'def': 300, 'min': 0, 'max': 10000, 'unit': 'x100/s'},
     {'id': 9, 'name': 'pos_ki', 'def': 0, 'min': 0, 'max': 10000, 'unit': 'x100/s2'},
     {'id': 10, 'name': 'pos_kd', 'def': 0, 'min': 0, 'max': 1000, 'unit': 'x1000'},
     {'id': 11, 'name': 'speed_limit', 'def': 300, 'min': 1, 'max': 300, 'unit': 'rpm'},
-    {'id': 12, 'name': 'voltage_limit', 'def': 8000, 'min': 100, 'max': 8000, 'unit': 'mV'},
+    {'id': 12, 'name': 'voltage_limit', 'def': 9000, 'min': 100, 'max': 10000, 'unit': 'mV'},
     {'id': 13, 'name': 'deadtime_comp_ns', 'def': 400, 'min': 0, 'max': 1000, 'unit': 'ns;0=off'},
     {'id': 14, 'name': 'speed_ramp', 'def': 60, 'min': 1, 'max': 3000, 'unit': 'rpm/s'},
     {'id': 15, 'name': 'speed_filter', 'def': 20, 'min': 0, 'max': 1000, 'unit': 'ms'},
-    {'id': 16, 'name': 'current_bw', 'def': 200, 'min': 0, 'max': 2000, 'unit': 'rad/s;0=manual'},
-    {'id': 17, 'name': 'phase_rs', 'def': 275, 'min': 1, 'max': 10000, 'unit': 'mOhm equivalent'},
-    {'id': 18, 'name': 'phase_ls', 'def': 600, 'min': 1, 'max': 10000, 'unit': 'uH; provisional'},
+    {'id': 16, 'name': 'current_bw', 'def': 1000, 'min': 0, 'max': 2000, 'unit': 'rad/s;0=manual'},
+    {'id': 17, 'name': 'phase_rs', 'def': 224, 'min': 1, 'max': 10000000, 'unit': 'uOhm'},
+    {'id': 18, 'name': 'phase_ls', 'def': 235, 'min': 1, 'max': 10000, 'unit': 'uH'},
     {'id': 19, 'name': 'spd_kd', 'def': 0, 'min': 0, 'max': 10000, 'unit': 'x1000'},
     {'id': 20, 'name': 'voltage_ramp', 'def': 1000, 'min': 100, 'max': 100000, 'unit': 'mV/s'},
     {'id': 21, 'name': 'torque_limit', 'def': 2700, 'min': 1, 'max': 5000, 'unit': 'mNm'},
     {'id': 22, 'name': 'current_filter', 'def': 100, 'min': 0, 'max': 10000, 'unit': 'us'},
 ]
 PARAM_BY_ID = dict((p["id"], p) for p in PARAM_TABLE)
+
+def parameter_table(version):
+    table = [dict(p) for p in PARAM_TABLE]
+    if version is None or version < 0x0A35:
+        table[12].update({'def':8000,'max':8000})  # old firmware compatibility only
+        table[17].update({'def':275,'max':10000,'unit':'mOhm equivalent'})
+        table[18].update({'def':600,'unit':'uH; provisional'})
+    if version is not None and version < 0x0A36:
+        table[16]['def'] = 200
+    return table
+
 
 
 # ---------------------------------------------------------------------------
@@ -714,6 +731,11 @@ class Link(object):
 
         self.state_lock = threading.Lock()
         self.diag_lock = threading.Lock()
+        self.max_output_lock = threading.Lock()
+        self.max_trace_lock = threading.Lock()
+        self.max_output_snapshot = None
+        self.max_output_error = None
+        self.max_run_generation = 0
         self.log = deque(maxlen=LOG_KEEP)            # internal only
         self.errors = deque(maxlen=TELEM_ERR_KEEP)   # newest real errors
         self.info = {}
@@ -985,14 +1007,17 @@ class Link(object):
         now = now if now is not None else time.time()
         state = data[2]
         flags = data[7]
+        fault_report = state == 3 and bool(flags & 0x20)
         with self.state_lock:
             self.motor_status = {
                 "available": True,
                 "mode": data[1],
                 "state": state,
                 "state_name": MOTOR_STATE_NAMES.get(state, "unknown"),
-                "step": data[3],
-                "step_ms": le16(data, 4),
+                "step": None if fault_report else data[3],
+                "step_ms": None if fault_report else le16(data, 4),
+                "fault_reason": data[3] if fault_report else None,
+                "fault_peak_ma": le16(data, 4) if fault_report else None,
                 "duty_permille": data[6] * 10,
                 "output_on": bool(flags & 0x01),
                 "fault": bool(flags & 0x02),
@@ -1121,8 +1146,15 @@ class Link(object):
                             req.data[0] == PCMD_GET_ONE and
                             (len(req.data) < 2 or len(data) < 2 or data[1] != req.data[1])):
                         continue
-                    if data[0] == 0x91 and (len(data) < 2 or data[1] != req.data[2]):
-                        continue
+                    if data[0] == 0x91:
+                        # Bank/chunk replies echo the selector; trace metadata
+                        # and record-latch replies echo the operation instead.
+                        op=req.data[1] if len(req.data)>2 else 0
+                        tag=req.data[2] if op in (4,7) else op
+                        if len(data)<2 or data[1]!=tag:
+                            continue
+                        if op==6 and data[2:4]!=req.data[2:4]:
+                            continue
                     if data[0] == 0x8F and data[1:3] != req.data[1:3]:
                         continue
                     if req.reply is None:
@@ -1536,11 +1568,16 @@ class Link(object):
                 "value": value, "flags": flags,
                 "t": now if now is not None else time.time()}
 
+    def parameter_table(self):
+        with self.state_lock:
+            version = (self.info.get("info") or {}).get("version")
+        return parameter_table(version)
+
     def _parse_param_reply(self, data):
         pid = data[1]
         value = le32(data, 2)
         flags = data[6] if len(data) > 6 else 0
-        known = PARAM_BY_ID.get(pid)
+        known = next((p for p in self.parameter_table() if p["id"] == pid), None)
         return {
             "id": pid,
             "name": known["name"] if known else "id %d" % pid,
@@ -1553,7 +1590,7 @@ class Link(object):
 
     def fetch_one(self, pid):
         """GET_ONE.  Returns (param_dict, error_string)."""
-        info = PARAM_BY_ID.get(pid)
+        info = next((p for p in self.parameter_table() if p["id"] == pid), None)
         name = info["name"] if info else "id %d" % pid
         reply = self.request("GET_ONE(%s)" % name, self.param_host_id,
                              self.param_dev_id, bytes([PCMD_GET_ONE, pid & 0xFF]),
@@ -1571,7 +1608,12 @@ class Link(object):
 
     def set_one(self, pid, value):
         """SET_ONE.  Returns (param_dict, error_string)."""
-        info = PARAM_BY_ID.get(pid)
+        if pid == 17:
+            with self.state_lock:
+                version = (self.info.get("info") or {}).get("version")
+            if version is None:
+                return None, "电阻单位尚未确认：请先读取固件版本"
+        info = next((p for p in self.parameter_table() if p["id"] == pid), None)
         name = info["name"] if info else "id %d" % pid
         if info is not None:
             if value < info["min"] or value > info["max"]:
@@ -1801,6 +1843,11 @@ class Link(object):
             return False, "device refused motor command: %s" % reasons.get(reason, perr_text(code))
         ok, err = self._confirm_motor(True, mode)
         if ok:
+            self.max_run_generation += 1
+            self.max_output_snapshot = None
+            if mode==7:
+                threading.Thread(target=max_output.monitor,args=(self,self.max_run_generation),
+                    name="foc-maximum-diagnostic",daemon=True).start()
             self.recorder.start(mode, seconds)
         return ok, err
 
@@ -1862,6 +1909,15 @@ class Link(object):
     def control_stat(self):
         if self.bus is None:
             return None, self.reason or "CAN adapter is not open"
+        # Control clients must not depend on the lower-priority periodic poll.
+        # A recorder can otherwise leave MOTOR_STAT stuck at PRECHARGE while
+        # CONTROL_STAT/feedback already report RUN. Require a real reply here.
+        motor_reply = self.request("CONTROL_MOTOR_STAT", self.param_host_id,
+                                   self.param_dev_id, bytes([PCMD_MOTOR_STAT]),
+                                   (PRSP_MOTOR, PRSP_NACK), attempts=1)
+        if motor_reply is None or len(motor_reply) != 8 or motor_reply[0] != PRSP_MOTOR:
+            return None, "电机状态读取失败：未收到新的 MOTOR_STAT 应答"
+        self._on_motor_status(motor_reply)
         reply = self.request("CONTROL_STAT", self.param_host_id,
                              self.param_dev_id,
                              bytes([PCMD_CTRL_STAT, 0, 0, 0, 0, 0, 0, 0]),
@@ -1985,7 +2041,7 @@ class Link(object):
             readings = dict((k, dict(v)) for k, v in self.info.items()
                             if k.startswith("param_"))
         out = []
-        for desc in PARAM_TABLE:
+        for desc in self.parameter_table():
             key = "param_%d" % desc["id"]
             reading = readings.get(key)
             out.append({
@@ -3430,7 +3486,7 @@ progress,.calib-progress { accent-color:var(--neon); filter:drop-shadow(0 0 6px 
         </label>
       </div>
       <div class="k">高级开环参数只用于有限时长诊断。<b>电压是幅值上限，电流是相电流峰值限制</b>；
-        真正决定发热的是<b>电流上限</b>（铜损 ≈ 2·I²·R_相，7010 每相 0.275Ω，与转速无关）。
+        发热取决于实际相电流、绕组电阻和散热；当前相电阻采用用户确认的 224 μΩ。
         常规操作使用上面的模式面板；高级设置不代替闭环目标。
         模式只保留<b>正弦开环</b>（六步模式已删除）；默认预设 正弦开环 / 3000mA / 5V。</div>
     </div>
@@ -5408,7 +5464,7 @@ setInterval(pollBatch, BATCH_MS);
   var FAULT_NAMES = {1: "ADC 采样陈旧", 2: "通用过流 (OCP 跳闸)", 3: "NTC 过温",
                      4: "闭环过流 (超 i_limit 约 300us)", 5: "硬过流 (>1.5×i_limit)",
                      6: "编码器失效", 7: "校准过流",
-                     10: "控制漏拍 (连续错过 100us 截止)", 12: "电流环未锁住 (诊断用)"};
+                     10: "控制漏拍 (连续错过 100us 截止)", 11: "相电流采样超量程 (ADC 贴轨)", 12: "电流环未锁住 (诊断用)"};
   function fetchDiagStat() {
     // /api/diag/stat 是"请求固件回一帧 0x90"再返回缓存快照 -> 第一次可能还没到, 取第二次
     return request("/api/diag/stat").then(function () {
@@ -5937,7 +5993,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 '__TUNE_CATALOG__', json.dumps([
                     {"id": p["id"], "default": p["def"],
                      "min": p["min"], "max": p["max"]}
-                    for p in PARAM_TABLE
+                    for p in link.parameter_table()
                 ], separators=(",", ":")))
             self._send(page.encode('utf-8'), "text/html; charset=utf-8")
             return
@@ -6080,6 +6136,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json({"ok": bool(ok), "op": op, "error": err or None})
             return
 
+        if route == "/api/max-output/status":
+            if app.ota_busy():
+                self._json({"ok":False,"error":"CAN-OTA is running"},status=409)
+                return
+            try:
+                if query.get('cached')==['1']:
+                    with link.state_lock:maximum=link.max_output_snapshot
+                    self._json({"ok":True,"maximumOutput":maximum,"diagnosticError":link.max_output_error})
+                else:
+                    self._json({"ok":True,"maximumOutput":max_output.status(link)})
+            except ValueError as exc:
+                self._json({"ok":False,"error":str(exc)},status=409)
+            return
+
         if route == "/api/control/status":
             if app.ota_busy():
                 self._json({"ok": True, "control": link.control_snapshot(),
@@ -6087,6 +6157,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             control, err = link.control_stat()
             self._json({"ok": control is not None, "control": control,
+                        "motor": link.motor_status_snapshot(),
                         "feedback": link.feedback_snapshot(), "error": err})
             return
 
@@ -6286,7 +6357,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             enable = 1 if qint("enable", 0) else 0
             mode = qint("mode", RPM_MODE_DEFAULT)
             if mode < 0 or mode > CONTROL_MODE_MAX_WEB:
-                self._json({"ok": False, "error": "mode must be in 0..6"}, status=400)
+                self._json({"ok": False, "error": "mode must be in 0..7"}, status=400)
                 return
             if app.ota_busy():
                 self._json({"ok": False, "error": "CAN-OTA is running"}, status=409)
@@ -6794,7 +6865,7 @@ class App(object):
             #     这类只认"真正的 IO 异常"(读线程置 need_reopen)。
             #   - ZQWL 串口: 有实测过的"假活"故障(句柄打开成功但再也收不到帧),
             #     所以保留原来的静默判据。
-            if isinstance(bus, PyCanBus):
+            if isinstance(bus, PyCanBus) or getattr(self.link, "need_reopen", False):
                 if getattr(self.link, "need_reopen", False):
                     self.link.need_reopen = False
                     self.link.add_error("CAN 适配器 IO 异常, 重新打开")
@@ -6802,6 +6873,11 @@ class App(object):
                 else:
                     return
             else:
+                # USB heartbeat/config replies prove the ZQWL receiver is alive
+                # even when the motor PSU is OFF and there are no CAN frames.
+                transport_rx = getattr(bus, "last_transport_activity", 0.0)
+                if transport_rx and now - transport_rx <= self.DEAD_AFTER_S and getattr(bus,"state",None) != "bus-off":
+                    return
                 last_rx = getattr(self.link, "last_rx", 0.0)
                 # 错误帧也算"活动"
                 last_act = max(last_rx, getattr(self.link, "last_activity", 0.0))

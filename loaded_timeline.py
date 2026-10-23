@@ -13,7 +13,8 @@ FIELDS = ['elapsed_s', 'recording_elapsed_s', 'source_recording_elapsed_s', 'pc_
           'output_speed_rpm', 'motor_ntc_C', 'motor_output_on', 'motor_mode', 'motor_fault',
           'supply_target_voltage_V', 'supply_target_current_A', 'supply_actual_voltage_V',
           'supply_actual_current_A', 'supply_actual_power_W', 'supply_output_on',
-          'supply_max_voltage_V', 'supply_max_current_A', 'payload_json']
+          'supply_max_voltage_V', 'supply_max_current_A', 'brake_target_torque_Nm',
+          'brake_feedback_torque_Nm', 'brake_command_current_A', 'payload_json']
 
 
 class LoadedTimeline:
@@ -41,6 +42,10 @@ class LoadedTimeline:
 
     def event(self, source, payload, stamp=None, **values):
         # Per-source rows leave unrelated channels empty. No interpolation or future-value fill.
+        if source in ('torque_feedback','torque_loading_start','torque_target_step'):
+            values.update(brake_target_torque_Nm=payload.get('targetNm'),
+                          brake_feedback_torque_Nm=payload.get('measuredNm'),
+                          brake_command_current_A=payload.get('currentA',payload.get('brakeCurrentA')))
         with self.lock:
             now = time.monotonic()
             row = dict(elapsed_s=now-self.began,
@@ -110,11 +115,12 @@ class LoadedTimeline:
                         config = snapshot.get('config') or channel.get('config') or {}
                         measured, settings = snapshot.get('measured') or [], snapshot.get('settings') or []
                         vscale, ascale = 10**config.get('voltageDecimals', 2), 10**config.get('currentDecimals', 2)
+                        actual_ascale = 10**config.get('measuredCurrentDecimals', config.get('currentDecimals',2))
                         values = dict(supply_target_voltage_V=settings[1]/vscale if len(settings)>1 else None,
                                       supply_target_current_A=settings[2]/ascale if len(settings)>2 else None,
                                       supply_actual_voltage_V=measured[0]/vscale if measured else None,
-                                      supply_actual_current_A=measured[1]/ascale if len(measured)>1 else None,
-                                      supply_actual_power_W=measured[2] if len(measured)>2 else None,
+                                      supply_actual_current_A=measured[1]/actual_ascale if len(measured)>1 else None,
+                                      supply_actual_power_W=snapshot.get('calculatedPowerW') if snapshot.get('calculatedPowerW') is not None else measured[2] if len(measured)>2 else None,
                                       supply_output_on=bool(snapshot['status'] & 128) if isinstance(snapshot.get('status'), int) else None,
                                       supply_max_voltage_V=config.get('maxVoltage'), supply_max_current_A=config.get('maxCurrent'))
                     self.event(key, channel, stamp, **values)

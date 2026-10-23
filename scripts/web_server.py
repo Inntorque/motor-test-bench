@@ -126,7 +126,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.close_connection = True
                 return
             body = self.rfile.read(length) if length else None
-            headers = {key: self.headers[key] for key in ('Content-Type', 'Origin', 'X-MotorBench-Token')
+            headers = {key: self.headers[key] for key in ('Content-Type', 'Origin', 'X-MotorBench-Token',
+                       'X-Workbench-Client','X-Control-Epoch')
                        if key in self.headers}
             # Only authenticated, same-origin LAN requests reach this trusted proxy.
             # The bridge stays on loopback and still validates its control token.

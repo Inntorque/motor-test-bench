@@ -1,11 +1,14 @@
 {
-  "source": "User-provided, working xige_foc host runtime, copied 2026-10-19",
-  "purpose": "Host CAN communication only; no firmware, binaries, logs or device sessions copied",
+  "source": "User-provided xige_foc host runtime, synchronized 2026-10-23",
+  "purpose": "Host CAN communication and diagnostics only; no firmware, binaries, logs or device sessions copied",
+  "maximumOutputMinimumFirmware": "0x0A3C",
   "files": {
+    "foc_web.py": "278649781a41c6e648a2b5bf097e75d012e0858e423a2b80d91a647c67c4e656",
+    "run_recorder.py": "2c5c5b4936e7968c32b7e6a32360fb1af6974514eb0a58131cc8dcebe245d1f1",
+    "max_output.py": "0dc4d0e28b41a4bd14bcac66a68887d23f2198568193830ff30964df00ed8eb9",
     "usb_gs.py": "85306619c384753a97d93240b42ae9269cb28fdbf3eb82ae9fdba5ae7a5bccbc",
-    "run_recorder.py": "3cf5f2c4130beced2b0fae7f7e22f613f966b5db9d57e6e3c5b9e531204c946a",
-    "foc_web.py": "027423dfedb4bb82776707788834cba0f415d45e385fe6c18b24df6d71f0e673",
-    "web_client.py": "2b04a2e6ed6b86d320dbb7a5e8793263be70c4f52ef38f5c4c0539b611677a03",
-    "zqwl.py": "2251d232da26fd6fb7eb84e77bdf64f512d2adccb22db016487a98192dd6dcb8"
-  }
+    "web_client.py": "3312ed26821834fadd65f6dfb76fbc1d3fcb90b3cca04623d0fd7314516ec21e",
+    "zqwl.py": "612c27df3302e45cbdf9d0b204025b97fb1b125297ce2eb4299074e36dddc152"
+  },
+  "lineEndings": "LF for portable source checksums"
 }

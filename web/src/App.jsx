@@ -2,10 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { appendSamples, plotColumns } from "./livePerformance.js";
 import { useLiveActions } from "./useLiveActions.js";
 import MotorCurrentPanel from "./MotorCurrentPanel.jsx";
+import CoupledCurrentPanel from "./CoupledCurrentPanel.jsx";
 import BrakeCurrentPanel from "./BrakeCurrentPanel.jsx";
 import TorqueCharacteristics from "./TorqueCharacteristics.jsx";
+import EncoderCompareView from "./EncoderCompareView.jsx";
+import {LoadTrial} from './loadTrial.js';
 import SpecializedTestsPanel from "./SpecializedTestsPanel.jsx";
-import {supplyPoint, supplyReadbackPoint, BRAKE_SUPPLY_CURRENT_LIMIT, brakeModeText, supplyOperatingMode} from './supplyPolicy.js';
+import {supplyMeasurements, supplyPoint, supplyReadbackPoint, BRAKE_SUPPLY_CURRENT_LIMIT, MOTOR_SUPPLY_CURRENT_LIMIT, MOTOR_SUPPLY_PRESET_CURRENT_A, brakeModeText, supplyOperatingMode} from './supplyPolicy.js';
 import {
   STORE_KEY,
   readRecords,
@@ -14,7 +17,7 @@ import {
   relativeSamples,
   eventCsv,
 } from "./records.js";
-import { toCsv, formatDuration, shaftPowerKw as calculateShaftPowerKw, motorTemperatureC, motorTargetCurrentA, characteristicAxisMax } from "./model.js";
+import { toCsv, formatDuration, shaftPowerKw as calculateShaftPowerKw, motorTemperatureC, motorTargetCurrentA, motorLiveCurrents, characteristicAxisMax } from "./model.js";
 
 const MAX_SAMPLES = 1500;
 const SENSOR_POLL_MS = 50;
@@ -60,7 +63,7 @@ const DEFAULT_SENSOR_CONFIG = { device: "", protocol: "modbus", baud: "19200", a
 
 function initialBenchState() {
   return {
-    range: 50, t: 0, torque: null, speed: null, current: null,
+    range: 100, t: 0, torque: null, speed: null, current: null,
     targetSpeed: null, targetCurrent: null, motorEnabled: false,
     loadEnabled: null, motorConnected: false, sensorConnected: false,
     supplyConnected: false, motorSupplyConnected: false,
@@ -70,16 +73,27 @@ function initialBenchState() {
 }
 
 function loadConfig(id) {
+  const motor=id === "motor-supply";
+  const defaults={ ...DEFAULT_CONFIG, protocol:motor?"ru":"ssj", currentDecimals:motor?"2":"3",
+    maxVoltage:"24", maxCurrent:motor?String(MOTOR_SUPPLY_CURRENT_LIMIT):String(BRAKE_SUPPLY_CURRENT_LIMIT) };
   try {
     const saved=JSON.parse(localStorage.getItem(`motor-bench:${id}:config`) || "{}");
-    const next={ ...DEFAULT_CONFIG, protocol:"ssj", ...saved };
-    // 当前制动 SSJ 电流寄存器单位为 0.001 A，同时修正旧缓存中的两位小数配置。
+    const next={ ...defaults, ...saved };
+    // Switch old browser profiles once; later manual protocol choices persist.
+    if(motor && saved.protocolDefaultRevision!=="ru-20261021" && saved.protocol!=="ru") {
+      Object.assign(next,{protocol:"ru",baud:"9600",parity:"N",stopbits:"1",address:"1",
+        voltageDecimals:"2",currentDecimals:"2",measuredCurrentDecimals:"2",
+        ratedVoltage:"",ratedCurrent:"",ratingsVerified:false});
+    }
+    if(motor)next.protocolDefaultRevision="ru-20261021";
+    // SSJ keeps its independently confirmed current scaling.
     if(id === "brake-supply") { next.protocol="ssj"; next.currentDecimals="3"; }
+    if(id === "motor-supply" && next.protocol === "ssj") next.currentDecimals="3";
     next.maxVoltage="24";
-    next.maxCurrent=id === "motor-supply"?"10":String(BRAKE_SUPPLY_CURRENT_LIMIT);
+    next.maxCurrent=id === "motor-supply"?String(MOTOR_SUPPLY_CURRENT_LIMIT):String(BRAKE_SUPPLY_CURRENT_LIMIT);
     return next;
   } catch {
-    return { ...DEFAULT_CONFIG, protocol:"ssj", currentDecimals:id==='brake-supply'?"3":DEFAULT_CONFIG.currentDecimals, maxVoltage:"24", maxCurrent:id==='motor-supply'?"10":String(BRAKE_SUPPLY_CURRENT_LIMIT) };
+    return { ...defaults, ...(motor?{protocolDefaultRevision:"ru-20261021"}:{}) };
   }
 }
 
@@ -95,22 +109,7 @@ function numberText(value, decimals = 2) {
   return Number.isFinite(value) ? value.toFixed(decimals) : "—";
 }
 
-function snapshotValues(device) {
-  const snapshot = device?.snapshot;
-  if (!device?.connected || !snapshot) return null;
-  const config = device.config || snapshot.config || {};
-  const voltageDecimals = Number(config.voltageDecimals ?? 2);
-  const currentDecimals = Number(config.currentDecimals ?? 2);
-  const measured = snapshot.measured || [];
-  return {
-    voltage: Number.isFinite(measured[0]) ? measured[0] / 10 ** voltageDecimals : null,
-    current: Number.isFinite(measured[1]) ? measured[1] / 10 ** currentDecimals : null,
-    power: Number.isFinite(measured[2]) ? measured[2] : null,
-    voltageDecimals,
-    currentDecimals,
-    output: Number.isFinite(snapshot.status) ? (snapshot.status & 0x80 ? "输出开启" : "输出关闭") : "状态未知",
-  };
-}
+const snapshotValues = supplyMeasurements;
 
 function Icon({ name, size = 20, ...props }) {
   const paths = {
@@ -370,23 +369,24 @@ const SupplyPanel = React.memo(function SupplyPanel({
   const registerSafe = Number(point.voltage) * 10 ** Number(config.voltageDecimals) <= 65535 &&
     Number(point.current) * 10 ** Number(config.currentDecimals) <= 65535;
   const outputOn = Boolean(device?.snapshot?.status & 0x80);
+  const mayBeOn=outputOn||device?.outputUncertain||(!device?.connected&&Boolean(device?.config?.device));
   const locked = device?.connected || busy;
   const patchConfig = (patch) => setConfig({ ...config, ...patch });
   const patchPoint = (patch) => setPoint({ ...point, ...patch });
   const voltageScale = 10 ** Number(config.voltageDecimals || 0);
   const currentScale = 10 ** Number(config.currentDecimals || 0);
   const brakeApplied = device?.connected && settings?.[1] === 24*voltageScale && settings?.[2] === Math.round(Number(point.current)*currentScale);
-  const outputControls = <>
-          {!motorSupply && <label>制动电流 A<input aria-label="制动电源目标电流 A" type="number" min="0" max={BRAKE_SUPPLY_CURRENT_LIMIT} step="any" value={point.current} disabled={!device?.connected || busy} onChange={(e) => patchPoint({ current: e.target.value })} /></label>}
+  const outputControls = <div className="hw-output-controls">
+          {!motorSupply && <label className="hw-current-field">制动电流 A<input aria-label="制动电源目标电流 A" type="number" min="0" max={BRAKE_SUPPLY_CURRENT_LIMIT} step="any" value={point.current} disabled={!device?.connected || busy} onChange={(e) => patchPoint({ current: e.target.value })} /></label>}
           {!withinLimits && <p className="hw-inline-error">设定值超过电源额定范围或工作台最大限幅。</p>}
           {device?.snapshot?.protection && <p className="hw-readback">设备保护读回：OVP {device.snapshot.protection.voltage} V（{device.snapshot.protection.ovpEnabled ? "已启用" : "未启用"}） / OCP {device.snapshot.protection.current} A（{device.snapshot.protection.ocpEnabled ? "已启用" : "未启用"}）</p>}
           {device?.snapshot?.ruStatus && <p className="hw-readback">{device.snapshot.ruStatus.cc ? "恒流 CC" : device.snapshot.ruStatus.cv ? "恒压 CV" : "CC/CV 未激活"} · OVP {device.snapshot.ruStatus.ovp ? "触发" : "未触发"} · OCP {device.snapshot.ruStatus.ocp ? "触发" : "未触发"} · OTP {device.snapshot.ruStatus.otp ? "触发" : "未触发"}</p>}
           <div className="hw-output-actions">
             {!motorSupply && <button className="button" disabled={!device?.connected || busy || !validPoint || !withinLimits || !registerSafe} onClick={() => onSet(supply.id)}>设置制动电流</button>}
-            <button className={`button ${outputOn?'danger':'primary'}`} disabled={!device?.connected || busy || (!outputOn && (!validPoint || !withinLimits || !registerSafe || (!motorSupply && !brakeApplied)))} onClick={() => onOutput(supply.id, !outputOn)}>{outputOn?`关闭${supply.title}`:`开启${supply.title}`}</button>
+            <button className={`button ${mayBeOn?'danger':'primary'}`} disabled={!mayBeOn&&(!device?.connected || busy || !validPoint || !withinLimits || !registerSafe || (!motorSupply && !brakeApplied))} onClick={() => onOutput(supply.id, !mayBeOn)}>{mayBeOn?`关闭${supply.title}`:`开启${supply.title}`}</button>
           </div>
-          <p className="hw-safety-note">{motorSupply?'开启时应用并读回 24 V / 10 A 后再开启输出；实际供电电流由负载决定，电机 Iq 在电机控制区设置。':'先设置目标电流，再开启。恒流时电源随负载调节实际电压，最高 24 V；实际 CC/CV 以设备反馈为准。'}断开通信不会关闭电源输出。</p>
-  </>;
+          <p className="hw-safety-note">{motorSupply?`电源在面板固定设为 24 V / ${MOTOR_SUPPLY_PRESET_CURRENT_A} A；开启时只核验预设并切换输出，不重写 V/A。电机 Iq 在电机控制区设置。`:'先设置目标电流，再开启。恒流时电源随负载调节实际电压，最高 24 V；实际 CC/CV 以设备反馈为准。'}断开通信不会关闭电源输出。</p>
+  </div>;
 
   useEffect(() => {
     try { localStorage.setItem(`motor-bench:${supply.id}:collapsed`, String(collapsed)); }
@@ -394,7 +394,8 @@ const SupplyPanel = React.memo(function SupplyPanel({
   }, [collapsed, supply.id]);
 
   return (
-    <section className="hw-supply-card" aria-label={`${supply.title}控制`}>
+    <section className={`hw-supply-card hw-compact-supply ${motorSupply ? 'is-motor-supply' : ''}`} aria-label={`${supply.title}控制`}>
+      <div className="hw-supply-summary">
       <header className="hw-supply-head">
         <span className="hw-device-icon"><Icon name={supply.icon} size={21} /></span>
         <div className="hw-supply-title"><h2>{supply.title}</h2><p>{supply.role} · {ru ? "万瑞达 RU-36-6060" : "SSJ"} · Modbus RTU</p></div>
@@ -417,13 +418,14 @@ const SupplyPanel = React.memo(function SupplyPanel({
         <div><span>{device?.snapshot?.powerCalculated ? "功率（V×A）" : "实际功率"}</span><strong>{values ? numberText(values.power, 0) : "—"}<small>W</small></strong></div>
         <div><span>设备输出</span><strong className={outputOn ? "hw-output-on" : ""}>{values ? values.output : "状态未知"}</strong></div>
       </div>
-      <div id={`${supply.id}-controls`} hidden={collapsed}>
+      </div>
+      <div className="hw-supply-body" id={`${supply.id}-controls`} hidden={collapsed}>
         {device?.error && <div className="hw-inline-error" role="alert">{device.error}</div>}
         {!bridgeReady && <div className="hw-inline-error">本机通信桥未运行，请先启动 <code>npm run hardware</code>。</div>}
         <details className="hw-connection-config" open={!device?.connected}>
           <summary>独立通信参数</summary>
           <div className="hw-form-grid">
-            {supply.id === "motor-supply" && <label>电源型号 / 协议<select aria-label="电机电源协议" value={config.protocol || "ssj"} disabled={locked} onChange={e=>patchConfig({protocol:e.target.value,ratedVoltage:"",ratedCurrent:"",parity:"N",stopbits:"1",baud:"9600",address:"1",voltageDecimals:"2",currentDecimals:"2"})}><option value="ssj">SSJ 电源</option><option value="ru">万瑞达 RU-36-6060 / RU 系列</option></select></label>}
+            {supply.id === "motor-supply" && <label>电源型号 / 协议<select aria-label="电机电源协议" value={config.protocol || "ru"} disabled={locked} onChange={e=>patchConfig({protocol:e.target.value,ratedVoltage:"",ratedCurrent:"",parity:"N",stopbits:"1",baud:"9600",address:"1",voltageDecimals:"2",currentDecimals:e.target.value==='ssj'?"3":"2"})}><option value="ru">万瑞达 RU-36-6060 / RU 系列</option><option value="ssj">SSJ 电源</option></select></label>}
             <label>传输方式<select value={config.transport} disabled={locked} onChange={(e) => patchConfig({ transport: e.target.value })}><option value="serial">{ru ? "串口 RS485 / RS232" : "串口 RS485"}</option><option value="tcp">网口 RTU 透明透传</option></select></label>
             {config.transport === "serial" ? <>
               <label>串口<select value={config.device} disabled={locked} onChange={(e) => patchConfig({ device: e.target.value })}><option value="">选择串口</option>{ports.map((port) => <option key={port.port} value={port.port}>{port.port} · {port.description}</option>)}</select></label>
@@ -452,10 +454,12 @@ const SupplyPanel = React.memo(function SupplyPanel({
           </div>
         </details>
         <div className="hw-setpoint-section">
+          <div className="hw-supply-meta">
           <div className="hw-section-title"><strong>电源输出控制</strong><span>设置值按设备读回确认</span></div>
-          <p className="hw-readback">{motorSupply?'默认供电 24 V · 电源限流 10 A':'默认恒流 CC 控制 · 电压上限 24 V · 目标电流 0–2.3 A'}</p>
+          <p className="hw-readback">{motorSupply?`面板预设 24 V · 电源限流 ${MOTOR_SUPPLY_PRESET_CURRENT_A} A · 开启不改写预设`:'默认恒流 CC 控制 · 电压上限 24 V · 目标电流 0–2.3 A'}</p>
           {!motorSupply && <p className={supplyOperatingMode(device)==='cv'?'hw-inline-error':'hw-readback'} aria-live="polite">{brakeModeText(device)}</p>}
           {settings && device?.connected && <p className="hw-readback">当前设定读回：{(settings[1] / voltageScale).toFixed(Number(config.voltageDecimals))} V / {(settings[2] / currentScale).toFixed(Number(config.currentDecimals))} A</p>}
+          </div>
           {motorSupply ? outputControls : <BrakeCurrentPanel token={token} onState={onDeviceState} onEvent={onEvent}>
             {outputControls}
           </BrakeCurrentPanel>}
@@ -468,27 +472,21 @@ const SupplyPanel = React.memo(function SupplyPanel({
 function SensorPanel({ displayRate, device, config, setConfig, ports, bridgeReady, busy, onRefreshPorts, onConnect, onDisconnect, onRead }) {
   const snapshot = device?.connected ? device.snapshot : null;
   const sensorPorts = ports.filter((port) => !/can|slcan/i.test(`${port.port} ${port.description || ""}`));
-  const powerKw = calculateShaftPowerKw(snapshot?.torque, snapshot?.speed);
   const locked = Boolean(device?.connected || busy);
   const patchConfig = (patch) => setConfig({ ...config, ...patch });
 
   return (
     <section className="hw-supply-card hw-sensor-panel" aria-label="动态扭矩传感器连接">
-      <header className="hw-supply-head">
+      <details className="hw-sensor-details" open={!device?.connected}>
+      <summary className="hw-supply-head">
         <span className="hw-device-icon"><Icon name="sensor" size={21} /></span>
         <div className="hw-supply-title"><h2>动态扭矩传感器</h2><p>{config.protocol === "hex6" ? "HEX 6 字节" : config.protocol === "hex8" ? "HEX 8 字节" : "Modbus RTU"} · RS485 · 只读采集</p></div>
         <span className={`hw-status ${device?.connected ? "is-connected" : ""}`}><i />{device?.connected ? "已连接" : "未连接"}</span>
-      </header>
-      <div className="hw-supply-readings" aria-label="扭矩传感器实际读数">
-        <div><span>输出扭矩</span><strong>{snapshot ? numberText(snapshot.torque, snapshot.torqueDecimals) : "—"}<small>N·m</small></strong></div>
-        <div><span>输出转速</span><strong>{snapshot ? numberText(snapshot.speed, snapshot.speedDecimals) : "—"}<small>rpm</small></strong></div>
-        <div><span>计算轴功率</span><strong>{powerKw == null ? "—" : powerKw.toFixed(3)}<small>kW</small></strong></div>
-        <div><span>通信校验</span><strong className={snapshot ? "hw-output-on" : ""}>{snapshot ? "CRC 有效" : "未验证"}</strong></div>
-      </div>
-      {snapshot && <p className="hw-readback">原始值：扭矩 {snapshot.rawTorque} / 转速 {snapshot.rawSpeed}；轴功率按 |扭矩 × 转速| ÷ 9550 计算。</p>}
+        <span className="hw-sensor-toggle" aria-hidden="true" />
+      </summary>
+      <div className="hw-sensor-details-body">
+      <p className="hw-readback">通信校验：{snapshot ? "CRC 有效" : "未验证"}</p>
       {snapshot?.framesReceived != null && <p className="hw-readback">目标接收 1000 次/秒 · 实际接收 {snapshot.frameRateHz} 次/秒 · 累计 {snapshot.framesReceived} 帧 · 重同步跳过 {snapshot.resyncBytes} 字节<br />后台逐帧采集，网页与曲线同步显示 {displayRate} 次/秒（上限 30）；高速缓存保留最近 60000 帧。<a className="button small" href="/api/sensors/torque-sensor/capture.csv" download>导出高速原始数据</a></p>}
-      {device?.error && <div className="hw-inline-error" role="alert">{device.error}</div>}
-      {!bridgeReady && <div className="hw-inline-error">本机通信桥未运行，请先启动 <code>npm run hardware</code>。</div>}
       <details className="hw-connection-config" open={!device?.connected}>
         <summary>独立 RS485 参数</summary>
         <div className="hw-form-grid">
@@ -512,6 +510,10 @@ function SensorPanel({ displayRate, device, config, setConfig, ports, bridgeRead
           <span className="hw-confirmation">{config.protocol === "modbus" ? "只读查询模式、停止位、小数位和测量值。" : "只接收主动上传；需设备面板设好模式与波特率，连续 CRC 帧验证后连接。"}不会清零或改写传感器参数。</span>
         </div>
       </details>
+      </div>
+      </details>
+      {device?.error && <div className="hw-inline-error" role="alert">{device.error}</div>}
+      {!bridgeReady && <div className="hw-inline-error">本机通信桥未运行，请先启动 <code>npm run hardware</code>。</div>}
     </section>
   );
 }
@@ -574,7 +576,7 @@ function Settings({ onClose, state, devices, bridgeReady, stopAll }) {
         <div className="demo-note"><strong>双电源</strong><p>电机电源与制动电源分别配置独立通信通道。断开通信不会改变设备输出状态，输出开关须以设备状态读回为准。</p></div>
       </div>
       <div className="dialog-foot">
-        <button className="button stop-all" onClick={stopAll} disabled={!state.loadEnabled}>关闭已开启的制动电源输出</button>
+        <button className="button stop-all" onClick={stopAll} disabled={!bridgeReady}>关闭制动电源输出</button>
         <button className="button primary" onClick={onClose}>完成</button>
       </div>
     </dialog>
@@ -596,6 +598,9 @@ export default function App() {
   const [characteristicView, setCharacteristicView] = useState(false);
   const [windowSeconds, setWindowSeconds] = useState(30);
   const [frozen, setFrozen] = useState(null);
+  const trial = useRef(null);
+  const [trialRun,setTrialRun] = useState(null);
+  const [frozenRun,setFrozenRun] = useState(null);
   const [events, setEvents] = useState([
     { at: new Date(), text: "真实设备模式已就绪；全部接口初始为未连接。" },
   ]);
@@ -642,6 +647,7 @@ export default function App() {
   const token = useRef("");
   const inFlight = useRef(new Set());
   const supplyReads = useRef(new Map());
+  const supplyGeneration = useRef({});
   const devicesRef = useRef(devices);
   const configsRef = useRef(configs);
   const pageStart = useRef(performance.now());
@@ -721,6 +727,7 @@ export default function App() {
       brakeSupplyVoltage: brakeValues?.voltage ?? null,
       brakeSupplyCurrent: brakeValues?.current ?? null,
       brakeSupplyPower: brakeValues?.power ?? null,
+      brakeSupplyReceivedAt: brake?.snapshot?.receivedAt ?? null,
       targetSpeed: null,
       targetCurrent: Number.isFinite(engine.current.targetCurrent) ? engine.current.targetCurrent : null,
       motorEnabled: deviceSet["current-motor"]?.connected ? deviceSet["current-motor"].snapshot?.motor?.output_on ?? null : null,
@@ -772,6 +779,7 @@ export default function App() {
     engine.current = { ...engine.current, t: elapsed };
     setState(engine.current);
     const sample = hardwareSample(deviceSet, elapsed);
+    appendTrialSamples([sample]);
     setSamples(previous => appendSamples(previous, [sample], LIVE_SAMPLE_LIMIT));
     if (recording.current) {
       const recordedSample = { ...sample, t: Math.max(0, elapsed - recording.current.engineOrigin) };
@@ -800,6 +808,7 @@ export default function App() {
         snapshot,
         run: payload?.run || previous[id]?.run || {},
         error: payload?.error || "",
+        outputUncertain:payload?.outputUncertain??previous[id]?.outputUncertain??false,
       },
     };
     devicesRef.current = next;
@@ -875,14 +884,16 @@ export default function App() {
     if (!token.current || inFlight.current.has(id)) return;
     if (supplyReads.current.has(id)) return supplyReads.current.get(id);
     const request = (async () => {
+      const generation=supplyGeneration.current[id]||0;
       if (!quiet) setBusy(previous => ({ ...previous, [id]: true }));
       try {
         const payload = await fetchJson(`/api/supplies/${id}/read`, {
           method: "POST", headers: { "X-MotorBench-Token": token.current },
           signal: AbortSignal.timeout(4000),
         });
-        updateDevice(id, payload, { capture: true });
+        if(generation===(supplyGeneration.current[id]||0))updateDevice(id, payload, { capture: true });
       } catch (error) {
+        if(generation!==(supplyGeneration.current[id]||0))return;
         if (error.payload && typeof error.payload.connected === "boolean") updateDevice(id, error.payload);
         else updateDevice(id, { connected: false, error: error.message });
       } finally {
@@ -1085,6 +1096,7 @@ export default function App() {
         if (pending.length) {
           paintCount++;
           const points = pending; pending = [];
+          appendTrialSamples(points);
           const reset = resetView; resetView = false;
           engine.current.t = points.at(-1).t;
           setSamples(previous => appendSamples(reset ? [] : previous, points, LIVE_SAMPLE_LIMIT));
@@ -1129,17 +1141,23 @@ export default function App() {
   }, []);
 
   async function runAction(id, action, payload = {}, successText = "操作完成") {
-    if (!token.current || inFlight.current.has(id)) return;
+    const stopping=action==='output'&&payload.on===false;
+    if (!token.current || (!stopping&&inFlight.current.has(id))) return;
+    const generation=(supplyGeneration.current[id]||0)+1;
+    supplyGeneration.current[id]=generation;
     inFlight.current.add(id);
     setBusy((previous) => ({ ...previous, [id]: true }));
     try {
       // Queue the user's operation behind the current read instead of dropping the click.
-      await supplyReads.current.get(id);
+      if(!stopping)await supplyReads.current.get(id);
       const result = await fetchJson(`/api/supplies/${id}/${action}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-MotorBench-Token": token.current },
         body: JSON.stringify(payload),
+        signal:AbortSignal.timeout(stopping?15000:12000),
       });
+      if(generation!==supplyGeneration.current[id])return;
+      if(stopping && ((result.snapshot||result).status&128))throw new Error('电源输出关闭尚未确认，请重试关闭');
       updateDevice(id, result, { capture: true });
       const resultSnapshot = result.snapshot || (Array.isArray(result.measured) ? result : null);
       if (result.connected && resultSnapshot?.settings && ['connect','set','output'].includes(action)) {
@@ -1158,12 +1176,15 @@ export default function App() {
       }
       setToast(successText);
     } catch (error) {
+      if(generation!==supplyGeneration.current[id])return;
       if (error.payload && typeof error.payload.connected === "boolean") updateDevice(id, error.payload);
       else updateDevice(id, { connected: false, error: error.message });
       setDevices((previous) => ({ ...previous, [id]: { ...previous[id], error: error.message } }));
     } finally {
-      inFlight.current.delete(id);
-      setBusy((previous) => ({ ...previous, [id]: false }));
+      if(generation===supplyGeneration.current[id]){
+        inFlight.current.delete(id);
+        setBusy((previous) => ({ ...previous, [id]: false }));
+      }
     }
   }
 
@@ -1171,7 +1192,7 @@ export default function App() {
     const config = configs[id];
     const common = {
       transport: config.transport,
-      protocol: config.protocol || "ssj",
+      protocol: config.protocol || (id === "motor-supply" ? "ru" : "ssj"),
       address: Number(config.address),
       voltageDecimals: Number(config.voltageDecimals),
       currentDecimals: Number(config.currentDecimals),
@@ -1193,39 +1214,25 @@ export default function App() {
     connectionSweep.current = true;
     setConnectingAll(true);
     setConnectionReport([]);
-    const report = [];
     try {
       await refreshPorts(false);
-      const jobs = [
-        ...SUPPLIES.map(supply => ({ id: supply.id, name: supply.title,
-          connect: () => connectSupply(supply.id),
-          missing: configs[supply.id].transport === "serial"
-            ? !configs[supply.id].device && "未配置串口，请展开该接口选择串口"
-            : !configs[supply.id].host && "未配置网关地址" })),
-        { id: "torque-sensor", name: "动态扭矩传感器", connect: connectTorqueSensor,
-          missing: !sensorConfig.device && "未配置串口，请展开传感器参数选择串口" },
-        { id: "current-motor", name: "电机驱动板", connect: async () => {
-          try {
-            const result = await fetchJson("/api/motor-current/connect", {
-              method: "POST", headers: { "Content-Type": "application/json", "X-MotorBench-Token": token.current },
-              body: "{}" });
-            updateDevice("current-motor", result);
-          } catch (error) { updateDevice("current-motor", { connected: false, error: error.message }); }
-        } },
-      ];
-      for (const job of jobs) {
-        setConnectionReport([...report, `${job.name}：正在检查…`]);
-        if (!devicesRef.current[job.id]?.connected) {
-          if (job.missing) { report.push(`${job.name}：未连接，${job.missing}`); continue; }
-          if (inFlight.current.has(job.id)) { report.push(`${job.name}：正在通信，请稍后重试`); continue; }
-          await job.connect();
-        }
-        const device = devicesRef.current[job.id];
-        report.push(`${job.name}：${device?.connected ? "已连接（真实通信验证通过）" : `未连接，${device?.error || "未收到有效设备应答"}`}`);
-        setConnectionReport([...report]);
+      const hints = Object.fromEntries(SUPPLIES.map(supply => [supply.id, connectionPayload(supply.id)]));
+      hints["torque-sensor"] = sensorConfig;
+      let progress = await fetchJson('/api/connections/start', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MotorBench-Token': token.current },
+        body: JSON.stringify(hints), signal: AbortSignal.timeout(5000),
+      });
+      setConnectionReport(progress.report || []);
+      while (progress.running) {
+        await new Promise(resolve => window.setTimeout(resolve, 400));
+        progress = await fetchJson('/api/connections/status', { signal: AbortSignal.timeout(5000), cache: 'no-store' });
+        setConnectionReport(progress.report || []);
       }
-      setConnectionReport(report);
-      addEvent(`一键连接完成：${report.join("；")}`);
+      const health = await fetchJson('/api/health', { signal: AbortSignal.timeout(5000) });
+      for (const [id, device] of Object.entries(health.channels || {})) updateDevice(id, device);
+      addEvent(`一键连接完成：${(progress.report || []).join("；")}`);
+    } catch (error) {
+      setConnectionReport(previous => [...previous, `连接检查中断：${error.message}；可再次点击查看/继续`]);
     } finally { connectionSweep.current = false; setConnectingAll(false); }
   }
 
@@ -1242,15 +1249,12 @@ export default function App() {
   }
 
   const stopAll = () => {
-    if (devicesRef.current["brake-supply"]?.connected && engine.current.loadEnabled === true)
-      setSupplyOutput("brake-supply", false);
-    else setToast("当前没有可关闭且已连接的制动电源输出");
+    setSupplyOutput("brake-supply", false);
   };
   const changeRange = (value) => {
     if (recording.current || backendSessionRef.current?.running || engine.current.loadEnabled === true) return;
     update({ range: Number(value) === 100 ? 100 : 50 });
     setSamples([]);
-    setFrozen(null);
     addEvent(`切换扭矩传感器量程配置至 ${value} N·m。`);
   };
   const startRecord = async () => {
@@ -1338,6 +1342,35 @@ export default function App() {
     return () => window.removeEventListener("storage", syncRecords);
   }, []);
 
+  function appendTrialSamples(points) {
+    const trace=trial.current;
+    if(trace?.append(points)&&trace.run.measurementEndedAt) {
+      setFrozen(trace.snapshot());setFrozenRun(trace.run);
+    }
+  }
+  function coupledState(run) {
+    if (!run.id)return;
+    if (run.running && trial.current?.run.id!==run.id) {
+      trial.current=new LoadTrial(run);
+      setFrozen(null);setFrozenRun(null);setCharacteristicView(true);
+    }
+    if (trial.current?.run.id!==run.id)return;
+    const wasRunning=trial.current.run.running;
+    const previousCutoff=trial.current.run.measurementEndedAt;
+    trial.current.update(run);
+    setTrialRun(run);
+    if ((run.measurementEndedAt&&!previousCutoff)||(wasRunning && !run.running)) {
+      const measured=trial.current.snapshot();
+      // Keep an empty completed trace for delayed final batches; never replace
+      // a stopped trial with live readings while waiting for those samples.
+      setFrozen(measured);setFrozenRun(run);
+    }
+  }
+  function resumeChart() {
+    trial.current=null;setTrialRun(null);setFrozen(null);setFrozenRun(null);
+  }
+  const curveSamples=useMemo(()=>frozen || (trial.current?.run.running ? trial.current.snapshot():samples),[frozen,samples,trialRun]);
+  const fullTrial=Boolean(frozenRun || trialRun?.running);
   const actions = useLiveActions({
     addEvent, connectSupply, disconnectSupply, readSupply, setSupplyValues, setSupplyOutput,
     refreshPorts: () => refreshPorts(true),
@@ -1345,6 +1378,8 @@ export default function App() {
     updateDevice,
     showSupplies: () => document.getElementById("supply-controls")?.scrollIntoView({ behavior: "smooth", block: "start" }),
     motorState: payload => updateDevice("current-motor", payload),
+    coupledStart: () => {setCharacteristicView(true);},
+    coupledState,
   });
   const supplyActions = useMemo(() => Object.fromEntries(SUPPLIES.map(({id}) => [id, {
     onDeviceState: payload => actions.updateDevice(id, payload),
@@ -1354,6 +1389,7 @@ export default function App() {
 
   const sample = hardwareSample();
   const motorTemperature = motorTemperatureC(devices["current-motor"]);
+  const liveCurrents = motorLiveCurrents(devices["current-motor"]);
   const lastRecord = records[0];
   const lastFullRecord = backendSession && !backendSession.running ? backendSession : fullHistory.find(row=>!row.running);
   const rangeLocked = Boolean(activeRecord || state.loadEnabled === true);
@@ -1490,7 +1526,7 @@ export default function App() {
           <button
             className="button stop-all"
             onClick={stopAll}
-            disabled={!state.supplyConnected || state.loadEnabled !== true}
+            disabled={!bridgeReady}
             title="关闭制动电源输出；电机输出使用电流环面板停止"
           >
             <Icon name="stop" size={15} />
@@ -1524,7 +1560,7 @@ export default function App() {
           </button>
           <div role="status" aria-live="polite">
             {connectionReport.length ? connectionReport.map((line, index) => <p key={index}>{line}</p>)
-              : <p>按已保存的通信参数逐个连接四个接口，连接成功后不自动开启输出。</p>}
+              : <p>自动发现设备，按本机记住的 USB 标识恢复连接；首次使用的同型号电源需指定供电对象。连接不自动开启输出。</p>}
           </div>
         </section>
         {storageError && (
@@ -1640,7 +1676,7 @@ export default function App() {
                       <Icon name="pulse" size={19} />
                     </div>
                     <div className="value">
-                      <span>{display(sample.speed, Number(sample.speedDecimals ?? 1))}</span>
+                      <span>{display(sample.speed, 0)}</span>
                       <small>rpm</small>
                     </div>
                     <div className="reading-foot">
@@ -1658,23 +1694,31 @@ export default function App() {
                     <div className="reading-foot"><span>{Number.isFinite(sample.shaftPowerKw) ? `${sample.shaftPowerKw.toFixed(6)} kW` : "传感器未连接 · 无功率读数"}</span></div>
                     <div className="secondary-line">手册公式：P = |T × n| / 9550</div>
                   </article>
-                  <article className="reading">
+                  <article className="reading current-reading" aria-label="电机目标与实时电流">
                     <div className="reading-label">
-                      <span>电机输出目标电流</span>
+                      <span>电机电流</span>
                       <Icon name="power" size={18} />
                     </div>
-                    <div className="value">
-                      <span>{display(sample.current, 3)}</span>
-                      <small>A</small>
+                    <div className="current-line current-iq">
+                      <span>实时 Iq</span><strong>{display(liveCurrents.iq, 3)} <small>A</small></strong>
+                    </div>
+                    <div className="current-line">
+                      <span>目标 Iq</span><strong>{display(sample.current, 3)} <small>A</small></strong>
+                    </div>
+                    <div className="current-phases" aria-label="三相瞬时电流">
+                      {['ia', 'ib', 'ic'].map((key, index) => <div className="current-line" key={key}>
+                        <span>{['A', 'B', 'C'][index]} 相</span><strong>{display(liveCurrents[key], 3)} <small>A</small></strong>
+                      </div>)}
                     </div>
                     <div className="reading-foot">
                       <span className={state.loadEnabled ? "running-text" : ""}>
-                        {!state.motorConnected ? "电机未连接 · 无目标电流"
+                        {!state.motorConnected ? "电机未连接"
                           : state.motorEnabled ? "电机输出已开启" : "电机输出已关闭"}
                       </span>
                     </div>
                     <div className="secondary-line">
-                      {Number.isFinite(sample.current) ? `已应答目标 Iq ${sample.current.toFixed(3)} A` : "未读取到电机目标电流"}
+                      {liveCurrents.iq == null || [liveCurrents.ia, liveCurrents.ib, liveCurrents.ic].some(value => value == null)
+                        ? "— 表示反馈缺失或已过期" : "三相为瞬时采样值"}
                     </div>
                   </article>
                   <article className="reading" aria-label="电机温度读数">
@@ -1683,7 +1727,8 @@ export default function App() {
                     <div className="reading-foot"><span>{!state.motorConnected ? "电机未连接 · 无温度读数"
                       : devices["current-motor"]?.snapshot?.ntc?.fault ? "NTC 故障"
                       : motorTemperature == null ? "温度无效或已过期"
-                      : devices["current-motor"]?.snapshot?.ntc?.over || devices["current-motor"]?.snapshot?.ntc?.tripped_latched ? "过温保护" : "NTC 实时反馈"}</span></div>
+                      : devices["current-motor"]?.snapshot?.ntc?.tripped_latched || (Number.isFinite(devices["current-motor"]?.snapshot?.ntc?.limit_c) && motorTemperature >= devices["current-motor"].snapshot.ntc.limit_c) ? "过温保护"
+                      : devices["current-motor"]?.snapshot?.ntc?.over ? "温度偏高 · 暂不可重新启动" : "NTC 实时反馈"}</span></div>
                   </article>
                 </div>
                 <section className="panel chart-panel">
@@ -1692,14 +1737,15 @@ export default function App() {
                       <h2>{characteristicView ? "扭矩特性曲线" : "实时曲线"}</h2>
                       <span className="panel-caption">
                         {frozen
-                          ? "视图已暂停 · 采集仍在继续"
-                          : "真实设备读回 · 未接入的通道保留空值"}
+                          ? (frozenRun ? `试验曲线已保留 · ${frozenRun.reason || '试验结束'}` : "视图已暂停 · 采集仍在继续")
+                          : fullTrial ? "本次固定负载试验全过程 · 实测数据" : "真实设备读回 · 未接入的通道保留空值"}
                       </span>
                     </div>
                     <div className="chart-tools">
                       <select
                         aria-label="曲线时间范围"
                         value={windowSeconds}
+                        disabled={fullTrial}
                         onChange={(e) =>
                           setWindowSeconds(Number(e.target.value))
                         }
@@ -1709,7 +1755,7 @@ export default function App() {
                       </select>
                       <button
                         className={`button small ${frozen ? "selected" : ""}`}
-                        onClick={() => setFrozen(frozen ? null : [...samples])}
+                        onClick={() => {if(frozen)resumeChart();else {setFrozen([...curveSamples]);setFrozenRun(trialRun);}}}
                       >
                         <Icon name={frozen ? "play" : "pause"} size={15} />
                         {frozen ? "恢复实时" : "暂停曲线"}
@@ -1753,10 +1799,10 @@ export default function App() {
                     </span>
                   </div>
                   <Plot
-                    samples={frozen || samples}
+                    samples={curveSamples}
                     metric={metric}
                     range={state.range}
-                    windowSeconds={windowSeconds}
+                    windowSeconds={fullTrial?Math.max(windowSeconds,(curveSamples.at(-1)?.t||0)-(curveSamples[0]?.t||0)):windowSeconds}
                     paused={Boolean(frozen)}
                     empty={!metricHasData && !frozen}
                     onConnect={actions.showSupplies}
@@ -1775,7 +1821,8 @@ export default function App() {
                     <span>时间 / mm:ss · 断开处保留缺口</span>
                   </div>
                   </>}
-                  {characteristicView && <TorqueCharacteristics samples={frozen || samples} windowSeconds={windowSeconds} />}
+                  {characteristicView && <TorqueCharacteristics samples={curveSamples} windowSeconds={fullTrial?Infinity:windowSeconds}
+                    loadRun={frozenRun || (trialRun?.running?trialRun:null)} />}
                 </section>
                 <section
                   className={`panel recording-panel ${activeRecord ? "is-recording" : ""}`}
@@ -1889,11 +1936,24 @@ export default function App() {
                 </section>
               </section>
               <aside className="control-area" aria-label="试验控制">
+                <CoupledCurrentPanel token={token} bridgeReady={bridgeReady}
+                  curveHeld={Boolean(frozenRun && !trialRun?.running)}
+                  sensorConnected={Boolean(devices['torque-sensor']?.connected)}
+                  outputSpeedRpm={devices['torque-sensor']?.connected && Number.isFinite(devices['torque-sensor']?.snapshot?.speed)
+                    && Date.now()/1000-devices['torque-sensor'].snapshot.receivedAt<=1.5
+                    ?Math.abs(devices['torque-sensor'].snapshot.speed):null}
+                  motorSupplyOn={Boolean(devices['motor-supply']?.connected && (devices['motor-supply']?.snapshot?.status & 128))}
+                  onMotorState={actions.motorState} onBrakeState={supplyActions['brake-supply'].onDeviceState}
+                  onEvent={actions.addEvent} onStart={actions.coupledStart} onRunState={actions.coupledState} />
+                <details className="motor-single-controls">
+                  <summary>电机单独控制 / 详细反馈</summary>
                 <MotorCurrentPanel token={token} bridgeReady={bridgeReady}
                   onState={actions.motorState} onEvent={actions.addEvent} />
+                </details>
                 <div className="control-hint"><Icon name="info" size={17} /><p>扭矩和转速必须来自真实传感器。制动电源的 V/A 设置与输出状态由设备应答确认。</p></div>
               </aside>
             </div>
+            <EncoderCompareView devices={devices} />
           </>
         ) : view === "specialized" ? (
           <SpecializedTestsPanel token={token} bridgeReady={bridgeReady} onWorkbench={setView} />

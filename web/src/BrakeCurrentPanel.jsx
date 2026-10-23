@@ -36,7 +36,7 @@ export default function BrakeCurrentPanel({token,onState,onEvent,children}) {
         if(active && epoch===actionEpoch.current && !pendingActions.current){
           setRun(data.run||{});setDevice(data.device||{connected:false});
           setError(previous=>previous.startsWith('制动步进状态读取失败')?'':previous);
-          if(data.run?.running)setMode('step');
+          if(data.run?.running&&data.run.mode!=='torque')setMode('step');
         }
       }catch {if(active && epoch===actionEpoch.current && !pendingActions.current)setError('制动步进状态读取失败；可尝试停止制动输出。');}
       finally {polling=false;}
@@ -54,9 +54,11 @@ export default function BrakeCurrentPanel({token,onState,onEvent,children}) {
     actionEpoch.current++;pendingActions.current++;
     setBusy(true);setError('');setMessage(name==='start'?'正在启动制动电流步进…':'正在关闭制动输出…');
     try {
-      const health=await fetch('/api/health',{cache:'no-store',signal:AbortSignal.timeout(2500)});
-      if(!health.ok)throw new Error('通信桥不可用');
-      token.current=(await health.json()).token;
+      if(name!=='stop'||!token.current){
+        const health=await fetch('/api/health',{cache:'no-store',signal:AbortSignal.timeout(2500)});
+        if(!health.ok)throw new Error('通信桥不可用');
+        token.current=(await health.json()).token;
+      }
       const response=await fetch(`/api/brake-current/${name}`,{
         method:'POST',headers:{'Content-Type':'application/json','X-MotorBench-Token':token.current},
         body:JSON.stringify(name==='start'?Object.fromEntries(Object.entries(form).map(([k,v])=>[k,Number(v)])):{}),
@@ -74,12 +76,18 @@ export default function BrakeCurrentPanel({token,onState,onEvent,children}) {
   }
   const measured=device.connected?device.snapshot?.measured?.[1]:null;
   const current=Number.isFinite(measured)?(measured/10**Number(device.config?.currentDecimals??3)).toFixed(3):'—';
-  return <>
-    <div className="hw-output-actions" aria-label="制动控制模式">
+  if(run.running&&run.mode==='torque')return <div className="brake-control-panel">
+    <p className="hw-readback">力矩测试已接管制动电源 · 目标 {Number(run.targetNm||0).toFixed(2)} N·m · 实际电流 {current} A</p>
+    <p className="hw-safety-note">加载由曲线旁的两阶段测试统一控制。</p>
+    <button className="button danger" onClick={()=>action('stop')}>停止两路输出</button>
+    {error&&<p className="hw-inline-error" role="alert">{error}</p>}
+  </div>;
+  return <div className="brake-control-panel">
+    <div className="hw-output-actions brake-mode-tabs" aria-label="制动控制模式">
       <button className={`button ${mode==='manual'?'primary':''}`} disabled={busy||run.running} aria-pressed={mode==='manual'} onClick={()=>setMode('manual')}>手动定值</button>
       <button className={`button ${mode==='step'?'primary':''}`} disabled={busy||run.running} aria-pressed={mode==='step'} onClick={()=>setMode('step')}>电流步进</button>
     </div>
-    {mode==='manual'?children:<>
+    {mode==='manual'?children:<div className="brake-step-controls">
       <div className="hw-form-grid">
         {[
           ['stepA','制动电流步长 A','0.001','0.001','2.3'],
@@ -99,8 +107,8 @@ export default function BrakeCurrentPanel({token,onState,onEvent,children}) {
       {run.limitReached&&<p className="hw-readback">已达到限幅，保持到持续时间结束。</p>}
       {run.reason&&<p className="hw-readback">结束原因：{run.reason}</p>}
       {run.stopConfirmed===false&&!run.running&&<p className="hw-inline-error">制动输出关闭未确认，请现场关闭电源。</p>}
-    </>}
+    </div>}
     {message&&<p className="hw-readback" role="status">{message}</p>}
     {error&&<p className="hw-inline-error" role="alert">{error}</p>}
-  </>;
+  </div>;
 }

@@ -2642,9 +2642,10 @@ h1 {
 }
 .hw-supply-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
+  margin-bottom: 16px;
 }
 .hw-supply-card,
 .hw-pending-panel,
@@ -3109,3 +3110,167 @@ h1 {
 .auto-summary > div { padding: 12px; border-radius: 8px; background: #f1f5f9; display: grid; gap: 8px; }
 .auto-summary span { font-size: 12px; color: #576b82; }
 .auto-summary strong { font-size: 18px; color: #203852; }
+
+/* Compact PSU rows: every control uses the full card width, with no empty side column. */
+.hw-compact-supply { padding: 12px 16px; }
+.hw-supply-summary {
+  display: grid;
+  grid-template-columns: minmax(320px, .9fr) minmax(0, 1.4fr);
+  align-items: center;
+  gap: 20px;
+}
+.hw-compact-supply .hw-supply-head { padding: 0; border: 0; gap: 8px; }
+.hw-compact-supply .hw-supply-readings {
+  padding: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.hw-compact-supply .hw-supply-readings > div { padding: 7px 10px; }
+.hw-compact-supply .hw-supply-readings > div > span { margin-bottom: 3px; }
+.hw-supply-body { border-top: 1px solid #edf0f3; margin-top: 10px; padding-top: 8px; }
+.hw-compact-supply .hw-connection-config { padding: 0; border: 0; }
+.hw-compact-supply .hw-connection-config:not([open]) { float: right; margin-left: 16px; }
+.hw-compact-supply .hw-connection-config summary { padding: 2px 0; font-size: 12px; }
+.hw-compact-supply .hw-connection-config[open] { margin-bottom: 10px; }
+.hw-compact-supply .hw-setpoint-section { padding-top: 0; }
+.hw-supply-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 8px; }
+.hw-supply-meta .hw-readback, .hw-supply-meta .hw-inline-error { margin: 0; }
+.hw-supply-meta .hw-section-title { gap: 8px; }
+.hw-output-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 10px; }
+.hw-current-field { flex: 0 1 160px; display: flex; flex-direction: column; gap: 4px; min-width: 0; color: #68778a; font-size: 11px; }
+.hw-current-field input { width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid #dce3eb; border-radius: 5px; color: #314258; background: #fff; font: inherit; font-size: 13px; }
+.hw-current-field input:disabled { background: #f4f6f8; color: #778394; }
+.hw-output-controls > .hw-output-actions { margin: 0; }
+.hw-output-controls > .hw-inline-error, .hw-output-controls > .hw-readback { flex-basis: 100%; order: 2; margin: 0; }
+.hw-output-controls > .hw-safety-note { flex-basis: 100%; order: 3; margin: 0; }
+.brake-control-panel { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; }
+.brake-control-panel .brake-mode-tabs { margin-top: 18px; align-self: start; flex-wrap: nowrap; }
+.brake-step-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 10px; min-width: 0; }
+.brake-step-controls > .hw-form-grid { flex: 1 1 420px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; gap: 8px; }
+.brake-step-controls > .hw-output-actions { margin: 0; flex-wrap: nowrap; order: 1; }
+.brake-step-controls > .hw-safety-note { flex-basis: 100%; margin: 0; order: 2; }
+.brake-step-controls > .hw-readback { margin: 0; order: 3; }
+.brake-step-controls > .hw-inline-error { flex-basis: 100%; margin: 0; order: 4; }
+.brake-control-panel > .hw-readback, .brake-control-panel > .hw-inline-error { grid-column: 1 / -1; margin: 0; }
+.is-motor-supply .hw-setpoint-section { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; }
+.is-motor-supply .hw-supply-meta { flex: 1 1 500px; margin: 0; }
+.is-motor-supply .hw-output-controls { display: contents; }
+@media (max-width: 1100px) {
+  .hw-supply-summary { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .brake-step-controls > .hw-form-grid { flex-basis: 100%; }
+}
+@media (max-width: 850px) {
+  .brake-control-panel { grid-template-columns: minmax(0, 1fr); }
+  .brake-control-panel .brake-mode-tabs { margin-top: 0; }
+  .hw-compact-supply .hw-connection-config:not([open]) { float: none; margin: 0 0 8px; }
+}
+@media (max-width: 580px) {
+  .hw-compact-supply .hw-supply-readings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .hw-supply-summary .hw-supply-head { flex-wrap: wrap; }
+  .brake-step-controls > .hw-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .brake-step-controls > .hw-output-actions { flex-wrap: wrap; }
+}
+
+/* Connection diagnostics stay available without separating the load controls from live readings. */
+.hw-sensor-panel { padding: 10px 16px; }
+.hw-sensor-details > .hw-supply-head { padding: 0; border: 0; cursor: pointer; list-style: none; }
+.hw-sensor-details > .hw-supply-head::-webkit-details-marker { display: none; }
+.hw-sensor-details > .hw-supply-head:focus-visible { outline: 2px solid #7298c1; outline-offset: 4px; border-radius: 4px; }
+.hw-sensor-details .hw-device-icon { width: 32px; height: 32px; }
+.hw-sensor-details .hw-supply-title { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 12px; }
+.hw-sensor-details .hw-supply-title p { margin: 0; }
+.hw-sensor-toggle { color: #68778a; font-size: 11px; white-space: nowrap; }
+.hw-sensor-toggle::after { content: "通信详情 ⌄"; }
+.hw-sensor-details[open] .hw-sensor-toggle::after { content: "收起详情 ⌃"; }
+.hw-sensor-details-body { margin-top: 10px; padding-top: 4px; border-top: 1px solid #edf0f3; }
+@media (max-width: 580px) {
+  .hw-sensor-details > .hw-supply-head { flex-wrap: wrap; gap: 8px; }
+  .hw-sensor-details .hw-supply-title { min-width: 120px; }
+}
+
+/* Only the current-loop panel: paired readings and a single row of step inputs. */
+.motor-current-panel.control-panel { padding: 14px 12px 10px; }
+.motor-current-panel .control-title { margin-bottom: 8px; gap: 6px; }
+.motor-current-panel .control-title > div > span { margin-top: 2px; }
+.motor-current-panel .hw-connection-actions { margin-top: 0; gap: 6px; }
+.motor-current-panel .hw-connection-actions .button { min-height: 32px; padding: 6px 9px; }
+.motor-current-panel .motor-connection-info { margin-top: 6px; line-height: 1.5; }
+.motor-current-panel .motor-output-state {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px;
+  margin: 8px 0 0; padding: 6px 8px; border: 1px solid #e4eaf0;
+  border-radius: 5px; color: #68778a; font-size: 11px; line-height: 1.5;
+}
+.motor-current-panel .motor-output-state strong { color: #27384e; font-size: 12px; }
+.motor-current-panel .motor-current-readings { padding: 8px 0; gap: 6px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.motor-current-panel .motor-current-readings > div { padding: 6px 8px; }
+.motor-current-panel .motor-current-readings > div > span { margin-bottom: 3px; line-height: 1.4; }
+.motor-current-panel .motor-current-readings > div > strong { font-size: 15px; line-height: 1.25; }
+.motor-current-panel .motor-current-readings > div > strong + span { margin: 2px 0 0; font-size: 9px; }
+.motor-current-panel .hw-form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 4px 0 8px; }
+.motor-current-panel .hw-form-grid label { gap: 4px; font-size: 10px; }
+.motor-current-panel .hw-form-grid input { min-height: 34px; padding: 6px; font-size: 12px; }
+.motor-current-panel .motor-current-help { margin: 0 0 8px; color: #68778a; font-size: 11px; }
+.motor-current-panel .motor-current-help > summary { cursor: pointer; padding: 3px 0; }
+.motor-current-panel .motor-current-help .hw-safety-note { margin-top: 4px; }
+.motor-current-panel .hw-output-actions { margin-top: 8px; gap: 6px; }
+.motor-current-panel .hw-output-actions .button { min-height: 36px; padding: 7px 9px; }
+.motor-current-panel > .hw-readback, .motor-current-panel > .hw-safety-note { margin-top: 6px; }
+
+.coupled-current-panel { padding: 14px 12px; }
+.coupled-current-panel .control-title { margin-bottom: 10px; }
+.coupled-device { padding: 9px 0; border-top: 1px solid #e4eaf0; }
+.coupled-device-title { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; color: #314258; font-size: 12px; }
+.coupled-device-title > span { color: #68778a; font-size: 10px; }
+.coupled-current-panel .hw-form-grid { margin-top: 7px; gap: 8px; }
+.coupled-current-panel .hw-form-grid input { min-height: 34px; padding: 6px 8px; }
+.coupled-current-panel .coupled-duration { grid-template-columns: 1fr; padding-top: 8px; border-top: 1px solid #e4eaf0; }
+.coupled-current-panel .hw-output-actions { margin-top: 10px; gap: 6px; }
+.coupled-current-panel .hw-output-actions .button { min-height: 36px; padding: 7px 8px; }
+.coupled-help { color: #68778a; font-size: 11px; margin-top: 8px; }
+.coupled-help > summary, .motor-single-controls > summary { cursor: pointer; }
+.motor-single-controls { min-width: 0; }
+.motor-single-controls > summary { padding: 10px 12px; color: #40536b; background: #fff; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+.motor-single-controls[open] > summary { margin-bottom: 8px; }
+@media (max-width: 850px) {
+  .control-area > .coupled-current-panel,
+  .control-area > .motor-single-controls { grid-column: 1 / -1; }
+}
+.characteristic-load { display:flex; flex-direction:column; align-items:flex-end; gap:4px; margin:0 0 12px; color:#24364b; font-size:13px; text-align:right; }
+.characteristic-load small { color:#64748b; }
+.torque-characteristics .characteristic-load-svg { font-size:12px; fill:#24364b; font-weight:600; }
+
+/* Six-axis motor chart follows the supplied square-grid performance sheet. */
+.characteristic-scroll .motor-performance-chart {
+  min-width: 780px;
+  font-family: "Times New Roman", "Noto Serif", serif;
+  font-size: 21px;
+  font-weight: 400;
+}
+.motor-performance-chart .performance-axis-unit { font-size: 22px; }
+.motor-performance-chart .performance-chart-title { font-family: inherit; font-size: 21px; fill: #252525; }
+.motor-performance-chart .performance-curve-label { font-size: 18px; paint-order: stroke; stroke: white; stroke-width: 3px; stroke-linejoin: round; }
+.characteristic-axis-tools { flex-wrap: wrap; gap: 10px 16px; }
+.characteristic-axis-tools label { display: flex; align-items: center; gap: 6px; color: #53657c; font-size: 12px; }
+.characteristic-axis-tools input { width: 78px; }
+.characteristic-expanded .characteristic-scroll .motor-performance-chart { min-width: 0; max-height: none; min-height: 0; }
+
+.current-reading .current-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #627187;
+}
+.current-reading .current-line strong {
+  color: #2b3b53;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.current-reading .current-line small { font-size: 10px; color: #647389; }
+.current-reading .current-iq { margin-top: 8px; }
+.current-reading .current-iq strong { font-size: 23px; }
+.current-reading .current-phases { border-top: 1px solid var(--border); padding-top: 5px; margin: 5px 0; }
+.current-reading .reading-foot { white-space: normal; }

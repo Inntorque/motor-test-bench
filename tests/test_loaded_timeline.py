@@ -70,6 +70,37 @@ class FixedLoadedTests(unittest.TestCase):
             self.auto.start(self.config() | {'targetIqA': 1.1})
         self.assertEqual(self.motor.writes, [])
 
+    def test_loaded_speed_uses_rotor_units_and_preserves_firmware_settings(self):
+        self.auto.start(self.config() | {'loadedMode':'speed_hold','targetSpeedRpm':1.5})
+        report=self.finish()
+        self.assertEqual(report['outcome'],'duration_complete')
+        self.assertTrue(report['stopConfirmed'])
+        self.assertEqual(report['steps'][0]['targetSpeedRpm'],1.5)
+        self.assertTrue(any('mode=2' in route for route in self.motor.writes))
+        self.assertTrue(any('field=speed_rpm&value=15.0' in route for route in self.motor.writes))
+        self.assertFalse(any('/api/set?' in route for route in self.motor.writes))
+        self.assertTrue(all('value=0' in route for route in self.motor.writes if 'field=current_a' in route))
+        self.assertGreater(report['timeline']['counts']['sensor_frame'],500)
+
+    def test_loaded_speed_invalid_targets_cannot_enable(self):
+        for target in (0,.01,-.01,float('nan'),float('inf'),2.01,-2.01):
+            with self.assertRaises(ValueError):
+                self.auto.start(self.config() | {'loadedMode':'speed_hold','targetSpeedRpm':target})
+        self.supply_online=False
+        with self.assertRaises(ValueError):
+            self.auto.start(self.config() | {'loadedMode':'speed_hold','targetSpeedRpm':1})
+        self.assertEqual(self.motor.writes,[])
+
+    def test_reverse_speed_preserves_sign_and_same_stop_guards(self):
+        self.auto.start(self.config() | {'loadedMode':'speed_hold','targetSpeedRpm':-1.5})
+        report=self.finish()
+        self.assertEqual(report['outcome'],'duration_complete')
+        self.assertTrue(report['stopConfirmed'])
+        self.assertEqual(report['steps'][0]['targetSpeedRpm'],-1.5)
+        self.assertTrue(any('field=speed_rpm&value=-15.0' in route for route in self.motor.writes))
+        self.assertFalse(any('/api/set?' in route for route in self.motor.writes))
+        self.assertLessEqual(report['peakOutputSpeedRpm'],report['controllerSpeedCeilingRpm'])
+
     def test_constant_current_records_every_source_and_unknown_fields_to_disk(self):
         record = self.auto.start(self.config())
         report = self.finish()

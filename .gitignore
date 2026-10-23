@@ -29,3 +29,6 @@ Thumbs.db
 /局域网访问说明.txt
 /vendor/xige_foc/logs/
 /vendor/xige_foc/motor_profile.txt
+
+# Local firmware deliveries and source snapshots
+/artifacts/

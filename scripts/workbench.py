@@ -72,7 +72,7 @@ def spawn(name, argv, port, entries, cwd=ROOT, env=None):
             with urllib.request.urlopen('http://127.0.0.1:8892/api/status', timeout=3) as r:
                 if Path(json.load(r).get('project_root', '')).resolve() != Path(cwd).resolve():
                     raise RuntimeError('8892 不是所配置的电机参考工程，拒绝复用')
-        # Recognize this project's existing Codex development units.
+        # Recognize this project's existing development service units.
         unit = {'bridge': 'ai-job-torque-workbench-bridge.service',
                 'web': 'ai-job-torque-workbench-web.service'}.get(name)
         if not WIN and unit and shutil.which('systemctl'):
@@ -156,45 +156,29 @@ def stop():
     entries = state()
     if listening(8766):
         health = request('/api/health')
-        try:
-            automatic = request('/api/automatic/status').get('current') or {}
-        except urllib.error.HTTPError as error:
-            if error.code != 404:
-                raise
-            automatic = {}
-        if automatic.get('running'):
-            stopped = request('/api/automatic/stop', {'id':automatic['id']}, health['token'])['current']
-            if stopped.get('stopConfirmed') is not True:
-                raise RuntimeError('自动脚本停机未确认，保留服务')
-            health = request('/api/health')
-        channels = health['channels']
-        motor = channels['current-motor']
-        if motor.get('run', {}).get('running') or (motor.get('snapshot') or {}).get('motor', {}).get('output_on'):
-            result = request('/api/motor-current/stop', {}, health['token'])
-            if result.get('run', {}).get('stopConfirmed') is not True:
-                raise RuntimeError('电机停止尚未确认，保留服务，请在工作台检查')
-        for key in ('motor-supply', 'brake-supply'):
-            snapshot = channels[key].get('snapshot') or {}
-            if snapshot.get('status', 0) & 0x80:
-                raise RuntimeError('电源仍在输出，请先在工作台关闭电源输出后再关闭程序')
-    if listening(8766):
-        try:
-            active_test = (request('/api/specialized/status').get('current') or {})
-        except urllib.error.HTTPError as error:
-            if error.code != 404:
-                raise
-            active_test = {}
-        if active_test.get('state') in ('running', 'settling'):
-            request('/api/specialized/stop', {'id': active_test['id']}, health['token'])
-    if listening(8766):
+        request('/api/control/stop', {}, health['token'])
+        deadline = time.monotonic()+20
+        while True:
+            safety = request('/api/control/status')
+            if not safety.get('stopping'):break
+            if time.monotonic()>=deadline:raise RuntimeError('仍在停机确认，保留服务，请检查设备')
+            time.sleep(.1)
+        if safety.get('blocked'):
+            raise RuntimeError('输出关闭未确认，保留服务：'+str(safety.get('errors')))
+        health = request('/api/health')
+        for key in ('motor-supply','brake-supply'):
+            if key in safety.get('unusedChannels',[]):continue
+            channel = health['channels'][key]
+            snapshot = channel.get('snapshot')
+            if (not channel.get('connected') or not snapshot or snapshot.get('status',0)&128
+                    or channel.get('outputUncertain')):
+                raise RuntimeError(key+' 输出状态未知或仍开启，保留服务，禁止强制退出')
+        active_test = request('/api/specialized/status').get('current') or {}
+        if active_test.get('state') in ('running','settling'):
+            request('/api/specialized/stop', {'id':active_test['id']}, health['token'])
         recording = request('/api/recordings/status?history=0').get('current') or {}
         if recording.get('running'):
             request('/api/recordings/stop', {'id':recording['id']}, health['token'])
-        brake = request('/api/brake-current/status')
-        if (brake.get('run') or {}).get('running'):
-            stopped = request('/api/brake-current/stop', {}, health['token'])
-            if (stopped.get('run') or {}).get('stopConfirmed') is not True:
-                raise RuntimeError('制动步进停止未确认，保留服务')
     for name in ('web', 'bridge', 'motor'):
         entry = entries.get(name)
         if not entry:

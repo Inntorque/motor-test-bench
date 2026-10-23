@@ -1,5 +1,6 @@
 export const SUPPLY_VOLTAGE = 24;
-export const MOTOR_SUPPLY_CURRENT_LIMIT = 10;
+export const MOTOR_SUPPLY_CURRENT_LIMIT = 20;
+export const MOTOR_SUPPLY_PRESET_CURRENT_A = 20;
 export const BRAKE_SUPPLY_CURRENT_LIMIT = 2.3;
 
 export function supplyOperatingMode(device) {
@@ -25,7 +26,7 @@ export function brakeModeText(device) {
 
 export function supplyPoint(id, point = {}) {
   return { voltage: String(SUPPLY_VOLTAGE),
-    current: id === 'motor-supply' ? String(MOTOR_SUPPLY_CURRENT_LIMIT) : point.current ?? '' };
+    current: id === 'motor-supply' ? String(MOTOR_SUPPLY_PRESET_CURRENT_A) : point.current ?? '' };
 }
 
 export function supplyReadbackPoint(id, previous, settings, config, applied = false) {
@@ -34,4 +35,21 @@ export function supplyReadbackPoint(id, previous, settings, config, applied = fa
     point.current = (settings[2] / 10 ** Number(config.currentDecimals ?? 2)).toFixed(Number(config.currentDecimals ?? 2));
   }
   return point;
+}
+
+// Readback precision can differ from the setpoint register precision.
+export function supplyMeasurements(device) {
+  const snapshot=device?.snapshot;
+  if (!device?.connected || !snapshot) return null;
+  const config=snapshot.config || device.config || {};
+  const voltageDecimals=Number(config.voltageDecimals ?? 2);
+  const currentDecimals=Number(config.measuredCurrentDecimals ?? config.currentDecimals ?? 2);
+  const measured=snapshot.measured || [];
+  return {
+    voltage:Number.isFinite(measured[0])?measured[0]/10**voltageDecimals:null,
+    current:Number.isFinite(measured[1])?measured[1]/10**currentDecimals:null,
+    power:Number.isFinite(snapshot.calculatedPowerW)?snapshot.calculatedPowerW:Number.isFinite(measured[2])?measured[2]:null,
+    voltageDecimals,currentDecimals,
+    output:Number.isFinite(snapshot.status)?(snapshot.status&0x80?'输出开启':'输出关闭'):'状态未知',
+  };
 }

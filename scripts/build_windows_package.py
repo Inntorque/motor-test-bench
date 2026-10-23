@@ -15,7 +15,8 @@ PYTHON_SHA256 = '97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b582196129
 PYTHON_URL = f'https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip'
 MODULES = ['hardware_bridge.py', 'motor_current.py', 'sensor_hex.py', 'specialized_tests.py',
            'automatic_tests.py', 'workbench_recordings.py', 'background_recording.py',
-           'brake_current.py', 'loaded_timeline.py', 'workbench_config.py']
+           'brake_current.py', 'brake_torque.py', 'loaded_timeline.py', 'workbench_config.py',
+           'device_connections.py', 'coupled_current.py', 'safety_control.py', 'power_limits.py']
 
 
 def extract(archive, destination, wheel=False):

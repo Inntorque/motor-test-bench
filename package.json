@@ -12,7 +12,8 @@
     "test:ui": "node tests/ui-smoke.mjs",
     "test:requirements": "node tests/requirements-ui.mjs",
     "start": "node scripts/launch.mjs start",
-    "stop": "node scripts/launch.mjs stop"
+    "stop": "node scripts/launch.mjs stop",
+    "test:maximum-ui": "node tests/maximum-ui.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

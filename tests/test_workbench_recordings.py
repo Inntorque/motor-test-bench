@@ -114,6 +114,22 @@ class WorkbenchRecordingTests(unittest.TestCase):
         self.assertEqual(motor['output_position_deg'],'')
         self.assertEqual(motor['actual_iq_A'],'0.21')
 
+    def test_recording_file_lock_cannot_block_device_control_events(self):
+        import threading
+        self.manager.start({})
+        held=threading.Event();release=threading.Event()
+        def disk_busy():
+            with self.manager.timeline.lock:
+                held.set();release.wait(2)
+        worker=threading.Thread(target=disk_busy);worker.start();self.assertTrue(held.wait(1))
+        try:
+            began=time.monotonic()
+            self.manager.observe('stop_request',{'on':False})
+            self.assertLess(time.monotonic()-began,.1)
+        finally:release.set();worker.join(1)
+        report=self.manager.stop(self.manager.status()['id'])
+        self.assertEqual(report['counts'].get('stop_request'),1)
+
     def test_no_connection_or_duplicate_record_is_rejected(self):
         self.connected = False
         with self.assertRaises(ValueError):self.manager.start({})

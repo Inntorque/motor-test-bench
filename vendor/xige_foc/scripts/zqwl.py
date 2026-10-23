@@ -168,6 +168,7 @@ class ZqwlBus(object):
         self.can_channel = can_channel
         self.verbose = verbose
         self.last_heartbeat = None
+        self.last_transport_activity = 0.0
         self.heartbeats = 0
         self.cfg_replies = []
         self.tx_frames = 0
@@ -254,6 +255,7 @@ class ZqwlBus(object):
                 break
             if not chunk:
                 continue
+            self.last_transport_activity = time.time()
             buf += chunk
             while buf:
                 head = buf[0]
