@@ -1,9 +1,11 @@
 """Disk-backed, source-timestamped acquisition; contains no actuator commands."""
 import csv
+import queue
 import json
 import threading
 import time
 from specialized_tests import Stats, finite
+from workbench.subjects import SETUP_COLUMNS, setup_columns
 
 
 FIELDS = ['elapsed_s', 'recording_elapsed_s', 'source_recording_elapsed_s', 'pc_recorded_unix_s', 'phase', 'source',
@@ -14,12 +16,17 @@ FIELDS = ['elapsed_s', 'recording_elapsed_s', 'source_recording_elapsed_s', 'pc_
           'supply_target_voltage_V', 'supply_target_current_A', 'supply_actual_voltage_V',
           'supply_actual_current_A', 'supply_actual_power_W', 'supply_output_on',
           'supply_max_voltage_V', 'supply_max_current_A', 'brake_target_torque_Nm',
-          'brake_feedback_torque_Nm', 'brake_command_current_A', 'payload_json']
+          'brake_feedback_torque_Nm', 'brake_command_current_A', 'payload_json', 'motor_name', 'driver_board_name', *SETUP_COLUMNS]
 
 
 class LoadedTimeline:
-    def __init__(self, directory, source, frames, ratio, configuration):
+    def __init__(self, directory, source, frames, ratio, configuration, event_hub=None):
         self.source, self.frames, self.ratio = source, frames, ratio
+        self.recording_id=configuration.get('recordingId')
+        subject = configuration.get('testSubject') or {}
+        self.subject_names = {'motor_name': (subject.get('motor') or {}).get('name', ''),
+                              'driver_board_name': (subject.get('driverBoard') or {}).get('name', ''), **setup_columns(subject)}
+        self.event_hub=event_hub;self.incoming=queue.Queue(maxsize=4096);self.unsubscribe=None
         self.lock = threading.RLock()
         self.cancel = threading.Event()
         self.thread = None
@@ -52,9 +59,9 @@ class LoadedTimeline:
                        recording_elapsed_s=None if self.recording_clock is None else now-self.recording_clock,
                        source_recording_elapsed_s=stamp-self.recording_at if finite(stamp) and self.recording_at is not None else None,
                        pc_recorded_unix_s=time.time(), phase=self.phase, source=source,
-                       source_received_unix_s=stamp, **values)
+                       source_received_unix_s=stamp, **self.subject_names, **values)
             encoded = json.dumps(payload, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
-            self.json_file.write(json.dumps({**row, 'payload': payload}, ensure_ascii=False,
+            self.json_file.write(json.dumps({**row,'recordSchema':2,'recordingId':self.recording_id,'payload':payload}, ensure_ascii=False,
                                            separators=(',', ':'), allow_nan=False)+'\n')
             self.writer.writerow({**row, 'payload_json': encoded})
             self.counts[source] = self.counts.get(source, 0)+1
@@ -68,6 +75,12 @@ class LoadedTimeline:
             self.recording_clock = time.monotonic()
             self.phase = 'recording'
             self.event('recording_start', {'recordingStartedAt': self.recording_at})
+        if self.event_hub:
+            def receive(event):
+                if event['type']!='acquisition':return
+                try:self.incoming.put_nowait(event['data'])
+                except queue.Full:self.error='记录事件队列已满，存在数据缺口'
+            self.unsubscribe=self.event_hub.subscribe(receive)
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
@@ -83,7 +96,14 @@ class LoadedTimeline:
         last_flush = time.monotonic()
         try:
             while True:
-                sources = self.source()
+                packet=None
+                if self.event_hub:
+                    try:event=self.incoming.get(timeout=.1)
+                    except queue.Empty:
+                        if self.cancel.is_set():break
+                        continue
+                    sources=event['sources'];packet=event['packet']
+                else:sources=self.source()
                 for key, channel in sources.items():
                     snapshot = channel.get('snapshot') or {}
                     stamp = snapshot.get('receivedAt')
@@ -98,15 +118,13 @@ class LoadedTimeline:
                     if key == 'motor':
                         feedback, motor, ntc = (snapshot.get(name) or {} for name in ('feedback', 'motor', 'ntc'))
                         values = dict(commanded_iq_A=(channel.get('run') or {}).get('targetA'),
-                                      reported_iq_reference_A=(snapshot.get('control') or {}).get('iq_target_ma'),
+                                      reported_iq_reference_A=feedback.get('iq_reference_a'),
                                       actual_iq_A=feedback.get('iq_a'), actual_id_A=feedback.get('id_a'),
                                       rotor_position_deg=feedback.get('position_deg'), rotor_speed_rpm=feedback.get('speed_rpm'),
                                       output_position_deg=feedback['position_deg']/self.ratio if finite(feedback.get('position_deg')) and finite(self.ratio) and self.ratio>0 else None,
                                       output_speed_rpm=feedback['speed_rpm']/self.ratio if finite(feedback.get('speed_rpm')) and finite(self.ratio) and self.ratio>0 else None,
                                       motor_ntc_C=ntc.get('temp_c'), motor_output_on=motor.get('output_on'),
                                       motor_mode=motor.get('mode'), motor_fault=motor.get('fault'))
-                        reference = values['reported_iq_reference_A']
-                        values['reported_iq_reference_A'] = reference/1000 if finite(reference) else None
                         with self.lock:
                             if self.measurement_end is None and finite(stamp) and stamp >= self.recording_at:
                                 self.stats['actualIqA'].add(feedback.get('iq_a'))
@@ -124,13 +142,14 @@ class LoadedTimeline:
                                       supply_output_on=bool(snapshot['status'] & 128) if isinstance(snapshot.get('status'), int) else None,
                                       supply_max_voltage_V=config.get('maxVoltage'), supply_max_current_A=config.get('maxCurrent'))
                     self.event(key, channel, stamp, **values)
-                packet = self.frames(self.cursor)
+                if not self.event_hub:packet = self.frames(self.cursor)
                 if packet is not None:
                     if packet.get('reset') or packet.get('dropped'):
                         raise ValueError('完整时间序列检测到扭矩序号重置或缓存溢出')
                     if (packet.get('config') or {}) != self.sensor_config:
                         raise ValueError('记录期间扭矩通信参数改变')
                     for sequence, stamp, raw_torque, raw_speed in packet.get('frames', []):
+                        if sequence<=self.cursor:continue
                         if self.cursor and sequence != self.cursor+1:
                             raise ValueError('完整时间序列扭矩帧不连续')
                         self.cursor = sequence
@@ -179,6 +198,7 @@ class LoadedTimeline:
                     'recordingEndedAt': self.measurement_end, 'statistics': {key: stat.result() for key, stat in self.stats.items()}}
 
     def close(self):
+        if self.unsubscribe:self.unsubscribe();self.unsubscribe=None
         self.cancel.set()
         if self.thread:
             self.thread.join(3)

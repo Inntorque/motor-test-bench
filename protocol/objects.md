@@ -1,0 +1,53 @@
+# MBP/1 object dictionary
+
+Generated from `schema.json`; integers are little endian.
+
+| ID | Name | Type |
+|---|---|---|
+| 0x0001 | device_uid | bytes |
+| 0x0002 | hardware_identity | utf8 |
+| 0x0003 | firmware_version | utf8 |
+| 0x0004 | sdk_version | utf8 |
+| 0x0005 | boot_id | u64 |
+| 0x0100 | control_modes | u32 |
+| 0x0101 | feedback_fields | u64 |
+| 0x0102 | optional_features | u64 |
+| 0x0200 | dq_current_convention | u8 |
+| 0x0201 | iq_min | i32 |
+| 0x0202 | iq_max | i32 |
+| 0x0203 | phase_protection_current | u32 |
+| 0x0204 | phase_run_limit_max | u32 |
+| 0x0205 | allowed_negative_id_min | i32 |
+| 0x0206 | dq_voltage_limit | u32 |
+| 0x0207 | rotor_speed_abs_max | u32 |
+| 0x0208 | motor_temperature_trip | i32 |
+| 0x0209 | device_watchdog_ms | u32 |
+| 0x0300 | readiness_flags | u32 |
+| 0x0301 | fault_category | u16 |
+| 0x0302 | vendor_fault_code | u32 |
+| 0x0303 | readiness_detail | utf8 |
+| 0x1000 | run_mode | u8 |
+| 0x1001 | direction | i32 |
+| 0x1002 | iq_target | i32 |
+| 0x1003 | phase_run_limit | u32 |
+| 0x1004 | bus_current_budget | u32 |
+| 0x1005 | bus_voltage_basis | u32 |
+| 0x1006 | negative_id_min | i32 |
+| 0x1007 | speed_soft_limit | u32 |
+| 0x1008 | prepared_id | u32 |
+| 0x2000 | stream_groups | nested |
+| 0x3000 | maximum_state | u8 |
+| 0x3001 | available_iq | i32 |
+| 0x3002 | active_limits | u32 |
+| 0x3003 | maximum_window | nested |
+| 0x4000 | diagnostic_descriptor | nested |
+| 0x5000 | frozen_transfer_descriptor | nested |
+| 0x6000 | state | u8 |
+| 0x6001 | mode | u8 |
+| 0x6002 | status_flags | u16 |
+| 0x6003 | session_id | u64 |
+| 0x6004 | run_generation | u32 |
+| 0x6005 | command_seq | u32 |
+| 0x6006 | last_stop_id | u32 |
+| 0x1009 | velocity_target | i32 |
+| 0x100A | position_target | i64 |

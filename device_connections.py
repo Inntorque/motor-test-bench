@@ -103,6 +103,10 @@ class ConnectionManager:
                 report(key, '正在恢复已保存连接…')
                 try:
                     config = self.resolve(profile, ports)
+                    if key == 'motor-supply' and config.get('protocol', 'ssj') == 'ssj':
+                        config.update(protocol='ru', baud=9600, parity='N', stopbits=1, address=1,
+                                      voltageDecimals=2, currentDecimals=2, measuredCurrentDecimals=2,
+                                      ratedVoltage=None, ratedCurrent=None, ratingsVerified=False)
                     config = (a['normalized_sensor_config'](config) if key == 'torque-sensor'
                               else a['normalized_config'](config, key))
                     if config.get('device') in used:
@@ -146,30 +150,32 @@ class ConnectionManager:
                             report('torque-sensor', '未连接，' + str(error))
                     else:
                         report('torque-sensor', '未发现唯一有效 HEX 115200 数据源，请核对供电和通信参数')
-                # Read-only identification cannot distinguish two identical supplies' wiring roles.
                 missing = [k for k in unresolved if k in a['CHANNELS']]
-                candidates = []
+                candidates = {key: [] for key in missing}
                 if missing:
                     for p in available:
                         if p.device in streaming or p.device in used:
                             continue
-                        probe = a['PowerSupplyChannel']('discovery')
-                        try:
-                            config = a['normalized_config'](dict(device=p.device, baud=9600, stopbits=1,
-                                address=1, voltageDecimals=2, currentDecimals=2))
-                            result = probe.connect(config)
-                            candidates.append(p.device)
-                            with self.lock:
-                                self.job['candidates'].append({'port': p.device, 'type': 'ssj',
-                                    'settings': result['snapshot']['settings']})
-                        except Exception as error:
-                            with self.lock:
-                                self.job['candidates'].append({'port': p.device, 'error': str(error)})
-                        finally:
-                            probe.disconnect()
+                        for key in missing:
+                            protocol = 'ru' if key == 'motor-supply' else 'ssj'
+                            probe = a['PowerSupplyChannel']('discovery')
+                            try:
+                                config = a['normalized_config'](dict(device=p.device, protocol=protocol,
+                                    baud=9600, stopbits=1, address=1, voltageDecimals=2, currentDecimals=2))
+                                result = probe.connect(config)
+                                candidates[key].append(p.device)
+                                with self.lock:
+                                    self.job['candidates'].append({'port': p.device, 'type': protocol,
+                                        'settings': result['snapshot']['settings']})
+                            except Exception as error:
+                                with self.lock:
+                                    self.job['candidates'].append({'port': p.device, 'error': str(error)})
+                            finally:
+                                probe.disconnect()
                     for key in missing:
-                        report(key, ('发现电源 ' + '、'.join(candidates) + '；首次请选择对应串口并连接，随后自动记住'
-                                     if candidates else '未发现有效 SSJ 应答，请检查权限、接线或手动配置协议'))
+                        protocol_name = '万瑞达 RU' if key == 'motor-supply' else 'SSJ'
+                        report(key, ('发现电源 ' + '、'.join(candidates[key]) + '；首次请选择对应串口并连接，随后自动记住'
+                                     if candidates[key] else f'未发现有效 {protocol_name} 应答，请检查权限、接线或通信参数'))
             report('current-motor', '正在恢复 CAN 并等待真实反馈…')
             try:
                 if not devices['current-motor'].status()['connected']:

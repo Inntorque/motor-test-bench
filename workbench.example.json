@@ -1,8 +1,5 @@
 {
-  "xigeRoot": "../xige_foc",
-  "motor": {
-    "interface": "zqwl",
-    "baud": 500000,
-    "node": 0
-  }
+  "schema": 2,
+  "motor": {"interface":"zqwl", "baud":500000, "nativeNode":1},
+  "web": {"lan":false}
 }

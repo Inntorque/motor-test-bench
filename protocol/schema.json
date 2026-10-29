@@ -1,0 +1,650 @@
+{
+  "wire": [
+    1,
+    0
+  ],
+  "sdk": "1.0.0",
+  "host_api": 1,
+  "record_schema": 2,
+  "types": {
+    "u8": 1,
+    "u16": 2,
+    "u32": 3,
+    "u64": 4,
+    "i32": 5,
+    "i64": 6,
+    "bool": 7,
+    "utf8": 8,
+    "bytes": 9,
+    "nested": 10
+  },
+  "opcodes": {
+    "identify": 1,
+    "read_objects": 2,
+    "claim_control": 3,
+    "release_control": 4,
+    "prepare_run": 5,
+    "start": 6,
+    "set_target": 7,
+    "clear_fault": 8,
+    "set_streams": 9,
+    "read_diagnostic": 10,
+    "read_transfer": 11,
+    "read_state": 12
+  },
+  "frames": {
+    "stop": 128,
+    "control_heartbeat": 256,
+    "device_heartbeat": 320,
+    "status": 384,
+    "sample": 512,
+    "event": 576,
+    "request": 1024,
+    "response": 1088,
+    "diagnostic_request": 1152,
+    "diagnostic_response": 1216
+  },
+  "objects": {
+    "device_uid": {
+      "id": 1,
+      "type": "bytes"
+    },
+    "hardware_identity": {
+      "id": 2,
+      "type": "utf8"
+    },
+    "firmware_version": {
+      "id": 3,
+      "type": "utf8"
+    },
+    "sdk_version": {
+      "id": 4,
+      "type": "utf8"
+    },
+    "boot_id": {
+      "id": 5,
+      "type": "u64"
+    },
+    "control_modes": {
+      "id": 256,
+      "type": "u32"
+    },
+    "feedback_fields": {
+      "id": 257,
+      "type": "u64"
+    },
+    "optional_features": {
+      "id": 258,
+      "type": "u64"
+    },
+    "dq_current_convention": {
+      "id": 512,
+      "type": "u8"
+    },
+    "iq_min": {
+      "id": 513,
+      "type": "i32"
+    },
+    "iq_max": {
+      "id": 514,
+      "type": "i32"
+    },
+    "phase_protection_current": {
+      "id": 515,
+      "type": "u32"
+    },
+    "phase_run_limit_max": {
+      "id": 516,
+      "type": "u32"
+    },
+    "allowed_negative_id_min": {
+      "id": 517,
+      "type": "i32"
+    },
+    "dq_voltage_limit": {
+      "id": 518,
+      "type": "u32"
+    },
+    "rotor_speed_abs_max": {
+      "id": 519,
+      "type": "u32"
+    },
+    "motor_temperature_trip": {
+      "id": 520,
+      "type": "i32"
+    },
+    "device_watchdog_ms": {
+      "id": 521,
+      "type": "u32"
+    },
+    "readiness_flags": {
+      "id": 768,
+      "type": "u32"
+    },
+    "fault_category": {
+      "id": 769,
+      "type": "u16"
+    },
+    "vendor_fault_code": {
+      "id": 770,
+      "type": "u32"
+    },
+    "readiness_detail": {
+      "id": 771,
+      "type": "utf8"
+    },
+    "run_mode": {
+      "id": 4096,
+      "type": "u8"
+    },
+    "direction": {
+      "id": 4097,
+      "type": "i32"
+    },
+    "iq_target": {
+      "id": 4098,
+      "type": "i32"
+    },
+    "phase_run_limit": {
+      "id": 4099,
+      "type": "u32"
+    },
+    "bus_current_budget": {
+      "id": 4100,
+      "type": "u32"
+    },
+    "bus_voltage_basis": {
+      "id": 4101,
+      "type": "u32"
+    },
+    "negative_id_min": {
+      "id": 4102,
+      "type": "i32"
+    },
+    "speed_soft_limit": {
+      "id": 4103,
+      "type": "u32"
+    },
+    "prepared_id": {
+      "id": 4104,
+      "type": "u32"
+    },
+    "stream_groups": {
+      "id": 8192,
+      "type": "nested"
+    },
+    "maximum_state": {
+      "id": 12288,
+      "type": "u8"
+    },
+    "available_iq": {
+      "id": 12289,
+      "type": "i32"
+    },
+    "active_limits": {
+      "id": 12290,
+      "type": "u32"
+    },
+    "maximum_window": {
+      "id": 12291,
+      "type": "nested"
+    },
+    "diagnostic_descriptor": {
+      "id": 16384,
+      "type": "nested"
+    },
+    "frozen_transfer_descriptor": {
+      "id": 20480,
+      "type": "nested"
+    },
+    "state": {
+      "id": 24576,
+      "type": "u8"
+    },
+    "mode": {
+      "id": 24577,
+      "type": "u8"
+    },
+    "status_flags": {
+      "id": 24578,
+      "type": "u16"
+    },
+    "session_id": {
+      "id": 24579,
+      "type": "u64"
+    },
+    "run_generation": {
+      "id": 24580,
+      "type": "u32"
+    },
+    "command_seq": {
+      "id": 24581,
+      "type": "u32"
+    },
+    "last_stop_id": {
+      "id": 24582,
+      "type": "u32"
+    },
+    "velocity_target": {
+      "id": 4105,
+      "type": "i32"
+    },
+    "position_target": {
+      "id": 4106,
+      "type": "i64"
+    }
+  },
+  "compounds": {
+    "stream_groups": {
+      "1": [
+        "period_us",
+        "u32"
+      ],
+      "2": [
+        "fields",
+        "u32"
+      ],
+      "3": [
+        "coherence",
+        "utf8"
+      ],
+      "4": [
+        "slow_period_us",
+        "u32"
+      ]
+    },
+    "maximum_window": {
+      "1": [
+        "schema",
+        "u16"
+      ],
+      "2": [
+        "window_id",
+        "u32"
+      ],
+      "3": [
+        "device_time_us",
+        "u64"
+      ],
+      "4": [
+        "duration_us",
+        "u32"
+      ],
+      "5": [
+        "samples",
+        "u32"
+      ],
+      "6": [
+        "flags",
+        "u32"
+      ],
+      "7": [
+        "iq_reference_ma",
+        "i32"
+      ],
+      "8": [
+        "id_reference_ma",
+        "i32"
+      ],
+      "9": [
+        "operating_current_ma",
+        "u32"
+      ],
+      "10": [
+        "iq_mean_ma",
+        "i32"
+      ],
+      "11": [
+        "id_mean_ma",
+        "i32"
+      ],
+      "12": [
+        "iq_error_rms_ma",
+        "u32"
+      ],
+      "13": [
+        "id_error_rms_ma",
+        "u32"
+      ],
+      "14": [
+        "phase_peak_ma",
+        "u32"
+      ],
+      "15": [
+        "voltage_saturated_permille",
+        "u16"
+      ],
+      "16": [
+        "estimated_bus_current_ma",
+        "i32"
+      ],
+      "17": [
+        "raw_min",
+        "u16"
+      ],
+      "18": [
+        "sample_window_margin",
+        "i32"
+      ],
+      "19": [
+        "pwm_generation",
+        "u32"
+      ],
+      "20": [
+        "magnetic_flags",
+        "u16"
+      ],
+      "21": [
+        "magnetic_magnitude",
+        "u16"
+      ],
+      "22": [
+        "magnetic_error_count",
+        "u16"
+      ],
+      "23": [
+        "sample_launch_count",
+        "u16"
+      ],
+      "24": [
+        "sample_pwm_ccr0",
+        "u16"
+      ],
+      "25": [
+        "bus_budget_ma",
+        "u32"
+      ],
+      "26": [
+        "dq_voltage_limit_mv",
+        "u32"
+      ]
+    },
+    "diagnostic_descriptor": {
+      "1": [
+        "kind",
+        "u16"
+      ],
+      "2": [
+        "schema",
+        "u16"
+      ],
+      "3": [
+        "source",
+        "utf8"
+      ],
+      "4": [
+        "payload",
+        "bytes"
+      ]
+    },
+    "frozen_transfer_descriptor": {
+      "1": [
+        "dataset_id",
+        "u32"
+      ],
+      "2": [
+        "schema",
+        "u16"
+      ],
+      "3": [
+        "points",
+        "u32"
+      ],
+      "4": [
+        "point_bytes",
+        "u16"
+      ],
+      "5": [
+        "total_bytes",
+        "u32"
+      ],
+      "6": [
+        "crc32",
+        "u32"
+      ],
+      "7": [
+        "sample_period_us",
+        "u32"
+      ]
+    },
+    "transfer_request": {
+      "1": [
+        "dataset_id",
+        "u32"
+      ],
+      "2": [
+        "offset",
+        "u32"
+      ],
+      "3": [
+        "length",
+        "u16"
+      ]
+    },
+    "transfer_response": {
+      "1": [
+        "dataset_id",
+        "u32"
+      ],
+      "2": [
+        "offset",
+        "u32"
+      ],
+      "3": [
+        "payload",
+        "bytes"
+      ],
+      "4": [
+        "crc32",
+        "u32"
+      ]
+    }
+  },
+  "request_bodies": {
+    "read_objects": "u16 object IDs (empty = all core objects)",
+    "claim_control": "boot u64, proposed session u64, generation u32, sequence u32",
+    "mutating": "boot u64, session u64, generation u32, sequence u32 followed by TLVs",
+    "read_diagnostic": "u16 kind (1 maximum window, 2 coherent control, 3 frozen descriptor)",
+    "read_transfer": "transfer_request TLVs",
+    "read_state": "empty"
+  },
+  "deduplication": {
+    "entries": 4,
+    "scope": "current boot; exact request bytes; stale session/generation checked before replay",
+    "maximum_pdu": 1024,
+    "diagnostic_maximum_pdu": 256,
+    "isotp_timeout_ms": 1000,
+    "isotp_block_size": 8,
+    "isotp_stmin_ms": 1
+  },
+  "sample_fields": {
+    "0": "time_us_low",
+    "1": "time_us_high",
+    "2": "iq_actual",
+    "3": "iq_reference",
+    "4": "id_actual",
+    "5": "rotor_speed",
+    "6": "position_low",
+    "7": "position_high",
+    "8": "bus_voltage",
+    "9": "bus_current",
+    "10": "motor_temperature",
+    "11": "board_temperature",
+    "12": "iq_target",
+    "13": "dq_voltage_limit",
+    "14": "estimated_bus_current",
+    "15": "reserved",
+    "16": "phase_a",
+    "17": "phase_b",
+    "18": "phase_c",
+    "19": "adc_sequence",
+    "20": "pwm_generation",
+    "21": "temperature_time_low",
+    "22": "temperature_time_high",
+    "23": "encoder_raw"
+  },
+  "frame_layouts": {
+    "stop": [
+      [
+        "magic",
+        0,
+        32
+      ],
+      [
+        "stop_id",
+        32,
+        32
+      ]
+    ],
+    "control_heartbeat": [
+      [
+        "session_id",
+        0,
+        64
+      ]
+    ],
+    "device_heartbeat": [
+      [
+        "boot_tag",
+        0,
+        32
+      ],
+      [
+        "uptime_ms",
+        32,
+        32
+      ]
+    ],
+    "status": [
+      [
+        "state",
+        0,
+        8
+      ],
+      [
+        "mode",
+        8,
+        8
+      ],
+      [
+        "flags",
+        16,
+        16
+      ],
+      [
+        "last_stop_id",
+        32,
+        32
+      ]
+    ],
+    "sample": [
+      [
+        "sample_seq",
+        0,
+        16
+      ],
+      [
+        "field_id",
+        16,
+        8
+      ],
+      [
+        "flags",
+        24,
+        8
+      ],
+      [
+        "raw_value",
+        32,
+        32
+      ]
+    ],
+    "event": [
+      [
+        "event_code",
+        0,
+        16
+      ],
+      [
+        "severity",
+        16,
+        8
+      ],
+      [
+        "source",
+        24,
+        8
+      ],
+      [
+        "device_ms",
+        32,
+        32
+      ]
+    ]
+  },
+  "enums": {
+    "MODE": {
+      "NONE": 0,
+      "IQ": 1,
+      "TORQUE": 2,
+      "VELOCITY": 3,
+      "POSITION": 4,
+      "MAX_AVAILABLE_IQ": 5
+    },
+    "STATE": {
+      "DISABLED": 0,
+      "STARTING": 1,
+      "RUNNING": 2,
+      "STOPPING": 3,
+      "FAULT": 4
+    },
+    "RESULT": {
+      "OK": 0,
+      "PENDING": 1,
+      "UNSUPPORTED": 2,
+      "INVALID_ARGUMENT": 3,
+      "OUT_OF_RANGE": 4,
+      "NOT_READY": 5,
+      "BUSY": 6,
+      "STALE_SESSION": 7,
+      "STALE_GENERATION": 8,
+      "DEVICE_FAULT": 9,
+      "TIMEOUT": 10
+    },
+    "STAGE": {
+      "ACCEPTED": 0,
+      "APPLIED": 1,
+      "CONFIRMED": 2
+    },
+    "STATUS_FLAG": {
+      "OUTPUT_ON": 1,
+      "READY": 2,
+      "FAULT_ACTIVE": 4,
+      "START_INHIBITED": 8,
+      "SAMPLE_VALID": 16,
+      "MAINTENANCE": 32
+    },
+    "FEATURE": {
+      "MAX_AVAILABLE_IQ": 1,
+      "FIELD_WEAKENING": 2,
+      "COHERENT_SAMPLE": 4,
+      "MAX_WINDOW": 8,
+      "FROZEN_TRACE": 16
+    },
+    "READINESS_FLAG": {
+      "READY": 1,
+      "CALIBRATION_REQUIRED": 2,
+      "CALIBRATION_VALID": 4,
+      "TEMPERATURE_START_INHIBITED": 8,
+      "FAULT_LATCHED": 16,
+      "CONTROL_FEEDBACK_VALID": 32
+    },
+    "LIMIT_FLAG": {
+      "CURRENT": 1,
+      "VOLTAGE": 2,
+      "SOURCE_ESTIMATE": 4,
+      "ADC_RANGE": 8,
+      "SPEED_SOFT_LIMIT": 16
+    }
+  }
+}

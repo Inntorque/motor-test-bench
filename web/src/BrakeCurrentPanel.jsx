@@ -1,3 +1,5 @@
+import {subscribeDevices} from './deviceStore.js';
+import {apiFetch} from './apiClient.js';
 import React, {useEffect, useRef, useState} from 'react';
 import {motorStepInputError} from './model.js';
 import {brakeModeText} from './supplyPolicy.js';
@@ -23,27 +25,11 @@ export default function BrakeCurrentPanel({token,onState,onEvent,children}) {
   const pendingActions=useRef(0);
   const callback=useRef(onState); callback.current=onState;
   useEffect(()=>{try {localStorage.setItem(FORM_KEY,JSON.stringify(form));}catch {}},[form]);
-  useEffect(()=>{
-    let active=true,polling=false;
-    async function poll() {
-      if(polling)return;
-      polling=true;
-      const epoch=actionEpoch.current;
-      try {
-        const response=await fetch('/api/brake-current/status',{cache:'no-store',signal:AbortSignal.timeout(2500)});
-        if(!response.ok)throw new Error('制动步进通信不可用');
-        const data=await response.json();
-        if(active && epoch===actionEpoch.current && !pendingActions.current){
-          setRun(data.run||{});setDevice(data.device||{connected:false});
-          setError(previous=>previous.startsWith('制动步进状态读取失败')?'':previous);
-          if(data.run?.running&&data.run.mode!=='torque')setMode('step');
-        }
-      }catch {if(active && epoch===actionEpoch.current && !pendingActions.current)setError('制动步进状态读取失败；可尝试停止制动输出。');}
-      finally {polling=false;}
-    }
-    void poll(); const timer=window.setInterval(poll,500);
-    return ()=>{active=false;window.clearInterval(timer);};
-  },[]);
+  useEffect(()=>subscribeDevices(state=>{
+    if(pendingActions.current)return;
+    const data=state.routes?.['/api/brake-current/status'];
+    if(data){setRun(data.run||{});setDevice(state.streamOnline===false?{connected:false}:data.device||{connected:false});if(data.run?.running&&data.run.mode!=='torque')setMode('step');}
+  }),[]);
   async function action(name) {
     if(name==='stop' && stopPending.current)return;
     if(name==='start') {
@@ -55,11 +41,11 @@ export default function BrakeCurrentPanel({token,onState,onEvent,children}) {
     setBusy(true);setError('');setMessage(name==='start'?'正在启动制动电流步进…':'正在关闭制动输出…');
     try {
       if(name!=='stop'||!token.current){
-        const health=await fetch('/api/health',{cache:'no-store',signal:AbortSignal.timeout(2500)});
+        const health=await apiFetch('/api/health',{cache:'no-store',signal:AbortSignal.timeout(2500)});
         if(!health.ok)throw new Error('通信桥不可用');
         token.current=(await health.json()).token;
       }
-      const response=await fetch(`/api/brake-current/${name}`,{
+      const response=await apiFetch(`/api/brake-current/${name}`,{
         method:'POST',headers:{'Content-Type':'application/json','X-MotorBench-Token':token.current},
         body:JSON.stringify(name==='start'?Object.fromEntries(Object.entries(form).map(([k,v])=>[k,Number(v)])):{}),
         signal:AbortSignal.timeout(15000),

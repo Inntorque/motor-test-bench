@@ -13,7 +13,6 @@ class BrakeCurrent:
         self.lock = threading.RLock()
         self.cancel = threading.Event()
         self.thread = None
-        self.lease = 0
         self.read_duration = .5
         self.start_guard = None
         self.run = {'running':False, 'phase':'idle', 'targetA':0, 'steps':0,
@@ -21,7 +20,6 @@ class BrakeCurrent:
 
     def status(self, heartbeat=False):
         with self.lock:
-            if heartbeat:self.lease = time.monotonic()
             return {'run':dict(self.run), 'device':self.channel.cached_status()}
 
     def active(self):
@@ -91,7 +89,6 @@ class BrakeCurrent:
             if self.start_guard:self.start_guard()
             if self.cancel.is_set() or (synchronization and synchronization.cancel.is_set()):raise ValueError('联动启动已取消')
             with self.lock:
-                self.lease = time.monotonic()
                 self.run = {'running':True, 'phase':'starting', 'targetA':0, 'steps':0, 'elapsed':0,
                             'mode':data.get('mode','step'),
                             'currentA':step if data.get('mode')=='hold' else None,
@@ -149,7 +146,6 @@ class BrakeCurrent:
                 now = time.monotonic()
                 with self.lock:self.run['elapsed'] = round(now-began,3)
                 if now-began >= duration:break
-                if now-self.lease > 3:raise ValueError('工作台页面心跳中断，停止制动输出')
                 with self.channel.lock:
                     if self.cancel.is_set():break
                     now = time.monotonic()

@@ -13,10 +13,10 @@ ROOT = Path(__file__).resolve().parent.parent
 PYTHON_VERSION = '3.13.16'
 PYTHON_SHA256 = '97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297'
 PYTHON_URL = f'https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip'
-MODULES = ['hardware_bridge.py', 'motor_current.py', 'sensor_hex.py', 'specialized_tests.py',
-           'automatic_tests.py', 'workbench_recordings.py', 'background_recording.py',
+MODULES = ['hardware_bridge.py', 'sensor_hex.py', 'specialized_tests.py',
+           'automatic_tests.py', 'background_recording.py',
            'brake_current.py', 'brake_torque.py', 'loaded_timeline.py', 'workbench_config.py',
-           'device_connections.py', 'coupled_current.py', 'safety_control.py', 'power_limits.py']
+           'device_connections.py', 'coupled_current.py', 'power_limits.py']
 
 
 def extract(archive, destination, wheel=False):
@@ -58,7 +58,7 @@ def build(output, cached_python=None):
     # The Windows path bootstrap uses native separators when resolving parent paths.
     # Isolated embedded Python does not automatically add the executed script's folder.
     (runtime / 'python313._pth').write_text(
-        'python313.zip\n.\nLib\\site-packages\n..\\..\n..\\..\\vendor\\xige_foc\\scripts\nimport site\n',
+        'python313.zip\n.\nLib\\site-packages\n..\\..\nimport site\n',
         encoding='ascii')
     wheels = cache / 'wheels'
     subprocess.run([sys.executable, '-m', 'pip', 'download', '--only-binary=:all:', '--platform', 'win_amd64',
@@ -71,11 +71,11 @@ def build(output, cached_python=None):
                            'requirements.txt', 'requirements-motor.txt', 'requirements-windows.txt', 'workbench.example.json']:
         shutil.copy2(ROOT / name, package / name)
     shutil.copytree(ROOT / 'dist', package / 'dist')
-    shutil.copytree(ROOT / 'vendor/xige_foc', package / 'vendor/xige_foc',
-                    ignore=shutil.ignore_patterns('__pycache__', '*.pyc', 'logs', '.venv'))
+    for name in ('workbench','protocol','profiles'):
+        shutil.copytree(ROOT/name,package/name,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
     scripts = package / 'scripts'
     scripts.mkdir()
-    for name in ['workbench.py', 'web_server.py', 'lan_access.py', 'install_windows.py',
+    for name in ['workbench.py', 'web_server.py', 'instance_lock.py', 'lan_access.py', 'install_windows.py',
                  'windows_firewall.ps1', 'windows_shortcuts.ps1', 'verify_windows_package.py']:
         shutil.copy2(ROOT / 'scripts' / name, scripts / name)
     shutil.copy2(ROOT / 'docs/windows-package.txt', package / '使用说明.txt')

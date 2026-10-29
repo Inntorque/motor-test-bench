@@ -257,48 +257,21 @@ class BridgeTests(unittest.TestCase):
             self.assertTrue(any(frame[1]==16 for frame in replacement.frames))
             self.assertFalse(channel.output_uncertain)
 
-    def test_motor_ssj_set_and_measured_current_scales_are_both_three_decimals(self):
-        config=bridge.normalized_config(self.config,'motor-supply')
+    def test_brake_ssj_current_scaling_is_unchanged(self):
+        config=bridge.normalized_config({**self.config,'currentDecimals':3},'brake-supply')
         self.assertEqual((config['currentDecimals'],config['measuredCurrentDecimals']),(3,3))
-        channel=self.channels['motor-supply']
-        self.motor_transport.registers.update({1001:600,1002:144})
+        channel=self.channels['brake-supply']
+        channel._open_transport=lambda config:self.brake_transport
+        self.brake_transport.registers.update({1001:600,1002:144})
         with patch.object(bridge.time,'sleep'):
             result=channel.connect(config)
             self.assertEqual(result['snapshot']['measured'],[2400,600,144])
-            self.assertAlmostEqual(result['snapshot']['calculatedPowerW'],14.4)
-            self.assertTrue(result['snapshot']['powerCalculated'])
-            self.assertFalse(any(f[1] in (5,6,16) for f in self.motor_transport.frames))
+            self.assertIsNone(result['snapshot']['calculatedPowerW'])
+            self.assertFalse(result['snapshot']['powerCalculated'])
+            self.assertFalse(any(f[1] in (5,6,16) for f in self.brake_transport.frames))
             channel.set_values({'voltage':24,'current':2})
-            self.assertEqual(self.motor_transport.registers[2002],2000)
+            self.assertEqual(self.brake_transport.registers[2002],2000)
             self.assertFalse(channel.snapshot['status']&128)
-        brake=bridge.normalized_config({**self.config,'currentDecimals':3},'brake-supply')
-        self.assertEqual((brake['currentDecimals'],brake['measuredCurrentDecimals']),(3,3))
-
-    def test_motor_on_preserves_panel_24v_10a_and_only_writes_output_register(self):
-        channel=self.channels['motor-supply']
-        config=bridge.normalized_config(self.config,'motor-supply')
-        self.motor_transport.registers.update({2001:2400,2002:10000})
-        with patch.object(bridge.time,'sleep'):
-            channel.connect(config)
-            self.motor_transport.frames.clear()
-            result=channel.set_output(True,{'voltage':24,'current':10})
-        writes=[struct.unpack('>H',f[2:4])[0] for f in self.motor_transport.frames if f[1]==16]
-        self.assertEqual(writes,[2016])
-        self.assertEqual(result['settings'][1:3],[2400,10000])
-        self.assertTrue(result['status']&128)
-        self.assertEqual(self.motor_transport.registers[2004],5003)
-
-    def test_motor_wrong_panel_preset_never_rewrites_va_or_enables(self):
-        channel=self.channels['motor-supply']
-        config=bridge.normalized_config(self.config,'motor-supply')
-        self.motor_transport.registers[2002]=2000
-        with patch.object(bridge.time,'sleep'):
-            channel.connect(config)
-            self.motor_transport.frames.clear()
-            with self.assertRaisesRegex(bridge.BridgeError,'2 A'):
-                channel.set_output(True,{'voltage':24,'current':10})
-        self.assertFalse(any(f[1] in (5,6,16) for f in self.motor_transport.frames))
-        self.assertEqual(self.motor_transport.registers[2002],2000)
 
     def test_stop_invalidates_queued_on_and_checks_scaling(self):
         import threading

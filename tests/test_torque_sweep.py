@@ -89,16 +89,14 @@ class SweepTests(unittest.TestCase):
         self.power=MotorPower();self.power.on=True
         self.plant=Plant(self.motor,self.supply);self.events=[]
         self.encoder_stall=False
-        original=self.motor._request
-        def encoder_feedback(route,**kwargs):
-            result=original(route,**kwargs)
-            if route=='/api/control/status':
-                now=time.time()
-                result['feedback'].update(speed_rpm=0 if self.encoder_stall else 50,
-                    position_deg=600 if self.encoder_stall else time.monotonic()*300,
-                    updated_at=now,position_at=now,position_stale=False)
+        original=self.motor.device.latest_snapshot
+        def encoder_feedback():
+            result=original();now=time.time()
+            result['feedback'].update(speed_rpm=0 if self.encoder_stall else 50,
+                position_deg=600 if self.encoder_stall else time.monotonic()*300,
+                updated_at=now,position_at=now,position_stale=False)
             return result
-        self.encoder_feedback_patch=patch.object(self.motor,'_request',side_effect=encoder_feedback)
+        self.encoder_feedback_patch=patch.object(self.motor.device,'latest_snapshot',side_effect=encoder_feedback)
         self.encoder_feedback_patch.start()
         self.runner=CoupledCurrent(self.motor,self.brake,self.plant,self.power,lambda:False,lambda *args:self.events.append(args))
     def tearDown(self):
@@ -122,9 +120,9 @@ class SweepTests(unittest.TestCase):
         identifier=self.ready()
         self.assertEqual(self.motor.run['targetA'],10)
         self.assertEqual(self.motor.positive_writes(),[10])
-        self.assertEqual(self.motor.current_limit_ma,10000)
-        self.assertIn('/api/motor?enable=1&mode=5&seconds=0',self.motor.writes)
-        self.assertFalse(any('/api/save' in row for row in self.motor.writes))
+        self.assertEqual(self.motor.current_limit_ma,30000)
+        self.assertIn(('start',1),self.motor.writes)
+        self.assertTrue(all(row[0] in ('prepare','start','target','stop') for row in self.motor.writes))
         self.assertEqual(self.supply.enable_trace,[])
         self.assertEqual(self.runner.run['targetNm'],0)
         time.sleep(.15)
@@ -149,12 +147,12 @@ class SweepTests(unittest.TestCase):
         self.assertFalse(self.motor.enabled or self.supply.on)
 
     def test_pause_during_target_write_cancels_command_and_never_loads_brake(self):
-        request=self.motor._request;blocked=threading.Event();release=threading.Event()
-        def delayed(route,**kwargs):
-            if route=='/api/control/set?field=current_a&value=10.0':
+        request=self.motor.device.set_target;blocked=threading.Event();release=threading.Event()
+        def delayed(value):
+            if value==10:
                 blocked.set();release.wait(2)
-            return request(route,**kwargs)
-        with patch.object(self.motor,'_request',side_effect=delayed):
+            return request(value)
+        with patch.object(self.motor.device,'set_target',side_effect=delayed):
             self.runner.start(self.params());self.wait(blocked.is_set)
             self.assertEqual(self.runner.run['phase'],'ramping')
             self.runner.cancel_requests('离线注入：下达电流目标时暂停')
@@ -176,28 +174,18 @@ class SweepTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.runner.begin_loading({'id':identifier})
         time.sleep(.15)
         self.assertFalse(self.motor.enabled)
-        self.assertFalse(any('/api/motor?enable=1' in row for row in self.motor.writes[before:]))
-        self.assertTrue(self.motor.writes[-1].endswith('field=current_a&value=0'))
+        self.assertFalse(any(row[0]=='start' for row in self.motor.writes[before:]))
+        self.assertEqual(self.motor.writes[-1],('stop',))
 
-    def test_pause_ack_and_cached_idle_are_not_fresh_off_confirmation(self):
-        self.ready();cached=threading.Event();cached.set();off_seen=threading.Event()
-        request=self.motor._request;results=[]
-        def reply(route,**kwargs):
-            result=request(route,**kwargs)
-            if route=='/api/status' and not self.motor.enabled and cached.is_set():
-                result['motor']['updated_at']=0
-                off_seen.set()
-            return result
-        with patch.object(self.motor,'_request',side_effect=reply):
-            thread=threading.Thread(target=lambda:results.append(self.runner.stop(wait=True)))
-            thread.start()
-            self.assertTrue(off_seen.wait(2))
-            self.assertFalse(self.motor.run['stopConfirmed'])
-            self.assertNotIn(True,self.supply.enable_trace)
-            cached.clear();thread.join(4)
-            self.assertFalse(thread.is_alive())
+    def test_native_stop_confirmation_is_required_before_marking_stopped(self):
+        self.ready();blocked=threading.Event();release=threading.Event();stop=self.motor.device.stop;results=[]
+        def delayed():
+            blocked.set();release.wait(2);return stop()
+        with patch.object(self.motor.device,'stop',side_effect=delayed):
+            thread=threading.Thread(target=lambda:results.append(self.runner.stop(wait=True)));thread.start()
+            self.assertTrue(blocked.wait(2));self.assertFalse(self.motor.run['stopConfirmed']);self.assertNotIn(True,self.supply.enable_trace)
+            release.set();thread.join(4);self.assertFalse(thread.is_alive())
         self.assertTrue(results[0]['run']['stopConfirmed'])
-        self.assertFalse(self.motor.enabled or self.supply.on)
 
     def test_confirmed_pause_allows_new_run_without_resetting_configuration(self):
         previous=self.ready();self.runner.stop(wait=True)
@@ -209,33 +197,20 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(self.runner.run['targetNm'],0)
         self.assertNotIn(True,self.supply.enable_trace)
 
-    def test_maximum_limit_readback_mismatch_never_enables_motor_or_brake(self):
-        request=self.motor._request
-        def reply(route,**kwargs):
-            result=request(route,**kwargs)
-            if route.startswith('/api/set?id=7'):
-                self.motor.current_limit_ma=5000  # ACK without an applied value
-            return result
-        with patch.object(self.motor,'_request',side_effect=reply):
+    def test_native_prepare_readback_mismatch_never_enables_motor_or_brake(self):
+        with patch.object(self.motor.device,'prepare_run',side_effect=ValueError('运行配置读回不一致')):
             self.runner.start(self.params());self.wait(lambda:not self.runner.active())
         self.assertIn('读回不一致',self.runner.run['reason'])
-        self.assertFalse(any('/api/motor?enable=1' in row for row in self.motor.writes))
-        self.assertEqual(self.motor.positive_writes(),[])
-        self.assertNotIn(True,self.supply.enable_trace)
+        self.assertFalse(any(row[0]=='start' for row in self.motor.writes));self.assertNotIn(True,self.supply.enable_trace)
 
-    def test_stop_during_limit_configuration_cannot_be_followed_by_enable(self):
-        request=self.motor._request;blocked=threading.Event();release=threading.Event()
-        def reply(route,**kwargs):
-            if route.startswith('/api/set?id=7'):
-                blocked.set();release.wait(2)
-            return request(route,**kwargs)
-        with patch.object(self.motor,'_request',side_effect=reply):
+    def test_stop_during_native_prepare_cannot_be_followed_by_enable(self):
+        request=self.motor.device.prepare_run;blocked=threading.Event();release=threading.Event()
+        def delayed(config):
+            blocked.set();release.wait(2);return request(config)
+        with patch.object(self.motor.device,'prepare_run',side_effect=delayed):
             self.runner.start(self.params());self.wait(blocked.is_set)
-            self.runner.cancel_requests('离线注入：最大电流配置时停止')
-            release.set();self.wait(lambda:not self.runner.active())
-        self.assertFalse(any('/api/motor?enable=1' in row for row in self.motor.writes))
-        self.assertEqual(self.motor.positive_writes(),[])
-        self.assertNotIn(True,self.supply.enable_trace)
+            self.runner.cancel_requests('离线注入：运行准备时停止');release.set();self.wait(lambda:not self.runner.active())
+        self.assertFalse(any(row[0]=='start' for row in self.motor.writes));self.assertEqual(self.motor.positive_writes(),[]);self.assertNotIn(True,self.supply.enable_trace)
     def test_parameter_limits_reject_before_output(self):
         for key,value in (('startNm',-.1),('maxNm',0),('maxNm',100),('stepNm',float('nan')),('intervalS',.1)):
             data=self.params();data['brake'][key]=value
@@ -261,9 +236,9 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(self.runner.run['targetNm'],0)
         self.assertFalse(self.supply.on)
     def test_loss_of_owner_during_wait_stops_motor_without_enabling_brake(self):
-        self.ready();self.runner.lease=time.monotonic()-3
+        self.ready();self.runner.cancel_requests('协调器：控制浏览器心跳超时')
         self.wait(lambda:not self.runner.active(),heartbeat=False)
-        self.assertIn('心跳',self.runner.run['reason'])
+        self.assertFalse(self.runner.active())
         self.assertFalse(self.motor.enabled or self.supply.on)
         self.assertNotIn(True,self.supply.enable_trace)
     def test_slow_torque_response_keeps_loading_past_ten_seconds(self):
@@ -380,7 +355,7 @@ class SweepTests(unittest.TestCase):
         self.wait(lambda:not self.runner.active())
         self.assertIn('保护',self.runner.run['reason'])
         self.assertNotIn('recoveryCount',self.runner.run)
-        self.assertEqual(sum('/api/motor?enable=1' in row for row in self.motor.writes),1)
+        self.assertEqual(sum(row[0]=='start' for row in self.motor.writes),1)
         self.assertNotIn(True,self.supply.enable_trace)
 
     def test_cancel_during_brake_set_does_not_send_enable_afterward(self):

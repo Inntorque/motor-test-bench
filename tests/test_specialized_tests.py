@@ -75,6 +75,7 @@ class SpecializedTestsTests(unittest.TestCase):
             self.tests.start({'kind':'baseline'})
 
     def test_high_rate_csv_retains_each_frame_and_persists_results(self):
+        self.tests.subjects=lambda:{'motor':{'id':'m1','name':'电机 A'},'driverBoard':{'id':'d1','name':'驱动板 A'}}
         self.tests.start({'kind':'baseline','durationS':1})
         report=self.wait()
         self.assertEqual(report['state'],'completed')
@@ -82,6 +83,8 @@ class SpecializedTestsTests(unittest.TestCase):
         self.assertGreater(report['sensorSamples'],800)
         path=self.tests.file(report['id'],'data.csv')
         with path.open(encoding='utf-8-sig',newline='') as file:rows=list(csv.DictReader(file))
+        self.assertEqual(report['testSubject']['motor']['name'],'电机 A')
+        self.assertTrue(all(row['motor_name']=='电机 A' and row['driver_board_name']=='驱动板 A' for row in rows))
         seq=[int(row['sensor_sequence']) for row in rows]
         self.assertTrue(all(b==a+1 for a,b in zip(seq,seq[1:])))
         self.assertEqual(len(rows),report['sensorSamples'])

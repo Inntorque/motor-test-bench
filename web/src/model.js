@@ -1,5 +1,6 @@
 // Data export and display helpers. Live measurements are supplied by device
 // adapters; this module never invents equipment readings.
+import {SETUP_CSV_FIELDS} from './testSubjects.js';
 const CSV_FIELDS = [
   ["source", "source"],
   ["receivedAt", "receivedAt"],
@@ -46,14 +47,16 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
-export function toCsv(samples) {
+export function toCsv(samples, testSubject) {
   if (!Array.isArray(samples)) throw new TypeError("Samples must be an array");
-  const rows = [CSV_FIELDS.map(([, heading]) => heading).join(",")];
+  const setup = testSubject?.testSetup;
+  const names = testSubject ? [testSubject.motor?.name || '', testSubject.driverBoard?.name || '', ...(setup ? SETUP_CSV_FIELDS.map(([key])=>setup[key]) : [])] : [];
+  const rows = [[...CSV_FIELDS.map(([, heading]) => heading), ...(testSubject ? ['motor_name', 'driver_board_name'] : []), ...(setup ? SETUP_CSV_FIELDS.map(([,heading])=>heading) : [])].join(",")];
   const origin = samples[0]?.t ?? 0;
   for (const sample of samples) {
-    rows.push(CSV_FIELDS.map(([field]) => csvCell(
+    rows.push([...CSV_FIELDS.map(([field]) => csvCell(
       field === "t" && Number.isFinite(sample.t) ? sample.t - origin : sample[field],
-    )).join(","));
+    )), ...names.map(csvCell)].join(","));
   }
   return `\uFEFF${rows.join("\r\n")}\r\n`;
 }
@@ -105,7 +108,7 @@ export function motorLiveCurrents(device, now = Date.now() / 1000) {
 
 export function motorOutputFeedback(device) {
   const snapshot = device?.connected ? device.snapshot : null;
-  const ratio = snapshot?.motorProfile?.nameplate?.reduction_ratio;
+  const ratio = device?.testSubject?.testSetup?.ratio;
   const feedback = snapshot?.feedback;
   if (!Number.isFinite(ratio) || ratio <= 0 || feedback?.position_stale !== false)
     return {positionDeg:null, speedRpm:null};
@@ -119,7 +122,7 @@ export function motorDeviceState(device) {
   const motor = device?.connected ? device.snapshot?.motor : null;
   if (!motor || motor.available !== true || !Number.isFinite(motor.age_s) || motor.age_s > 1.5)
     return '状态未知';
-  if (motor.fault || motor.state === 3) return '保护触发';
+  if (motor.fault || motor.state === 4) return '保护触发';
   if (motor.output_on === true) return motor.state === 1 ? '启动中 · 输出开启' : '运行中 · 输出开启';
   if (motor.state === 0 && motor.output_on === false) return '已停止 · 输出关闭';
   return '状态待确认';

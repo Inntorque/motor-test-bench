@@ -6,26 +6,10 @@ import time
 import unittest
 from unittest.mock import patch
 from background_recording import BackgroundRecording
-from motor_current import CurrentMotor, CurrentError
+from workbench.test_engine import CurrentMotor, CurrentError
 
 
 class BackgroundRecordingTests(unittest.TestCase):
-    def test_motor_command_ack_and_failure_are_correlated_without_tokens(self):
-        motor=CurrentMotor()
-        motor.session={'token':'private-test-token','command_epoch':0}
-        events=[]
-        motor.diagnostic_observer=lambda kind,payload:events.append((kind,payload))
-        response=io.BytesIO(b'{"ok":true}')
-        response.headers={}
-        with patch('motor_current.urllib.request.urlopen',return_value=response):
-            motor._request('/api/control/set?field=current_a&value=0.2',write=True)
-        with patch('motor_current.urllib.request.urlopen',side_effect=OSError('link timeout')):
-            with self.assertRaises(CurrentError):motor._request('/api/motor?enable=0',write=True,allow_cancel=True)
-        self.assertEqual([e[0]for e in events],['motor_command_request','motor_command_response','motor_command_request','motor_command_error'])
-        self.assertEqual(events[0][1]['commandId'],events[1][1]['commandId'])
-        self.assertEqual(events[2][1]['commandId'],events[3][1]['commandId'])
-        self.assertNotIn('private-test-token',json.dumps(events))
-
     def test_frames_commands_disconnect_and_reset_continue_in_rotated_files(self):
         with tempfile.TemporaryDirectory() as root:
             state = {'connected':True, 'snapshot':{'receivedAt':time.time(), 'settings':[1,2400,1000]}}

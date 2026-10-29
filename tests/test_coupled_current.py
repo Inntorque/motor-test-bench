@@ -18,12 +18,6 @@ class TimedMotor(FakeMotor):
         self.step_times = []
         self.precharge_delay = 0
         self.enabled_at = 0
-    def _request(self, route, *, write=False, allow_cancel=False):
-        result=super()._request(route,write=write,allow_cancel=allow_cancel)
-        if route.startswith('/api/motor?enable=1'):self.enabled_at=time.monotonic()
-        if route=='/api/status' and self.enabled and time.monotonic()<self.enabled_at+self.precharge_delay:
-            result['motor']['state']=1
-        return result
     def _set_current(self, value):
         if value > 0:self.step_times.append(time.monotonic())
         return super()._set_current(value)
@@ -91,7 +85,7 @@ class CoupledTests(unittest.TestCase):
         self.assertTrue(run['stopConfirmed'])
         self.assertEqual(self.motor.run['startedAt'], self.brake.run['startedAt'])
         self.assertGreaterEqual(self.runner.sync.began,self.motor.enabled_at+.25)
-        self.assertEqual(self.motor.run['deviceWatchdogS'],16)
+        self.assertIn(('start',1),self.motor.writes)
         self.assertGreater(len(self.motor.step_times), 1)
         self.assertEqual(len(self.supply.step_times), 1)
         self.assertEqual(self.brake.run['targetA'],.1)
@@ -190,7 +184,7 @@ class CoupledTests(unittest.TestCase):
                 self.runner.start(self.params(5))
                 self.wait_for(lambda:self.runner.status()['run']['phase']=='running')
                 if cause=='sensor':self.sensor.connected=False
-                else:self.runner.lease=time.monotonic()-3
+                else:self.runner.cancel_requests('协调器：浏览器心跳超时')
                 run=self.finish()
                 self.assertIn('传感器' if cause=='sensor' else '心跳',run['reason'])
                 self.assertFalse(self.motor.enabled or self.supply.on)

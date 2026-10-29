@@ -1,0 +1,8 @@
+.subject-popover {
+  max-height: calc(100dvh - 180px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.subject-popover .setup-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.subject-popover .setup-actions .button { padding: 8px; font-size: 12px; }
+.subject-popover .setup-editor { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }

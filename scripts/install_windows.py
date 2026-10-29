@@ -63,8 +63,7 @@ def install(args):
     shutil.copy2(SOURCE / 'package-manifest.json', target / 'package-manifest.json')
     config_file = target / 'workbench.local.json'
     config = json.loads(config_file.read_text(encoding='utf-8-sig')) if config_file.exists() else {}
-    config.setdefault('xigeRoot', 'vendor/xige_foc')
-    config.setdefault('motor', {'interface': 'zqwl', 'baud': 500000, 'node': 0})
+    config.setdefault('motor', {'interface': 'zqwl', 'baud': 500000, 'nativeNode': 1})
     config.setdefault('web', {})['lan'] = True
     config_file.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding='utf-8')
     data = credentials(target)
@@ -77,7 +76,7 @@ def install(args):
     python = target / 'runtime/python/python.exe'
     subprocess.run([str(python), '-X', 'utf8', '-c',
         'import sys; print("Runtime paths:", sys.path, flush=True); '
-        'import serial, can, wrapt; import hardware_bridge, zqwl, run_recorder; print("Runtime ready")'],
+        'import serial, can, wrapt; import hardware_bridge; from workbench.devices import motor, zqwl; print("Runtime ready")'],
         cwd=target, check=True)
     if not args.skip_firewall:
         result = subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(target / 'scripts/windows_firewall.ps1')])

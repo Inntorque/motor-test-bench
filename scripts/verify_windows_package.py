@@ -50,7 +50,7 @@ def main():
             with urllib.request.urlopen('http://127.0.0.1:5173/__workbench/status') as response:
                 assert json.load(response)['lan'] is True
             assert subprocess.run(installer, stdout=subprocess.PIPE, stderr=subprocess.STDOUT).returncode != 0
-            print('PASS: install/update preservation, start three real services, HTTP/API, no simulated devices, refuse live overwrite')
+            print('PASS: install/update preservation, start one application service, HTTP/API, no simulated devices, refuse live overwrite')
         except Exception:
             for log in (target / '.runtime').glob('*.log'):
                 print(log.name + ':\n' + log.read_text(encoding='utf-8', errors='replace')[-12000:])
@@ -69,29 +69,14 @@ def main():
 
 
 def verify_lan():
-    from scripts.web_server import Handler
+    from workbench.service import Handler,devices
     from scripts.lan_access import Access
-
-    class FakeBridge(BaseHTTPRequestHandler):
-        def log_message(self, *_): pass
-        def do_GET(self):
-            body = json.dumps({'ok': True}).encode()
-            self.send_response(200); self.send_header('Content-Length', str(len(body)))
-            self.end_headers(); self.wfile.write(body)
-        def do_POST(self):
-            assert self.headers['Origin'] == 'http://127.0.0.1:5173'
-            assert self.headers['X-MotorBench-Token'] == 'fake-token'
-            self.rfile.read(int(self.headers.get('Content-Length', '0')))
-            self.do_GET()
-
-    bridge = ThreadingHTTPServer(('127.0.0.1', 0), FakeBridge)
     class RemoteClient(Handler):
-        bridge_port = bridge.server_port
         def _local(self): return False
-    server = ThreadingHTTPServer(('127.0.0.1', 0), RemoteClient)
-    server.lan_access = Access({'password': 'example-password', 'secret': 'x' * 64})
-    for service in (bridge, server):
-        threading.Thread(target=service.serve_forever, daemon=True).start()
+    server=ThreadingHTTPServer(('127.0.0.1',0),RemoteClient)
+    server.lan_access=Access({'password':'example-password','secret':'x'*64})
+    server.closing=threading.Event()
+    threading.Thread(target=server.serve_forever,daemon=True).start()
     try:
         def request(method, path, body=None, headers=None):
             connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=3)
@@ -101,22 +86,21 @@ def verify_lan():
             connection.close()
             return result
         origin = f'http://127.0.0.1:{server.server_port}'
-        assert request('GET', '/api/health')[0] == 401
+        assert request('GET', '/api/v1/health')[0] == 401
         assert b'password' in request('GET', '/')[2]
         assert request('POST', '/login', 'password=example-password', {'Origin': 'http://outside.invalid'})[0] == 403
         code, headers, _ = request('POST', '/login', 'password=example-password', {'Origin': origin})
         assert code == 303 and 'HttpOnly' in headers['Set-Cookie']
         cookie = headers['Set-Cookie'].split(';')[0]
-        assert request('GET', '/api/health', headers={'Cookie': cookie})[0] == 200
-        headers = {'Cookie': cookie, 'Origin': origin, 'X-MotorBench-Token': 'fake-token'}
-        assert request('POST', '/api/fake', '{}', headers)[0] == 200
-        assert request('POST', '/api/fake', '{}', {**headers, 'Origin': 'http://outside.invalid'})[0] == 403
+        assert request('GET', '/api/v1/health', headers={'Cookie': cookie})[0] == 200
+        headers = {'Cookie': cookie, 'Origin': origin, 'X-MotorBench-Token': devices.TOKEN}
+        assert request('POST', '/api/v1/control/heartbeat', '{}', headers)[0] == 200
+        assert request('POST', '/api/v1/control/heartbeat', '{}', {**headers, 'Origin': 'http://outside.invalid'})[0] == 403
         assert request('GET', '/', headers={'Host': 'outside.invalid'})[0] == 403
-        assert request('GET', '/api/health', headers={'Cookie': cookie + 'invalid'})[0] == 401
-        print('PASS: LAN password gate, signed session, same-origin proxy, unauthorized/foreign-origin rejection')
+        assert request('GET', '/api/v1/health', headers={'Cookie': cookie + 'invalid'})[0] == 401
+        print('PASS: LAN password gate, signed session, same-origin local API, unauthorized/foreign-origin rejection')
     finally:
-        for service in (server, bridge):
-            service.shutdown(); service.server_close()
+        server.closing.set();server.shutdown();server.server_close()
 
 
 if __name__ == '__main__':

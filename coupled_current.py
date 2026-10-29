@@ -7,7 +7,7 @@ import time
 import uuid
 from collections import deque
 from brake_torque import BrakeTorque
-from safety_control import SafetyControl
+from workbench.control import ControlCoordinator
 from power_limits import power_problem, MOTOR_SUPPLY_CURRENT_LIMIT, MOTOR_SUPPLY_PRESET_CURRENT_A
 
 
@@ -124,7 +124,6 @@ class CoupledCurrent:
         self.thread = None
         self.sync = None
         self.participants = []
-        self.lease = 0
         self.cancel = threading.Event()
         self.run = {'running': False, 'phase': 'idle', 'reason': '', 'elapsed': 0, 'stopConfirmed': None}
 
@@ -145,7 +144,6 @@ class CoupledCurrent:
 
     def status(self, heartbeat=False):
         with self.lock:
-            if heartbeat:self.lease = time.monotonic()
             run = copy.deepcopy(self.run)
             sync = self.sync
             if sync:
@@ -155,7 +153,7 @@ class CoupledCurrent:
                     if sync.began:
                         run['elapsed'] = round(max(0, time.monotonic()-sync.began), 3) if run['running'] else run['elapsed']
             return {'run': run, 'motor': self.motor.status(), 'brake': self.brake.status(),
-                    'capabilities': {'torqueSweep': True, 'fullIqRamp': True, 'maximumOutput': True}, 'torqueCalibration': BrakeTorque.metadata()}
+                    'capabilities': {'torqueSweep': True, 'fullIqRamp': True, 'maximumOutput': bool((self.motor.status().get('snapshot') or {}).get('capabilities',{}).get('maximumOutput'))}, 'torqueCalibration': BrakeTorque.metadata()}
 
     def _event(self, kind, payload):
         try:self.observe(kind, payload)
@@ -178,7 +176,6 @@ class CoupledCurrent:
             self.sync = RampSynchronization(uuid.uuid4().hex)
             self.cancel = threading.Event()
             self.participants = []
-            self.lease = time.monotonic()
             self.run = {'id': self.sync.id, 'running': True, 'phase': 'checking', 'reason': '', 'elapsed': 0,
                         'stopConfirmed': None, 'motor': dict(zip(('stepA','intervalS','durationS'), m)),
                         'brake': {'mode':'hold','currentA':b[0],'durationS':b[2]}}
@@ -218,7 +215,7 @@ class CoupledCurrent:
         if launched and not confirmations.get('motor'):
             try:
                 self.motor_supply.set_output(False)
-                SafetyControl.wait_discharged(self.motor_supply)
+                ControlCoordinator.wait_discharged(self.motor_supply)
                 with self.lock:self.run['motorIsolated']=True
             except Exception as error:errors.append(f'电机断电兜底：{error}')
         with self.lock:
@@ -227,6 +224,13 @@ class CoupledCurrent:
                             stopConfirmed=all(confirmations.values()) if launched else None,
                             stopResults=confirmations,stopErrors=errors)
         self._event('coupled_end',self.status()['run'])
+
+    def _check_loading_capabilities(self):
+        snapshot=self.motor.snapshot or {}
+        fields=snapshot.get('capabilities',{}).get('fields')
+        required=(1<<2)|(1<<5)|(1<<6)|(1<<7)
+        if fields is not None and fields&required!=required:
+            raise ValueError('加载测试缺少 Iq、转速或多圈位置反馈能力')
 
     def _start_sweep(self, data):
         try:
@@ -244,7 +248,7 @@ class CoupledCurrent:
         maximum_options={key:data[key] for key in ('negativeIdMinA','maxPhaseA','maxSpeedRpm') if key in data}
         self.sync = RampSynchronization(uuid.uuid4().hex)
         self.cancel = threading.Event();self.load_requested = threading.Event()
-        self.participants = [];self.lease = time.monotonic()
+        self.participants = []
         self.run = dict(id=self.sync.id, mode='torque_sweep', running=True, phase='checking',
                         reason='', elapsed=0, stopConfirmed=None, motorMode=motor_mode, maximumOptions=maximum_options,
                         torqueConfig=config, targetNm=0., measuredNm=None, brakeCurrentA=0., loadSteps=0)
@@ -256,7 +260,7 @@ class CoupledCurrent:
         with self.control, self.lock:
             if (not self.run['running'] or self.run.get('mode')!='torque_sweep'
                     or self.run.get('phase')!='awaiting_load' or self.cancel.is_set()
-                    or self.sync.cancel.is_set() or time.monotonic()-self.lease>2.5):
+                    or self.sync.cancel.is_set()):
                 raise ValueError('需先完成 Iq 满转准备，才能开始力矩加载')
             if data.get('id')!=self.run['id']:raise ValueError('试验已变化，请刷新状态后重新操作')
             if self.load_requested.is_set():raise ValueError('力矩加载已请求，请勿重复启动')
@@ -266,12 +270,7 @@ class CoupledCurrent:
             return self.status()
 
     def _run_sweep(self, sync):
-        """Capped 10 A target with firmware slew; brake stays OFF until requested.
-
-        Native motor supervision/watchdog and the joint owner lease stay active
-        through spin-up, the waiting period, and closed-loop torque loading.
-        No power-cycle recovery or automatic restart is attempted after motion.
-        """
+        """Prepare motor output, then wait for the separate loading action."""
         launched=[];reason='任务结束';samples=deque();standstill=StandstillConfirmation()
         measurement_end=None
         recording_id=None
@@ -293,6 +292,7 @@ class CoupledCurrent:
                     busLimitA=settings[2]/10**pc['currentDecimals'],
                     busVoltageV=settings[1]/10**pc['voltageDecimals'])
             _,_,_,limit=self.motor.prepare(motor_data)
+            self._check_loading_capabilities()
             # Brake's native timed task is not started; this only checks its
             # connection, configuration and OFF state before joint ownership.
             brake_preflight=self.brake.prepare(dict(mode='hold',currentA=0,durationS=1))
@@ -313,7 +313,9 @@ class CoupledCurrent:
                     recording=self.recorder.start({'name':'最大输出力矩测试','range':100}) if own_recording else self.recorder.status()
                     if recording:
                         if own_recording:recording_id=recording['id']
-                        with self.lock:self.run['recordingId']=recording['id']
+                        with self.lock:
+                            self.run['recordingId']=recording['id']
+                            self.run['testSubject']=recording.get('testSubject',{})
                 except Exception as error:
                     with self.lock:self.run['recordingError']=str(error)
                     self._event('recording_error',{'error':str(error)})
@@ -324,8 +326,6 @@ class CoupledCurrent:
             while not sync.cancel.is_set():
                 now=time.monotonic()
                 if self.cancel.is_set():raise ValueError('操作者停止')
-                if now-self.lease>2.5:raise ValueError('联动页面心跳中断，停止两路输出')
-                self.motor.lease=now
                 measured=self._check_sensor()
                 power_status=self.motor_supply.cached_status()
                 power=power_status.get('snapshot') or {}
@@ -427,7 +427,7 @@ class CoupledCurrent:
             if launched and not confirmations.get('motor'):
                 try:
                     self.motor_supply.set_output(False)
-                    SafetyControl.wait_discharged(self.motor_supply)
+                    ControlCoordinator.wait_discharged(self.motor_supply)
                     with self.lock:self.run['motorIsolated']=True
                 except Exception as error:errors.append(f'电机断电兜底：{error}')
             with self.lock:
@@ -442,11 +442,11 @@ class CoupledCurrent:
                     with self.lock:self.run['recordingError']=str(error)
 
     def _recover(self):
-        if self.cancel.is_set() or time.monotonic()-self.lease>2.5:raise ValueError('操作者已离线或取消')
+        if self.cancel.is_set():raise ValueError('操作者已离线或取消')
         try:self.brake.stop()
         finally:self.motor_supply.set_output(False)
-        SafetyControl.wait_discharged(self.motor_supply,self.cancel)
-        SafetyControl.wait_discharged(self.brake.channel,self.cancel)
+        ControlCoordinator.wait_discharged(self.motor_supply,self.cancel)
+        ControlCoordinator.wait_discharged(self.brake.channel,self.cancel)
         if self.cancel.wait(.5):raise ValueError('恢复已取消')
         options={'cancel':self.cancel} if hasattr(self.motor_supply,'cancel_pending') else {}
         self.motor_supply.set_output(True,{'voltage':24,'current':MOTOR_SUPPLY_PRESET_CURRENT_A},**options)
@@ -454,7 +454,7 @@ class CoupledCurrent:
         powered_at=time.time()
         deadline=time.monotonic()+5
         while True:
-            if self.cancel.is_set() or time.monotonic()-self.lease>2.5:raise ValueError('恢复已取消或操作者心跳中断')
+            if self.cancel.is_set():raise ValueError('恢复已取消或操作者心跳中断')
             try:
                 self.motor.connect(cancel=self.cancel)
                 snapshot=self.motor._refresh()
@@ -500,6 +500,7 @@ class CoupledCurrent:
             self._check_sensor()
             # Both read-only preflights complete before either output is enabled.
             self.motor.prepare(self.run['motor'])
+            self._check_loading_capabilities()
             self.brake.prepare(self.run['brake'])
             if sync.cancel.is_set():
                 reason = sync.reason or '用户停止'
@@ -515,7 +516,6 @@ class CoupledCurrent:
                 self.brake.start(self.run['brake'], synchronization=sync)
             while not sync.cancel.is_set():
                 if self.cancel.is_set():raise ValueError('操作者停止')
-                if time.monotonic()-self.lease > 2.5:raise ValueError('联动页面心跳中断，停止两路输出')
                 measured=self._check_sensor()
                 if not self.motor_supply.cached_status()['connected']:raise ValueError('电机电源通信中断，停止两路输出')
                 if sync.began:
@@ -523,8 +523,6 @@ class CoupledCurrent:
                         self.run['phase'] = 'running'
                         self.run['elapsed'] = round(max(0, time.monotonic()-sync.began), 3)
                     # Engines retain their native I/O, feedback, limit and protection checks.
-                    # Only this live joint lease renews their individual watchdogs.
-                    self.motor.lease = self.brake.lease = time.monotonic()
                     now=time.monotonic()
                     resolution=10**-int(measured.get('speedDecimals',1))
                     if abs(measured['speed']) > resolution:

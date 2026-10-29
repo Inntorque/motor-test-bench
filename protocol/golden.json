@@ -1,0 +1,7 @@
+{
+  "identify_request": "4d544250010001000100000000000000",
+  "stop": "53544f5078563412",
+  "iq_negative_1234ma": "02100504002efbffff",
+  "position_negative_large": "0a1006080035fb048ee0feffff",
+  "nested_stream": "00200a12000100030400204e00000200030400ff74ff00"
+}

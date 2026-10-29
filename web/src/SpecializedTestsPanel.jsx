@@ -1,152 +1,177 @@
-import React, { useEffect, useState } from 'react';
-import AutomaticTestsPanel from './AutomaticTestsPanel.jsx';
+import React,{useEffect,useRef,useState} from 'react';
+import {apiFetch} from './apiClient.js';
+import {subjectText,setupText} from './testSubjects.js';
+import {referencesCsv,saveFile,referenceAnalysis,loadAnalysis,saveAnalysis} from './specialized/data.js';
+import './specialized/specialized.css';
 
-const TYPES = {
-  baseline: ['零加载基线', '关闭制动励磁，记录有符号扭矩均值、标准差、峰峰值、RMS 和实际转速。'],
-  ripple: ['稳态波动', '先在工作台保持工况稳定，统计转矩与转速的峰峰波动率、变异系数。'],
-  temperature: ['NTC 温度记录', '记录电机已有 NTC 测点的初温、末温、最高温和温度变化；填写环境温度后计算末次温升。'],
-};
-const STATES = {settling:'等待稳定',running:'正在采集',completed:'采集完成',stopped:'手动结束',interrupted:'采集中断'};
-const show = (n, digits=3) => Number.isFinite(n) ? n.toFixed(digits) : '—';
-const running = record => ['running','settling'].includes(record?.state);
+const SHOW=(value,digits=3)=>Number.isFinite(value)?value.toFixed(digits):'—';
+const CATEGORIES={performance:'性能测试',position:'定位精度',thermal:'温升曲线'};
+const DEFAULTS={name:'',ratedSpeedRpm:'',ratedTorqueNm:'',
+  durationS:'600',windowS:'1',settleS:'1',dwellS:'2',coolingS:'60',ambientC:'',thermalWindowS:'600',thermalSlopeCPerMin:'0.1',stopWhenStable:false,
+  operation:'observe',test:'capture',controlMode:'IQ',target:'1',iqLevels:'0.5,1,1.5,2',ktMaxSpeedRpm:'5',ktMaxIdA:'0.5',
+  positions:'0,45,90,135,180,225,270,315',cycles:'5',approachDeg:'2',positionReference:'relative',motionConfirmed:false,
+  startNm:'0.1',stepNm:'0.1',maxNm:'30',intervalS:'5',bandwidthVerified:false,sensorInfo:'',coolingInfo:''};
 
-function PreviewChart({ report }) {
-  const [chosen,setChosen] = useState('');
-  const metric=chosen || (report.kind==='temperature' ? 'temperature' : 'torque');
-  const rows=report.preview?.[metric] || [];
-  const unit={torque:'N·m',speed:'rpm',temperature:'°C'}[metric];
-  let low=0, high=1;
-  if(rows.length) {
-    const values=rows.map(row=>row[1]);
-    if(metric==='temperature') {low=Math.floor(Math.min(...values))-1;high=Math.ceil(Math.max(...values))+1;}
-    else if(metric==='torque') {high=Math.max(.01,...values.map(Math.abs))*1.1;low=-high;}
-    else high=Math.max(1,...values)*1.1;
-  }
-  const end=Math.max(1,rows.at(-1)?.[0] || 0);
-  const path=rows.map(([t,value],index)=>`${index?'L':'M'}${50+t/end*640},${175-(value-low)/(high-low)*145}`).join(' ');
-  return <section className="special-preview" aria-label="专项曲线预览">
-    <label>预览指标 <select aria-label="专项曲线预览指标" value={metric} onChange={event=>setChosen(event.target.value)}><option value="torque">扭矩</option><option value="speed">转速</option><option value="temperature">NTC 温度</option></select></label>
-    {rows.length ? <svg viewBox="0 0 720 215" role="img" aria-label={`专项${metric}曲线，单位${unit}`}>
-      {[0,.5,1].map(v=><g key={v}><line x1="50" x2="690" y1={30+v*145} y2={30+v*145} stroke="#d4dce7"/><text x="42" y={34+v*145} textAnchor="end">{show(high-v*(high-low),2)}</text></g>)}
-      <path d={path} fill="none" stroke="#1455c0" strokeWidth="2.5" vectorEffect="non-scaling-stroke"/><text x="50" y="200">0 s</text><text x="690" y="200" textAnchor="end">{show(end,1)} s</text>
-    </svg> : <p>该指标暂无有效预览数据。</p>}
-    <p>预览约每 0.5 秒抽点并压缩，完整原始数据保存在 CSV，统计使用全部有效采集点。</p>
-  </section>;
+function Curve({title,points,x,y,xLabel,yLabel,series}) {
+  const lines=series||[{points,x,y,color:'#2265bd'}];
+  const valid=lines.map(line=>({...line,values:(line.points||[]).filter(p=>Number.isFinite(p[line.x])&&Number.isFinite(p[line.y]))}));
+  const all=valid.flatMap(line=>line.values.map(p=>[p[line.x],p[line.y]]));
+  if(!all.length)return <section className="sx-chart"><h3>{title}</h3><p>尚无有效数据，缺失量不会填零。</p></section>;
+  let minX=Math.min(...all.map(p=>p[0])),maxX=Math.max(...all.map(p=>p[0]));
+  let minY=Math.min(0,...all.map(p=>p[1])),maxY=Math.max(...all.map(p=>p[1]));
+  if(maxX===minX)maxX=minX+1;if(maxY===minY)maxY=minY+1;
+  const pad=(maxY-minY)*.08;minY-=pad;maxY+=pad;
+  return <section className="sx-chart"><h3>{title}</h3><svg viewBox="0 0 760 270" role="img" aria-label={title}>
+    {[0,.25,.5,.75,1].map(t=><g key={t}><line x1="75" x2="720" y1={25+t*190} y2={25+t*190} stroke="#dce4ee"/><text x="65" y={29+t*190} textAnchor="end">{SHOW(maxY-t*(maxY-minY),2)}</text></g>)}
+    {valid.map((line,i)=><g key={i}><polyline points={line.values.map(p=>`${75+(p[line.x]-minX)/(maxX-minX)*645},${215-(p[line.y]-minY)/(maxY-minY)*190}`).join(' ')} fill="none" stroke={line.color} strokeWidth="2"/>
+      {line.values.length<=150&&line.values.map((p,j)=><circle key={j} cx={75+(p[line.x]-minX)/(maxX-minX)*645} cy={215-(p[line.y]-minY)/(maxY-minY)*190} r="2.5" fill={line.color}/>)}</g>)}
+    <text x="75" y="238">{SHOW(minX,1)}</text><text x="720" y="238" textAnchor="end">{SHOW(maxX,1)}</text><text x="400" y="263" textAnchor="middle">{xLabel}</text><text x="8" y="16">{yLabel}</text>
+  </svg></section>;
 }
 
-function SpecializedTestsPanel({ token, bridgeReady, onWorkbench }) {
-  const [form,setForm] = useState({kind:'baseline',name:'',durationS:'10',settleS:'2',ambientC:'',
-    torqueMeanFloorNm:'0.01',speedMeanFloorRpm:'1',manualBrakeOff:false,steadyConfirmed:false});
-  const [data,setData] = useState({current:null,records:[],availability:{}});
-  const [selectedId,setSelectedId] = useState('');
-  const [busy,setBusy] = useState(false);
-  const [error,setError] = useState('');
-  const [section,setSection] = useState('automatic');
-  const patch = change => setForm(previous=>({...previous,...change}));
-  async function getStatus() {
-    const response = await fetch('/api/specialized/status',{cache:'no-store',signal:AbortSignal.timeout(4000)});
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || '专项测试服务不可用');
+export default function SpecializedTestsPanel({token,bridgeReady}) {
+  const [category,setCategory]=useState('performance'),[form,setForm]=useState(DEFAULTS);
+  const [state,setState]=useState({automatic:{records:[]},specialized:{records:[]},coupled:{run:{}}});
+  const [catalog,setCatalog]=useState(null);
+  const [chosen,setChosen]=useState(null),[detail,setDetail]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [instrument,setInstrument]=useState({name:'',zeroDeg:'0',aligned:false});
+  const inFlight=useRef(false);const patch=value=>setForm(old=>({...old,...value}));
+  async function request(path,body) {
+    const response=await apiFetch(path,body?{method:'POST',headers:{'Content-Type':'application/json','X-MotorBench-Token':token.current},body:JSON.stringify(body)}:{cache:'no-store',forceNetwork:true,signal:AbortSignal.timeout(5000)});
+    const data=await response.json();if(!response.ok)throw Error(data.error||'专项服务请求失败');return data;
+  }
+  async function refresh() {
+    if(inFlight.current)return;inFlight.current=true;
+    try {
+      const [automatic,specialized,coupled,subjects]=await Promise.all(['/api/automatic/status','/api/specialized/status','/api/coupled-current/status','/api/test-subjects'].map(path=>request(path)));
+      setCatalog(subjects);
+      setState({automatic,specialized,coupled});
+    } catch(failure){setError(failure.message);}finally{inFlight.current=false;}
+  }
+  useEffect(()=>{void refresh();const timer=setInterval(refresh,1000);return()=>clearInterval(timer);},[]);
+  const reports=[...(state.automatic.records||[]).map(report=>({...report,origin:'automatic'})),...(state.specialized.records||[]).map(report=>({...report,origin:'specialized'}))].sort((a,b)=>b.startedAt-a.startedAt);
+  const live=[{...state.automatic.current,origin:'automatic'},{...state.specialized.current,origin:'specialized'}].find(report=>report.running&&report.specializedSchema===2);
+  const report=detail||(live&&(!chosen||chosen===live.id)?live:null)||reports.find(row=>row.id===chosen)||reports.find(row=>row.category===category&&row.specializedSchema===2);
+  const anyActive=!!state.automatic.current?.running||['running','settling'].includes(state.specialized.current?.state)||!!state.coupled.run?.running;
+  const setup=(catalog?.testSetups||[]).find(item=>item.id===catalog?.selected?.testSetupId&&item.motorId===catalog?.selected?.motorId);
+  useEffect(()=>patch({motionConfirmed:false}),[setup?.id,setup?.revision]);
+  const count=(report?.positionVisitCount??report?.positionVisits?.length)||0;
+  function recipe() {
+    if(!setup)throw Error('请先在右上角选择电机及其测试配置');
+    const result={...form,suite:category,testSetupId:setup.id,testSetupRevision:setup.revision??0,iqLevelsA:form.iqLevels.split(/[,，\s]+/).filter(Boolean).map(Number),positionsDeg:form.positions.split(/[,，\s]+/).filter(Boolean).map(Number)};
+    for(const key of ['positions','iqLevels','startNm','stepNm','maxNm','intervalS'])delete result[key];
+    for(const key of ['durationS','windowS','settleS','dwellS','coolingS','thermalWindowS','thermalSlopeCPerMin','target','cycles','approachDeg','ktMaxSpeedRpm','ktMaxIdA']) {
+      if(form[key].trim()===''||!Number.isFinite(Number(form[key])))throw Error(`${key} 必须填写有效数值`);result[key]=Number(form[key]);
+    }
+    for(const key of ['ratedSpeedRpm','ratedTorqueNm','ambientC']) {
+      if(form[key]!==''&&!Number.isFinite(Number(form[key])))throw Error(`${key} 必须为有效数值或留空`);
+      result[key]=form[key]===''?null:Number(form[key]);
+    }
     return result;
   }
-  useEffect(()=>{
-    let active=true, inFlight=false;
-    async function poll() {
-      if(inFlight) return;
-      inFlight=true;
-      try { const result=await getStatus(); if(active) {setData(result);setError('');} }
-      catch(failure) { if(active) setError(failure.message); }
-      finally {inFlight=false;}
-    }
-    void poll();
-    const timer=setInterval(poll,1000);
-    return ()=>{active=false;clearInterval(timer);};
-  },[]);
-  const current=data.current;
-  const active=running(current);
-  const availability=data.availability || {};
-  const problems=[];
-  if(!bridgeReady) problems.push('本机通信桥未就绪');
-  if(form.kind==='temperature') {if(!availability.temperature) problems.push('电机未连接或 NTC 读数无效/过期');}
-  else if(!availability.sensor) problems.push('请先连接扭矩传感器');
-  if(form.kind==='baseline') {
-    if(availability.brakeOutput===true) problems.push('制动电源仍在输出');
-    if(availability.brakeOutput==null && !form.manualBrakeOff) problems.push('需确认制动励磁已关闭');
-  }
-  if(form.kind==='ripple' && !form.steadyConfirmed) problems.push('需确认工况已稳定');
-  const valid = Number(form.durationS)>=1 && Number(form.durationS)<=3600 && form.durationS.trim()!=='' &&
-    form.settleS.trim()!=='' && Number(form.settleS)>=0 && Number(form.settleS)<=300 &&
-    (form.ambientC==='' || (Number(form.ambientC)>=-40 && Number(form.ambientC)<=100)) &&
-    Number(form.torqueMeanFloorNm)>=0 && Number(form.torqueMeanFloorNm)<=50 &&
-    Number(form.speedMeanFloorRpm)>=0 && Number(form.speedMeanFloorRpm)<=10000;
-  async function action(name) {
+  async function act(action) {
     setBusy(true);setError('');
+    let captureId;
     try {
-      const payload=name==='stop' ? {id:current.id} : {...form,
-        name:form.name.trim() || TYPES[form.kind][0], durationS:Number(form.durationS),settleS:Number(form.settleS),
-        ambientC:form.ambientC===''?null:Number(form.ambientC),
-        torqueMeanFloorNm:Number(form.torqueMeanFloorNm),speedMeanFloorRpm:Number(form.speedMeanFloorRpm)};
-      const response=await fetch(`/api/specialized/${name}`,{method:'POST',
-        headers:{'Content-Type':'application/json','X-MotorBench-Token':token.current},body:JSON.stringify(payload)});
-      const result=await response.json();
-      if(!response.ok) throw new Error(result.error || '专项测试操作失败');
-      setSelectedId(result.current.id);
-      setData(await getStatus());
-    } catch(failure) {setError(failure.message);}
-    finally {setBusy(false);}
+      if(action==='start') {
+        const body=recipe();let response;
+        if(category==='performance'&&(form.test==='capture'||form.test==='envelope')) {
+          response=await request('/api/specialized/start',{...body,test:'capture'});captureId=response.current.id;
+          if(form.test==='envelope') {
+            if(['startNm','stepNm','maxNm','intervalS'].some(key=>form[key].trim()===''||!Number.isFinite(Number(form[key]))))throw Error('加载参数必须填写有效数值');
+            await request('/api/coupled-current/start',{mode:'torque_sweep',motorMode:'maximum_output',busLimitA:20,busVoltageV:24,
+            brake:{startNm:Number(form.startNm),stepNm:Number(form.stepNm),maxNm:Number(form.maxNm),intervalS:Number(form.intervalS)}});
+          }
+        }else if(category==='thermal'&&form.operation==='observe')response=await request('/api/specialized/start',body);
+        else response=await request('/api/automatic/start',body);
+        setChosen(response.current.id);setDetail(null);
+      }else if(action==='load')await request('/api/coupled-current/load',{id:state.coupled.run.id});
+      else if(action==='stopDrive')await request('/api/automatic/stop',{id:state.automatic.current?.id});
+      else if(action==='stopEnvelope')await request('/api/coupled-current/stop',{});
+      else await request('/api/specialized/stop',{id:state.specialized.current?.id});
+      await refresh();
+    } catch(failure) {
+      setError(failure.message);
+      if(captureId)try{await request('/api/specialized/stop',{id:captureId});}catch{}
+    }finally{setBusy(false);}
   }
-  const report=current && (!selectedId || current.id===selectedId) ? current
-    : (data.records || []).find(r=>r.id===selectedId) || data.records?.[0];
-  const metrics=report?.stats || {};
-  const download = (id,name) => `/api/specialized/files/${id}/${name}`;
-  return <section className="specialized-tests" aria-label="专项测试">
-    <div className="panel special-intro"><h2>专项测试</h2><p>空载与带载脚本按顺序控制电机并保存结果；被动测量可独立记录现有工况。</p>
-      <div className="hw-output-actions"><button className={`button ${section==='automatic'?'primary':''}`} onClick={()=>setSection('automatic')}>空载 / 带载自动测试</button>
-        <button className={`button ${section==='passive'?'primary':''}`} onClick={()=>setSection('passive')}>被动测量与统计{active?' · 正在采集':''}</button>
-        <button className="button" onClick={()=>onWorkbench('bench')}>返回工作台控制设备</button></div></div>
-    <div hidden={section!=='automatic'}><AutomaticTestsPanel token={token} bridgeReady={bridgeReady}/></div>
-    <div hidden={section!=='passive'}><p className="setpoint-hint">被动采集只管理记录，电机和电源输出由工作台控制。请先设置运行工况。</p>
-    <div className="special-layout">
-      <section className="panel special-config"><h3>测试配方</h3>
-        <div className="hw-form-grid">
-          <label>测试项目<select aria-label="专项测试项目" value={form.kind} disabled={active || busy} onChange={e=>patch({kind:e.target.value})}>{Object.entries(TYPES).map(([id,[label]])=><option key={id} value={id}>{label}</option>)}</select></label>
-          <label>记录名称<input value={form.name} maxLength={100} placeholder={TYPES[form.kind][0]} disabled={active || busy} onChange={e=>patch({name:e.target.value})}/></label>
-          <label>有效采集时长 s<input aria-label="专项采集时长 s" type="number" min="1" max="3600" value={form.durationS} disabled={active || busy} onChange={e=>patch({durationS:e.target.value})}/></label>
-          <label>稳定等待 s<input aria-label="专项稳定等待 s" type="number" min="0" max="300" value={form.settleS} disabled={active || busy} onChange={e=>patch({settleS:e.target.value})}/></label>
-          {form.kind==='temperature' && <label>环境温度 °C（可选）<input type="number" min="-40" max="100" step="0.1" value={form.ambientC} disabled={active || busy} onChange={e=>patch({ambientC:e.target.value})}/></label>}
-        </div>
-        <p>{TYPES[form.kind][1]}</p>
-        {form.kind==='baseline' && <label className="special-confirm"><input type="checkbox" checked={form.manualBrakeOff} disabled={active || busy} onChange={e=>patch({manualBrakeOff:e.target.checked})}/>我已在现场确认制动励磁供电关闭或断开（人工确认，会随报告保存）</label>}
-        {form.kind==='ripple' && <label className="special-confirm"><input type="checkbox" checked={form.steadyConfirmed} disabled={active || busy} onChange={e=>patch({steadyConfirmed:e.target.checked})}/>工况已经稳定，采集期间不调整目标电流和制动设定</label>}
-        <details><summary>波动率计算设置</summary><div className="hw-form-grid">
-          <label>转矩归一化下限 N·m<input type="number" min="0" max="50" step="0.01" value={form.torqueMeanFloorNm} disabled={active || busy} onChange={e=>patch({torqueMeanFloorNm:e.target.value})}/></label>
-          <label>转速归一化下限 rpm<input type="number" min="0" max="10000" step="1" value={form.speedMeanFloorRpm} disabled={active || busy} onChange={e=>patch({speedMeanFloorRpm:e.target.value})}/></label>
-        </div><p>均值绝对值不高于下限时只报告绝对波动；峰峰波动率 = (最大−最小)/|均值|，变异系数 = 标准差/|均值|。</p></details>
-        {!active && problems.length>0 && <ul className="special-problems">{problems.map(p=><li key={p}>{p}</li>)}</ul>}
-        {error && <p className="hw-inline-error" role="alert">{error}</p>}
-        <div className="hw-output-actions"><button className="button primary" disabled={busy || active || problems.length>0 || !valid} onClick={()=>action('start')}>开始专项采集</button>
-          <button className="button" disabled={busy || !active} onClick={()=>action('stop')}>结束采集</button></div>
-        {current && <p role="status">{STATES[current.state]} · {show(current.elapsedS,1)} s · 扭矩/转速 {current.sensorSamples} 帧 · NTC 快照 {current.temperatureSamples} 次</p>}
-        <p className="setpoint-hint">稳定等待期间保留原始数据，不计入统计。断线、帧丢失、零加载时励磁开启等情况会中断记录。1000 帧/秒是通信速率。</p>
-      </section>
-      <section className="panel special-result"><h3>统计结果</h3>
-        {!report ? <p>完成采集后显示结果，记录保存在本机工程 recordings/specialized 目录。</p> : <>
-          <h4>{report.name}</h4><p>{STATES[report.state]} · {report.reason || '采集中'}{!running(report) && ` · ${report.valid ? '数据可用于统计' : '记录不完整或工况不满足要求'}`}</p>
-          <div className="records-table-wrap"><table><thead><tr><th>指标</th><th>有效点</th><th>均值</th><th>最小</th><th>最大</th><th>标准差</th><th>RMS</th><th>峰峰值</th></tr></thead><tbody>
-            {[['torque','扭矩 N·m'],['speed','转速 rpm'],['powerW','轴功率 W'],['actualIq','实际 Iq A'],['targetIq','目标 Iq A'],['temperature','NTC °C']].map(([key,label])=><tr key={key}><th>{label}</th><td>{metrics[key]?.count || 0}</td>{['mean','min','max','std','rms','peakToPeak'].map(field=><td key={field}>{show(metrics[key]?.[field])}</td>)}</tr>)}
-          </tbody></table></div>
-          <p>转矩峰峰波动率：{show(metrics.torque?.peakToPeakPercent)} % · 变异系数：{show(metrics.torque?.cvPercent)} %</p>
-          <p>转速峰峰波动率：{show(metrics.speed?.peakToPeakPercent)} % · 变异系数：{show(metrics.speed?.cvPercent)} %</p>
-          <p>NTC 温度变化：{show(report.temperatureChangeC,1)} °C · 末次相对环境温升：{show(report.endRiseAboveAmbientC,1)} °C</p>
-          <PreviewChart key={report.id} report={report} />
-          <p>结果为描述性统计，尚未设置合格阈值；NTC 仅代表电机现有测点，未判定热稳定或额定持续能力。</p>
-          {!running(report) && <div className="hw-output-actions"><a className="button" href={download(report.id,'data.csv')} download>导出专项原始 CSV</a><a className="button" href={download(report.id,'report.json')} download>导出结果报告 JSON</a></div>}
-        </>}
-      </section>
-    </div>
-    <section className="panel special-history"><h3>专项测试记录</h3><div className="records-table-wrap"><table><thead><tr><th>时间</th><th>项目 / 名称</th><th>状态</th><th>数据</th><th/></tr></thead><tbody>
-      {(data.records || []).map(record=><tr key={record.id}><td>{new Date(record.startedAt*1000).toLocaleString()}</td><td>{TYPES[record.kind]?.[0]} / {record.name}</td><td>{STATES[record.state]}</td><td>{record.sensorSamples} 帧 / {record.temperatureSamples} 次温度</td><td><button className="button small" onClick={()=>setSelectedId(record.id)}>查看结果</button></td></tr>)}
-    </tbody></table></div>{!data.records?.length && <p>暂无专项测试记录。</p>}</section></div>
+  async function showReport(row) {
+    setBusy(true);setError('');
+    try {const data=await request(`/api/${row.origin}/files/${row.id}/report.json`);setDetail(loadAnalysis({...data,origin:row.origin}));setChosen(row.id);}
+    catch(failure){setError(failure.message);}finally{setBusy(false);}
+  }
+  async function importReferences(file) {
+    if(!file||!report)return;setBusy(true);setError('');
+    try {
+      const rows=referencesCsv(await file.text());if(!rows.length)throw Error('CSV 没有参考数据');
+      if(!instrument.name.trim()||!instrument.aligned||instrument.zeroDeg.trim()===''||!Number.isFinite(Number(instrument.zeroDeg)))throw Error('请填写仪器/参考零位并确认坐标已对齐');
+      const analysis=referenceAnalysis(report,rows,{name:instrument.name.trim(),zeroDeg:Number(instrument.zeroDeg),aligned:true});
+      setDetail({...report,...analysis});
+      try {saveAnalysis(report,analysis);}catch{setError('分析已生成，但浏览器保存失败，请立即导出专项报告 JSON。');}
+    }catch(failure){setError(failure.message);}finally{setBusy(false);}
+  }
+  const field=(key,label,options={})=><label key={key}>{label}<input aria-label={label} value={form[key]} type={options.text?'text':'number'} step="any" disabled={anyActive||busy} onChange={event=>patch({[key]:event.target.value})}/></label>;
+  const select=(key,label,choices)=><label>{label}<select aria-label={label} value={form[key]} disabled={anyActive||busy} onChange={event=>patch({[key]:event.target.value})}>{choices.map(([value,text])=><option key={value} value={value}>{text}</option>)}</select></label>;
+  const metrics=report?.performance||{},position=report?.positionMetrics||{},temperature=report?.thermal||{};
+  return <section className="specialized-tests sx-suite" aria-label="专项测试">
+    <header className="sx-heading"><div><h2>专项测试</h2><p>性能、定位精度与温升测试，保存实测曲线和报告。</p></div><span>V2 · {anyActive?'任务进行中':'待测试'}</span></header>
+    <nav className="sx-tabs" aria-label="专项测试分类">{Object.entries(CATEGORIES).map(([key,label])=><button className={category===key?'active':''} key={key} onClick={()=>{setCategory(key);setChosen(null);setDetail(null);patch({test:key==='performance'?'capture':key});}}>{label}</button>)}</nav>
+    <div className="sx-columns"><section className="sx-card"><h3>{CATEGORIES[category]}配方</h3>
+      <p className="sx-muted">先完成设备连接。电机、驱动板和测试配置在本次开始时冻结。</p>
+      <p className="sx-note" aria-label="当前测试配置">{setupText(setup)}{setup?` · 质量 ${setup.massKg??'未填'} kg · 体积 ${setup.volumeL??'未填'} L`:'，请在右上角选择电机及其测试配置'}</p>
+      <div className="sx-fields">{field('name','记录名称',{text:true})}
+        {category==='performance'&&select('test','性能配方',[['capture','T-N：记录现有工况'],['envelope','T-N：最大输出＋阶梯加载'],['kt','转矩常数：低速电流分级'],['point','指定工况测量']])}
+        {category==='thermal'&&select('operation','温升运行方式',[['observe','只记录现有工况'],['active','专项保持指定工况']])}
+        {(category==='thermal'&&form.operation==='active'||category==='performance'&&form.test==='point')&&<>{select('controlMode','工况控制方式',[['IQ','指定 Iq'],['VELOCITY','指定输出转速']])}{field('target',form.controlMode==='IQ'?'目标 Iq A':'目标输出转速 rpm')}</>}
+        {category!=='position'&&field('durationS','采集/运行时长 s')}{field('windowS','统计窗口 s')}
+        {category!=='position'&&<>{field('ratedSpeedRpm','铭牌额定转速 rpm（可选）')}{field('ratedTorqueNm','铭牌额定转矩 N·m（可选）')}</>}
+        {category==='performance'&&<>
+          {form.test==='kt'&&<>{field('iqLevels','Iq 电流级 A（逗号分隔）',{text:true})}{field('ktMaxSpeedRpm','Kt 拟合转速范围 ±rpm')}{field('ktMaxIdA','Kt 拟合 Id 均值/波动范围 A')}{field('settleS','每级稳定等待 s')}{field('dwellS','每级有效采样 s')}</>}
+          {form.test==='envelope'&&<>{field('startNm','起始负载 N·m')}{field('stepNm','负载步长 N·m')}{field('maxNm','结束负载 N·m')}{field('intervalS','每级负载保持 s')}</>}
+          {field('sensorInfo','转矩传感器/标定与带宽说明',{text:true})}</>}
+        {category==='position'&&<>{field('positions','目标位置 °（逗号分隔）',{text:true})}{select('positionReference','位置坐标',[['relative','相对测试起点'],['absolute','现有多圈坐标']])}{field('cycles','正反向重复轮数')}{field('approachDeg','换向接近距离 °')}{field('settleS','到位后等待 s')}{field('dwellS','到位采样窗口 s')}</>}
+        {category==='thermal'&&<>{field('ambientC','环境温度 °C（未知留空）')}{field('thermalWindowS','热稳定观察窗口 s')}{field('thermalSlopeCPerMin','热稳定斜率范围 ±°C/min')}{field('coolingInfo','测点、环境和散热条件',{text:true})}</>}
+        {category!=='position'&&field('coolingS','停机后继续采集 s')}
+      </div>
+      {category==='performance'&&<><p className="sx-muted">T-N 保留全部轨迹；稳定窗口单列。额定值与连续能力分开。输出端密度采用电机＋减速箱总成质量/体积；电机轴直测采用电机本体。窗口峰值按本配方统计窗口计算，Kt 使用实际 Iq。</p><label className="sx-check"><input type="checkbox" checked={form.bandwidthVerified} onChange={event=>patch({bandwidthVerified:event.target.checked})}/>已核对传感器动态带宽；原始峰值与窗口峰值仍分别记录</label></>}
+      {category==='position'&&<p className="sx-note">驱动反馈只评估跟随误差。输出端绝对定位及重复性需独立参考角度；正反向接近路径包含两端各 {form.approachDeg}°。</p>}
+      {category==='thermal'&&<><p className="sx-note">现有 NTC 测点不自动等同绕组温度。无环境温度时只显示温度及相对初温变化。</p><label className="sx-check"><input type="checkbox" checked={form.stopWhenStable} onChange={event=>patch({stopWhenStable:event.target.checked})}/>满足观察窗口和工况稳定条件后结束（否则按配方时长）</label></>}
+      <label className="sx-check"><input type="checkbox" checked={form.motionConfirmed} disabled={anyActive} onChange={event=>patch({motionConfirmed:event.target.checked})}/>主动测试：已确认电源、负载、散热及本次目标和换向路径允许运动</label>
+      <div className="sx-actions"><button className="button primary" disabled={!bridgeReady||busy||anyActive||!setup||((category==='position'||category==='thermal'&&form.operation==='active'||category==='performance'&&form.test!=='capture')&&!form.motionConfirmed)} onClick={()=>act('start')}>{category==='performance'&&form.test==='envelope'?'① 最大输出空载启动':'开始专项测试'}</button>
+        {state.coupled.run?.running&&<><button className="button" disabled={busy||state.coupled.run.phase!=='awaiting_load'} onClick={()=>act('load')}>② 开始阶梯加载</button><button className="button danger" disabled={busy} onClick={()=>act('stopEnvelope')}>停止加载并停机</button></>}
+        {state.automatic.current?.running&&<button className="button danger" disabled={busy} onClick={()=>act('stopDrive')}>停止专项并停机</button>}
+        {['running','settling'].includes(state.specialized.current?.state)&&<button className="button" disabled={busy} onClick={()=>act('stopCapture')}>仅结束专项采集</button>}
+      </div><p className="sx-muted">观察配方只记录；主动配方会控制电机，并沿用现有控制权、设备保护和停止确认。不会写入调参或校准。</p>
+      {error&&<p className="sx-error" role="alert">{error}</p>}
+    </section><section className="sx-card" aria-label="专项结果"><h3>{report?.name||'测试结果'}</h3>{report?<>
+      <p>{subjectText(report.testSubject)}</p><p role="status">{report.running?report.phase:report.state} · {SHOW(report.elapsedS,1)} s · {report.reason||'采集中'}</p>
+      {report.specializedSchema!==2?<p className="sx-note">旧版记录保留原报告，可导出查看；不会套用新版指标。</p>:<>
+        {report.category==='performance'&&<><div className="sx-metrics">{[['最高稳定窗口转速 rpm',metrics.highestObservedRpm],['瞬时转速采样峰值 rpm',Math.abs(metrics.rawSpeedPeak?.speedRpm)],['原始转矩采样峰值 N·m',Math.abs(metrics.rawTorquePeak?.torqueNm)],['有效窗口最大转矩 N·m',Math.abs(metrics.windowTorquePeak?.torque)],['同工况最大机械功率 W',Math.abs(metrics.maxObservedPowerPoint?.powerW)],[report.config?.axis==='motor'?'电机轴实测 Kt N·m/A':'输出端等效 Kt N·m/A',metrics.outputEquivalentKt?.slope],['铭牌额定转速 rpm',metrics.ratedSpeedRpm],['短时转矩密度 N·m/kg',metrics.densities?.peakTorquePerKg],['短时功率密度 W/kg',metrics.densities?.shortTimePowerWPerKg],['短时转矩密度 N·m/L',metrics.densities?.peakTorquePerL],['短时功率密度 W/L',metrics.densities?.shortTimePowerWPerL]].map(([label,value])=><div key={label}><span>{label}</span><strong>{SHOW(value)}</strong></div>)}</div>
+          <p className="sx-note">短时扫描不能认定连续额定能力。{!metrics.outputEquivalentKt?'Kt 尚无足够的低速、Id 合适且独立的稳定电流级。':`Kt 截距 ${SHOW(metrics.outputEquivalentKt.intercept)} N·m，R² ${SHOW(metrics.outputEquivalentKt.rSquared)}。`}峰值和功率卡片为幅值，原始符号保留；瞬时采样峰值受测量带宽影响。</p>
+          <p className="sx-muted">稳定窗口为蓝色，过渡窗口为橙色；仅用于数据分组，不增加停机条件。当前有效窗口 {metrics.validWindows??'—'}，其中稳定窗口 {metrics.steadyWindows??'—'}。</p>
+          <Curve title="T-N 实测窗口" series={[{points:(report.preview||[]).filter(row=>row.valid&&row.steady),x:'n',y:'torque',color:'#2265bd'},{points:(report.preview||[]).filter(row=>row.valid&&!row.steady),x:'n',y:'torque',color:'#df7138'}]} xLabel="实测转速 rpm" yLabel="转矩 N·m"/>
+          <Curve title="转矩—实际 Iq" points={(report.preview||[]).filter(row=>row.valid)} x="iq" y="torque" xLabel="实际 Iq A（相峰值等效）" yLabel="转矩 N·m"/></>}
+        {report.category==='position'&&<><p>已保存 {count} 次正反向到位窗口。</p><div className="sx-metrics">{[['反馈最大均值误差 °',position.feedbackMaxAbsMeanErrorDeg],['反馈最差重复极差 °',position.feedbackWorstRepeatRangeDeg],['外部参考最大均值误差 °',position.externalMaxAbsMeanErrorDeg],['外部参考最差重复极差 °',position.externalWorstRepeatRangeDeg],['外部参考换向差 °',position.externalReversalDifferenceDeg]].map(([label,value])=><div key={label}><span>{label}</span><strong>{SHOW(value,6)}</strong></div>)}</div>
+          {!position.externalCoverageComplete&&<p className="sx-note">外部参考尚未完整覆盖：当前只显示驱动反馈或部分参考统计，不能作为完整绝对精度验收。</p>}
+          <Curve title="反馈定位偏差：正向蓝 / 反向橙" series={['forward','reverse'].map((direction,i)=>({points:(position.feedback||[]).filter(p=>p.direction===direction),x:'targetDeg',y:'mean',color:i?'#df7138':'#2265bd'}))} xLabel="目标角度 °" yLabel="偏差 °"/>
+          <Curve title="外部参考定位偏差" series={['forward','reverse'].map((direction,i)=>({points:(position.external||[]).filter(p=>p.direction===direction),x:'targetDeg',y:'mean',color:i?'#df7138':'#2265bd'}))} xLabel="目标角度 °" yLabel="偏差 °"/>
+          {!report.running&&<div className="sx-reference"><h4>补充独立角度测量</h4><p>先“查看完整结果”，下载模板；按访问编号填写外部仪器实测角度后导入。参考零位＋目标角度为期望参考坐标。分析另存在本浏览器并随报告导出，原始驱动记录保持只读。</p>
+            <button className="button" disabled={!report.positionVisits?.length} onClick={()=>saveFile(`position-${report.id}-reference.csv`,'\uFEFFvisit_id,target_deg,reference_deg\r\n'+report.positionVisits.map(v=>`${v.visitId},${v.nominalDeg},`).join('\r\n'))}>下载参考角度模板</button>
+            <div className="sx-fields"><label>参考仪器<input aria-label="参考仪器" value={instrument.name} onChange={e=>setInstrument(old=>({...old,name:e.target.value}))}/></label><label>外部参考零位 °<input aria-label="外部参考零位 °" type="number" value={instrument.zeroDeg} onChange={e=>setInstrument(old=>({...old,zeroDeg:e.target.value}))}/></label></div>
+            <label className="sx-check"><input type="checkbox" checked={instrument.aligned} onChange={e=>setInstrument(old=>({...old,aligned:e.target.checked}))}/>参考坐标和零位已经对齐，角度单位为 °</label>
+            <label>导入参考角度 CSV<input aria-label="导入参考角度 CSV" type="file" accept=".csv,text/csv" disabled={busy||anyActive} onChange={event=>{void importReferences(event.target.files?.[0]);event.target.value='';}}/></label>
+          </div>}</>}
+        {report.category==='thermal'&&<><div className="sx-metrics">{[['初温 °C',temperature.initialC],['当前/末温 °C',temperature.lastC],['最高温 °C',temperature.maxC],['相对环境温升 K',temperature.riseK],['相对初温变化 K',temperature.changeFromInitialK],['观察窗口斜率 °C/min',temperature.slopeCPerMin]].map(([label,value])=><div key={label}><span>{label}</span><strong>{SHOW(value,2)}</strong></div>)}</div>
+          <p>测点：现有电机 NTC · 独立有效温度样本 {temperature.count||0} · {temperature.stable?'满足本配方热稳定观察条件':'尚未满足热稳定观察条件'}</p>
+          {report.heatingResult&&<p>升温段结果：{report.heatingResult.stable?'满足本配方热稳定观察条件':'未完成热稳定验证'}</p>}
+          {report.verifiedOperatingPoint&&<div className="sx-note">本配方热稳定工况：{SHOW(report.verifiedOperatingPoint.n)} rpm / {SHOW(report.verifiedOperatingPoint.torque)} N·m / {SHOW(report.verifiedOperatingPoint.powerW)} W；连续工况转矩密度 {SHOW(report.verifiedOperatingPoint.torquePerKg)} N·m/kg，功率密度 {SHOW(report.verifiedOperatingPoint.powerWPerKg)} W/kg。仅对记录的负载和散热条件成立。</div>}
+          <Curve title="温度—时间曲线（含降温段）" points={report.thermalPreview||[]} x="t" y="temperatureC" xLabel="时间 s" yLabel="温度 °C"/>
+          <Curve title="相对环境温升曲线" points={Number.isFinite(report.config?.ambientC)?(report.thermalPreview||[]).map(p=>({...p,rise:p.temperatureC-report.config.ambientC})):[]} x="t" y="rise" xLabel="时间 s" yLabel="温升 K"/></>}
+        {!!report.qualityIssues?.length&&<p className="sx-error">数据质量：{report.qualityIssues.join('、')}；原始数据保留。</p>}
+      </>}
+      {report.recordingId&&<div className="sx-actions"><a className="button" href={`/api/v1/recordings/files/${report.recordingId}/timeline.csv`} download>完整参数 CSV</a><a className="button" href={`/api/v1/recordings/files/${report.recordingId}/timeline.jsonl`} download>完整参数 JSONL</a></div>}
+      {!report.running&&<div className="sx-actions"><a className="button" href={`/api/v1/${report.origin}/files/${report.id}/data.csv`} download>导出原始 CSV</a><button className="button" onClick={()=>saveFile(`specialized-${report.id}-report.json`,JSON.stringify(report,null,2),'application/json')}>导出报告 JSON</button>{report.referenceData&&Object.keys(report.referenceData).length>0&&<button className="button" onClick={()=>saveFile(`specialized-${report.id}-reference.csv`,'\uFEFFvisit_id,reference_deg\r\n'+Object.entries(report.referenceData).map(([id,angle])=>`${id},${angle}`).join('\r\n'))}>导出外部参考 CSV</button>}{report.specializedSchema===2&&<a className="button" href={`/api/v1/${report.origin}/files/${report.id}/timeline.jsonl`} download>导出专项来源 JSONL</a>}</div>}
+    </>:<p className="sx-muted">选择配方并采集真实数据后显示。没有质量、体积或外部参考时，对应指标保持空缺。</p>}</section></div>
+    <section className="sx-card sx-history"><h3>专项历史记录</h3><div className="sx-table"><table><thead><tr><th>时间 / 对象</th><th>项目 / 名称</th><th>状态</th><th>结果</th></tr></thead><tbody>{reports.map(row=><tr key={`${row.origin}-${row.id}`}><td>{new Date(row.startedAt*1000).toLocaleString()}<small>{subjectText(row.testSubject)}</small></td><td>{CATEGORIES[row.category]||'旧版专项'} / {row.name||row.config?.group||row.kind}</td><td>{row.state}</td><td><button className="button" onClick={()=>showReport(row)} disabled={busy||row.running}>查看完整结果</button></td></tr>)}</tbody></table></div>{!reports.length&&<p>暂无专项记录，旧记录不会删除。</p>}</section>
   </section>;
 }
-export default React.memo(SpecializedTestsPanel);

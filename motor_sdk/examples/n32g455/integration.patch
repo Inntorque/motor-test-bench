@@ -1,0 +1,2087 @@
+--- a/Makefile
++++ b/Makefile
+@@ -89,16 +89,19 @@
+ RTOS_PORT  := $(RTOS)/portable/GCC/ARM_CM4F
+ RTOS_SRC   := $(RTOS)/tasks.c $(RTOS)/queue.c $(RTOS)/list.c $(RTOS)/timers.c \
+               $(RTOS)/event_groups.c $(RTOS)/stream_buffer.c $(RTOS_PORT)/port.c
+-APP_SRC    := src/main.c src/main_rtos.c src/syscalls.c $(FOC_SRC) $(OTA_SRC) $(SDK_SRC) $(RTOS_SRC)
++BENCH_SRC := $(wildcard ports/*.c) $(wildcard third_party/motor_bench_sdk/src/*.c)
++APP_SRC    := $(BENCH_SRC) src/main.c src/main_rtos.c src/syscalls.c $(FOC_SRC) $(OTA_SRC) $(SDK_SRC) $(RTOS_SRC)
+ ASM_SRC    := startup/startup_n32g45x_gcc.s
+ 
+ APP_OBJECTS := $(addprefix $(APP_BUILD)/,$(notdir $(APP_SRC:.c=.o))) \
+                $(APP_BUILD)/startup_n32g45x_gcc.o
+ 
+-vpath %.c ota foc src $(SDK)/n32g45x_std_periph_driver/src $(SDK)/CMSIS/device $(RTOS) $(RTOS_PORT)
++vpath %.c ports third_party/motor_bench_sdk/src ota foc src $(SDK)/n32g45x_std_periph_driver/src $(SDK)/CMSIS/device $(RTOS) $(RTOS_PORT)
+ vpath %.s startup
+ 
+ INCLUDES := \
++  -Iports \
++  -Ithird_party/motor_bench_sdk/include \
+   -Iota \
+   -Ifoc \
+   -Isrc \
+@@ -141,7 +144,7 @@
+ CFLAGS := $(CPU) $(DEFINES) $(INCLUDES) \
+           -O2 -g3 -Wall -Wextra -Wno-unused-parameter \
+           -ffunction-sections -fdata-sections -fno-common \
+-          -std=gnu11
++          -std=gnu11 -fstack-usage
+ 
+ ASFLAGS := $(CPU) -g3 -x assembler-with-cpp
+ 
+@@ -182,7 +185,7 @@
+ 	@$(CC) -c $(CFLAGS) $< -o $@
+ 
+ # ★ 头文件也算依赖: 否则改了 foc/*.h ota/*.h 不会重编, 表现为 "改了没生效"
+-APP_HDRS   := $(wildcard foc/*.h ota/*.h src/*.h)
++APP_HDRS   := $(wildcard foc/*.h ota/*.h src/*.h ports/*.h third_party/motor_bench_sdk/include/*.h)
+ 
+ # Private implementation include must trigger an incremental controller rebuild.
+ $(APP_BUILD)/foc_mode.o: foc/foc_max_runtime.inc
+--- a/src/main.c
++++ b/src/main.c
+@@ -1,203 +1,207 @@
+-/*
+- * src/main.c -- CAN-OTA 应用固件 (示例骨架)
+- * ---------------------------------------------------------------------------
+- * 位置: Slot A (0x08008000) 或 Slot B (0x08043000), 同一份源码编两个地址版本。
+- *
+- * 这里的结构就是以后放 FOC 代码的位置:
+- *   1. ota_app_early_init()  把向量表指回自己 (必须第一行)
+- *   2. 开看门狗            卡死也能自动复位 -> try_left 递减 -> 回滚
+- *   3. 初始化外设
+- *   4. 外设自检
+- *   5. ota_confirm()        签字: 新固件转正 (★阶段2 起改由 RTOS 启动任务做, 见 main_rtos.c)
+- *   6. 主循环               FOC 环 + ota_proto_poll() (后台升级, 不中断业务)
+- *
+- * ⚠ ota_proto_poll() 必须被频繁调用 (主循环每圈一次)。收到镜像数据时
+- *   上位机会连续发帧, 调用间隔太长会丢帧 (丢了会自动重传, 只是变慢)。
+- */
+-#include "ota_layout.h"
+-#include "ota_can.h"
+-#include "ota_proto.h"
+-#include "ota_slot.h"
+-#include "ota_params.h"
+-#include "foc.h"       /* FOC 应用层: 采样/遥测/主循环业务 (foc/foc.c, foc/foc_adc.c) */
+-
+-#include "n32g45x.h"
+-#include "n32g45x_dbg.h"
+-
+-/* ★RTOS 阶段1: 由 src/main_rtos.c 提供 —— 创建静态任务并启动调度器(不返回)。
+- *   调用点必须在 ota_app_early_init/外设自检 完成之后 (签字已移到启动任务)。 */
+-void foc_rtos_start(void);
+-
+-/* ★阶段2: 统一紧急出口 (src/main_rtos.c) —— 关功率输出 + 存故障码 + 受控复位 */
+-void foc_panic_reset(uint32_t code);
+-
+-/* ------------------------------------------------------------------ */
+-/* 给 SWD / make alive 看的诊断变量                                     */
+-/* g_alive 是原来空工程就有的计数器, 保持不动                            */
+-/* ------------------------------------------------------------------ */
+-volatile uint32_t g_alive = 0xA5A50000u;
+-volatile uint32_t g_ota_state;
+-volatile uint32_t g_ota_slot;
+-volatile uint32_t g_ota_image_size;
+-volatile uint32_t g_ota_confirm_rc;
+-volatile uint32_t g_ota_commands;
+-volatile uint32_t g_ota_rx_bytes;
+-volatile uint32_t g_ota_last_error;
+-volatile uint32_t g_ota_can_rx;
+-volatile uint32_t g_ota_can_other;
+-volatile uint32_t g_ota_can_txfail;
+-volatile uint32_t g_ota_can_rc;
+-volatile uint32_t g_ota_pclk1;
+-volatile uint32_t g_ota_presc;
+-volatile uint32_t g_ota_tq;
+-volatile uint32_t g_foc_init_rc; /* foc_init() 返回值: 0 = 自检通过 */
+-
+-/* ------------------------------------------------------------------ */
+-/* 异常处理: ★阶段2 统一走 foc_panic_reset() —— 先关功率输出再复位,      */
+-/*   不留空循环 (原来只复位不关输出, 故障复位瞬间功率级仍可能带输出)      */
+-/*   Bootloader 会把 try_left 减一, 试满就回滚到旧固件 -> "永不砖"        */
+-/* ------------------------------------------------------------------ */
+-void HardFault_Handler(void)
+-{
+-    foc_panic_reset(0xF1000001u);
+-}
+-
+-void MemManage_Handler(void)
+-{
+-    foc_panic_reset(0xF2000001u);
+-}
+-
+-void BusFault_Handler(void)
+-{
+-    foc_panic_reset(0xF3000001u);
+-}
+-
+-void UsageFault_Handler(void)
+-{
+-    foc_panic_reset(0xF4000001u);
+-}
+-
+-/* ------------------------------------------------------------------ */
+-/* 独立看门狗: LSI 约 40kHz / 64 = 625Hz, 重装 0xFFF => 约 6.5s          */
+-/* 目的是"新固件能启动但跑飞/卡死"也能自动回滚, 而不是永远躺在那儿        */
+-/*                                                                     */
+-/* ⚠ 必须同时打开 DBG_IWDG_STOP (调试冻结):                             */
+-/*   IWDG 由 LSI 驱动, 内核被调试器 halt 时它照样在数。没有这个冻结位,   */
+-/*   调试器一 halt, 6.5 秒后看门狗就把芯片复位 —— 表现为 SWD "时好时坏"  */
+-/*   (pyOCD 报 Transfer fault while initing board / 烧录偶发失败)。      */
+-/* ------------------------------------------------------------------ */
+-static void iwdg_init(void)
+-{
+-    IWDG_WriteConfig(IWDG_WRITE_ENABLE);
+-    IWDG_SetPrescalerDiv(IWDG_PRESCALER_DIV64);
+-    IWDG_CntReload(0x0FFFu);
+-    IWDG_ReloadKey();
+-    IWDG_Enable();
+-
+-    /* 调试器 halt 住内核时冻结 IWDG, 否则会周期性复位, 没法调试/烧录 */
+-    DBG_ConfigPeriph(DBG_IWDG_STOP, ENABLE);
+-}
+-
+-/* ==================================================================== */
+-/*  ★★★ FOC 代码在 foc/ 目录 ★★★                                      */
+-/*                                                                      */
+-/*  foc_init(): 上电自检 (ADC 三相电流采样 + 零流偏置校准 + 注册遥测源)   */
+-/*              返回非 0 = 硬故障 -> 不签字 -> Bootloader 自动回滚旧版本  */
+-/*  foc_loop(): 每圈调用: 采样快照 + 遥测上报 (见 foc/foc.c)             */
+-/* ==================================================================== */
+-
+-int main(void)
+-{
+-    /* ① 向量表指回自己 (SystemInit 会把它设成 0x08000000) */
+-    ota_app_early_init();
+-
+-    /* ====================================================================
+-     * ★★★ 必须重新打开全局中断 ★★★
+-     *   Bootloader 在 ota_jump_to_slot() (ota/ota_slot.c:116) 里调了
+-     *   __disable_irq() 才跳转到 App, 而 App 里原本没有任何地方重新打开 ——
+-     *   也就是说 PRIMASK 一直是关的, **App 里所有中断都不会响应**。
+-     *   (这也解释了为什么这个工程之前全靠轮询: CAN/ADC/看门狗都不需要中断,
+-     *    而任何中断驱动的东西 —— 比如换向节拍定时器 —— 会完全没反应。)
+-     *
+-     *   实测症状: 六步换向的状态机卡在"自举预充"不动, 因为节拍中断没进来;
+-     *             但 CAN 查询/遥测一切正常, 看起来"像死机又不像死机"。
+-     * ==================================================================== */
+-    __enable_irq();
+-
+-    /* ② 先开狗: 后面任何一步卡死都会被复位并触发回滚 */
+-    iwdg_init();
+-
+-    /* ③ 外设初始化 */
+-    g_ota_can_rc = (uint32_t)ota_can_init(OTA_CAN_BAUD_DEFAULT, OTA_CAN_NODE_DEFAULT);
+-    ota_proto_init(OTA_ROLE_APP);
+-    ota_params_init();  /* 从参数页加载 FOC 参数(失败则用默认值) */
+-
+-    g_ota_slot       = ota_self_slot();
+-    g_ota_image_size = ota_image_size();
+-    g_ota_pclk1      = ota_can_pclk1();
+-    g_ota_presc      = ota_can_prescaler();
+-    g_ota_tq         = ota_can_tq_total();
+-
+-    /* ④ 自检
+-     *    foc_init() 里做: ADC 三相电流采样初始化 + 零流偏置校准 (+ 以后加编码器/栅驱)。
+-     *    自检不过的处理分两种情况 (ota_is_pending_self 的注释里有完整理由):
+-     *      - 刚 OTA 进来的新固件 (pending): 不签字 + 不喂狗 -> 看门狗复位
+-     *        -> Bootloader 把 try_left 减一 -> 试满 OTA_TRY_MAX 次自动回滚 (有救)
+-     *      - SWD 直烧的活动槽固件: 回滚机制不生效, 再复位就是死循环且 CAN 不响应。
+-     *        这时选择"带病运行", 保住 CAN/OTA 这条救援通道, 故障码从诊断量看。 */
+-    IWDG_ReloadKey();
+-    {
+-        int rc = foc_init();
+-
+-        ota_proto_set_foc_init_rc(rc); /* 上报给 GET_FOC_STAT, 无 SWD 也能看 */
+-        g_foc_init_rc = (uint32_t)rc;
+-        if ((rc != 0) && (ota_is_pending_self() != 0))
+-        {
+-            /* ★阶段2: 自检失败 + 自己是 pending 镜像 -> 受控复位(先关输出),
+-             *   bootloader 会把 try_left 减一, 试满即回滚。
+-             *   原来是 for(;;) 等看门狗, 白等约 6.5 秒且属于空转。 */
+-            foc_panic_reset(0xF5000001u);
+-        }
+-    }
+-
+-    /* ⑤ 签字确认: ★阶段2 改为【延迟到 RTOS 启动任务里做】——
+-     *   见 src/main_rtos.c 的 task_startup()。
+-     *   原来在这里(调度器起来之前)就签字: 于是"启动后立刻挂死"的坏镜像
+-     *   也会被转正, 只有 IWDG 能救。现在只有"业务循环 + ADC + CAN 在
+-     *   观察窗内都真的在推进"才 ota_confirm(); 否则不签字, 由 bootloader
+-     *   按 try_left 回滚 (方案第二节「阶段 2」第 2 条)。 */
+-
+-    /* ⑥ ★RTOS 阶段1: 原主循环体抽成 foc_app_tick_once(), 由 poll 任务周期调用;
+-     *    IWDG 不再在这里无条件喂 —— 改由 health 任务确认进度后才喂 (方案要求)。
+-     *    20kHz PWM / 10kHz 换向节拍仍由 TIM1/TIM3 硬件负责, 与调度无关。
+-     *    ⚠ 本阶段不要用这个镜像做 OTA 大块传输 (见 main_rtos.c 头部说明)。 */
+-    foc_rtos_start();
+-
+-    /* 调度器只在初始化失败时才返回: 受控复位 (不做空转) */
+-    NVIC_SystemReset();
+-}
+-
+-/* poll 任务每轮调一次: 与原来的主循环体逐行等价, 功能不丢 */
+-void foc_app_tick_once(void)
+-{
+-    g_alive++;
+-
+-    foc_loop();             /* ← 你的 FOC 代码 */
+-    ota_proto_foc_tick();   /* 业务循环计数(可通过 CAN 读出来验证在跑) */
+-
+-    ota_proto_poll();
+-
+-    g_ota_state     = (uint32_t)(ota_proto_rx_active() ? OTA_STATE_RECEIVING : OTA_STATE_APP);
+-    g_ota_commands  = ota_proto_commands();
+-    g_ota_rx_bytes  = ota_proto_rx_bytes();
+-    g_ota_last_error = ota_proto_last_error();
+-    g_ota_can_rx    = ota_can_rx_frames();
+-    g_ota_can_other = ota_can_rx_other();
+-    g_ota_can_txfail = ota_can_tx_fail();
+-}
+-
+-/* health 任务用它判断"业务是否真的在推进" */
+-uint32_t foc_app_alive(void)
+-{
+-    return (uint32_t)g_alive;
+-}
++/*
++ * src/main.c -- CAN-OTA 应用固件 (示例骨架)
++ * ---------------------------------------------------------------------------
++ * 位置: Slot A (0x08008000) 或 Slot B (0x08043000), 同一份源码编两个地址版本。
++ *
++ * 这里的结构就是以后放 FOC 代码的位置:
++ *   1. ota_app_early_init()  把向量表指回自己 (必须第一行)
++ *   2. 开看门狗            卡死也能自动复位 -> try_left 递减 -> 回滚
++ *   3. 初始化外设
++ *   4. 外设自检
++ *   5. ota_confirm()        签字: 新固件转正 (★阶段2 起改由 RTOS 启动任务做, 见 main_rtos.c)
++ *   6. 主循环               FOC 环 + ota_proto_poll() (后台升级, 不中断业务)
++ *
++ * ⚠ ota_proto_poll() 必须被频繁调用 (主循环每圈一次)。收到镜像数据时
++ *   上位机会连续发帧, 调用间隔太长会丢帧 (丢了会自动重传, 只是变慢)。
++ */
++#include "ota_layout.h"
++#include "ota_can.h"
++#include "motor_bench_port.h"
++#include "ota_proto.h"
++#include "ota_slot.h"
++#include "ota_params.h"
++#include "foc.h"       /* FOC 应用层: 采样/遥测/主循环业务 (foc/foc.c, foc/foc_adc.c) */
++
++#include "n32g45x.h"
++#include "n32g45x_dbg.h"
++
++/* ★RTOS 阶段1: 由 src/main_rtos.c 提供 —— 创建静态任务并启动调度器(不返回)。
++ *   调用点必须在 ota_app_early_init/外设自检 完成之后 (签字已移到启动任务)。 */
++void foc_rtos_start(void);
++
++/* ★阶段2: 统一紧急出口 (src/main_rtos.c) —— 关功率输出 + 存故障码 + 受控复位 */
++void foc_panic_reset(uint32_t code);
++
++/* ------------------------------------------------------------------ */
++/* 给 SWD / make alive 看的诊断变量                                     */
++/* g_alive 是原来空工程就有的计数器, 保持不动                            */
++/* ------------------------------------------------------------------ */
++volatile uint32_t g_alive = 0xA5A50000u;
++volatile uint32_t g_ota_state;
++volatile uint32_t g_ota_slot;
++volatile uint32_t g_ota_image_size;
++volatile uint32_t g_ota_confirm_rc;
++volatile uint32_t g_ota_commands;
++volatile uint32_t g_ota_rx_bytes;
++volatile uint32_t g_ota_last_error;
++volatile uint32_t g_ota_can_rx;
++volatile uint32_t g_ota_can_other;
++volatile uint32_t g_ota_can_txfail;
++volatile uint32_t g_ota_can_rc;
++volatile uint32_t g_ota_pclk1;
++volatile uint32_t g_ota_presc;
++volatile uint32_t g_ota_tq;
++volatile uint32_t g_foc_init_rc; /* foc_init() 返回值: 0 = 自检通过 */
++
++/* ------------------------------------------------------------------ */
++/* 异常处理: ★阶段2 统一走 foc_panic_reset() —— 先关功率输出再复位,      */
++/*   不留空循环 (原来只复位不关输出, 故障复位瞬间功率级仍可能带输出)      */
++/*   Bootloader 会把 try_left 减一, 试满就回滚到旧固件 -> "永不砖"        */
++/* ------------------------------------------------------------------ */
++void HardFault_Handler(void)
++{
++    foc_panic_reset(0xF1000001u);
++}
++
++void MemManage_Handler(void)
++{
++    foc_panic_reset(0xF2000001u);
++}
++
++void BusFault_Handler(void)
++{
++    foc_panic_reset(0xF3000001u);
++}
++
++void UsageFault_Handler(void)
++{
++    foc_panic_reset(0xF4000001u);
++}
++
++/* ------------------------------------------------------------------ */
++/* 独立看门狗: LSI 约 40kHz / 64 = 625Hz, 重装 0xFFF => 约 6.5s          */
++/* 目的是"新固件能启动但跑飞/卡死"也能自动回滚, 而不是永远躺在那儿        */
++/*                                                                     */
++/* ⚠ 必须同时打开 DBG_IWDG_STOP (调试冻结):                             */
++/*   IWDG 由 LSI 驱动, 内核被调试器 halt 时它照样在数。没有这个冻结位,   */
++/*   调试器一 halt, 6.5 秒后看门狗就把芯片复位 —— 表现为 SWD "时好时坏"  */
++/*   (pyOCD 报 Transfer fault while initing board / 烧录偶发失败)。      */
++/* ------------------------------------------------------------------ */
++static void iwdg_init(void)
++{
++    IWDG_WriteConfig(IWDG_WRITE_ENABLE);
++    IWDG_SetPrescalerDiv(IWDG_PRESCALER_DIV64);
++    IWDG_CntReload(0x0FFFu);
++    IWDG_ReloadKey();
++    IWDG_Enable();
++
++    /* 调试器 halt 住内核时冻结 IWDG, 否则会周期性复位, 没法调试/烧录 */
++    DBG_ConfigPeriph(DBG_IWDG_STOP, ENABLE);
++}
++
++/* ==================================================================== */
++/*  ★★★ FOC 代码在 foc/ 目录 ★★★                                      */
++/*                                                                      */
++/*  foc_init(): 上电自检 (ADC 三相电流采样 + 零流偏置校准 + 注册遥测源)   */
++/*              返回非 0 = 硬故障 -> 不签字 -> Bootloader 自动回滚旧版本  */
++/*  foc_loop(): 每圈调用: 采样快照 + 遥测上报 (见 foc/foc.c)             */
++/* ==================================================================== */
++
++int main(void)
++{
++    /* ① 向量表指回自己 (SystemInit 会把它设成 0x08000000) */
++    ota_app_early_init();
++
++    /* ====================================================================
++     * ★★★ 必须重新打开全局中断 ★★★
++     *   Bootloader 在 ota_jump_to_slot() (ota/ota_slot.c:116) 里调了
++     *   __disable_irq() 才跳转到 App, 而 App 里原本没有任何地方重新打开 ——
++     *   也就是说 PRIMASK 一直是关的, **App 里所有中断都不会响应**。
++     *   (这也解释了为什么这个工程之前全靠轮询: CAN/ADC/看门狗都不需要中断,
++     *    而任何中断驱动的东西 —— 比如换向节拍定时器 —— 会完全没反应。)
++     *
++     *   实测症状: 六步换向的状态机卡在"自举预充"不动, 因为节拍中断没进来;
++     *             但 CAN 查询/遥测一切正常, 看起来"像死机又不像死机"。
++     * ==================================================================== */
++    __enable_irq();
++
++    /* ② 先开狗: 后面任何一步卡死都会被复位并触发回滚 */
++    iwdg_init();
++
++    /* ③ 外设初始化 */
++    g_ota_can_rc = (uint32_t)ota_can_init(OTA_CAN_BAUD_DEFAULT, OTA_CAN_NODE_DEFAULT);
++    ota_proto_init(OTA_ROLE_APP);
++    ota_params_init();  /* 从参数页加载 FOC 参数(失败则用默认值) */
++
++    g_ota_slot       = ota_self_slot();
++    g_ota_image_size = ota_image_size();
++    g_ota_pclk1      = ota_can_pclk1();
++    g_ota_presc      = ota_can_prescaler();
++    g_ota_tq         = ota_can_tq_total();
++
++    /* ④ 自检
++     *    foc_init() 里做: ADC 三相电流采样初始化 + 零流偏置校准 (+ 以后加编码器/栅驱)。
++     *    自检不过的处理分两种情况 (ota_is_pending_self 的注释里有完整理由):
++     *      - 刚 OTA 进来的新固件 (pending): 不签字 + 不喂狗 -> 看门狗复位
++     *        -> Bootloader 把 try_left 减一 -> 试满 OTA_TRY_MAX 次自动回滚 (有救)
++     *      - SWD 直烧的活动槽固件: 回滚机制不生效, 再复位就是死循环且 CAN 不响应。
++     *        这时选择"带病运行", 保住 CAN/OTA 这条救援通道, 故障码从诊断量看。 */
++    IWDG_ReloadKey();
++    {
++        int rc = foc_init();
++
++        ota_proto_set_foc_init_rc(rc); /* 上报给 GET_FOC_STAT, 无 SWD 也能看 */
++        g_foc_init_rc = (uint32_t)rc;
++        if ((rc != 0) && (ota_is_pending_self() != 0))
++        {
++            /* ★阶段2: 自检失败 + 自己是 pending 镜像 -> 受控复位(先关输出),
++             *   bootloader 会把 try_left 减一, 试满即回滚。
++             *   原来是 for(;;) 等看门狗, 白等约 6.5 秒且属于空转。 */
++            foc_panic_reset(0xF5000001u);
++        }
++    }
++
++    motor_bench_init();
++
++    /* ⑤ 签字确认: ★阶段2 改为【延迟到 RTOS 启动任务里做】——
++     *   见 src/main_rtos.c 的 task_startup()。
++     *   原来在这里(调度器起来之前)就签字: 于是"启动后立刻挂死"的坏镜像
++     *   也会被转正, 只有 IWDG 能救。现在只有"业务循环 + ADC + CAN 在
++     *   观察窗内都真的在推进"才 ota_confirm(); 否则不签字, 由 bootloader
++     *   按 try_left 回滚 (方案第二节「阶段 2」第 2 条)。 */
++
++    /* ⑥ ★RTOS 阶段1: 原主循环体抽成 foc_app_tick_once(), 由 poll 任务周期调用;
++     *    IWDG 不再在这里无条件喂 —— 改由 health 任务确认进度后才喂 (方案要求)。
++     *    20kHz PWM / 10kHz 换向节拍仍由 TIM1/TIM3 硬件负责, 与调度无关。
++     *    ⚠ 本阶段不要用这个镜像做 OTA 大块传输 (见 main_rtos.c 头部说明)。 */
++    foc_rtos_start();
++
++    /* 调度器只在初始化失败时才返回: 受控复位 (不做空转) */
++    NVIC_SystemReset();
++}
++
++/* poll 任务每轮调一次: 与原来的主循环体逐行等价, 功能不丢 */
++void foc_app_tick_once(void)
++{
++    g_alive++;
++
++    foc_loop();             /* ← 你的 FOC 代码 */
++    ota_proto_foc_tick();   /* 业务循环计数(可通过 CAN 读出来验证在跑) */
++
++    motor_bench_poll();
++    ota_proto_poll();
++
++    g_ota_state     = (uint32_t)(ota_proto_rx_active() ? OTA_STATE_RECEIVING : OTA_STATE_APP);
++    g_ota_commands  = ota_proto_commands();
++    g_ota_rx_bytes  = ota_proto_rx_bytes();
++    g_ota_last_error = ota_proto_last_error();
++    g_ota_can_rx    = ota_can_rx_frames();
++    g_ota_can_other = ota_can_rx_other();
++    g_ota_can_txfail = ota_can_tx_fail();
++}
++
++/* health 任务用它判断"业务是否真的在推进" */
++uint32_t foc_app_alive(void)
++{
++    return (uint32_t)g_alive;
++}
+--- a/foc/foc_mode.c
++++ b/foc/foc_mode.c
+@@ -20,6 +20,7 @@
+ static volatile uint32_t s_control_updates, s_control_overruns;
+ static volatile uint32_t s_control_cycles, s_control_max_cycles;
+ static volatile int16_t s_id_sample_ma, s_iq_sample_ma;
++static foc_bench_snapshot_t s_bench_snapshot;
+ static volatile uint8_t s_cl_trip_frames;      /* consecutive frames above the operator limit */
+ static volatile uint8_t s_control_overrun_run; /* consecutive missed control deadlines */
+ /* Measured phase currents of the completed current-control tick (A). */
+@@ -174,7 +175,6 @@
+ #define FOC_CTRL_TICK_S             0.0001f
+ #define FOC_CTRL_SPEED_DIV          10u        /* 1 kHz speed/position outer loop */
+ #define FOC_CTRL_OUTER_DT_S         (FOC_CTRL_TICK_S * FOC_CTRL_SPEED_DIV)
+-#define FOC_CTRL_MAX_CURRENT_MA   30000     /* User-confirmed hardware limit: allow ID7 / Iq up to 30 A; defaults unchanged. */
+ #define FOC_PHASE_TEST_MAX_MA     5000      /* direct phase test keeps its own conservative trip */
+ #define FOC_CTRL_MAX_VOLTAGE_MV     10000
+ #define FOC_CTRL_MAX_SPEED_RPM      300.0f     /* conservative until PWM-synchronous ADC is enabled */
+@@ -1184,6 +1184,20 @@
+     s_dbg_input[15]=diag_s16(s_decouple_d*1000.0f);
+     s_dbg_input[16]=diag_s16(s_decouple_q*1000.0f);
+     s_dbg_input[17]=(uint16_t)(current_frame.sequence>>16);
++    s_bench_snapshot.position_count=s_position_count;
++    s_bench_snapshot.iq_ma=s_iq_sample_ma;
++    s_bench_snapshot.id_ma=s_id_sample_ma;
++    s_bench_snapshot.reference_ma=s_iq_target_ma;
++    s_bench_snapshot.available_iq_ma=(int32_t)(iq_ref*1000.0f);
++    s_bench_snapshot.target_ma=s_target_current_ma;
++    s_bench_snapshot.speed_mrpm=(int32_t)(foc_encoder_pll_vel_counts_s()*60000.0f/16384.0f)*(ota_params_get(2u)==2?-1:1);
++    s_bench_snapshot.source_us=foc_tick_micros()-s_dbg_current_age_us;
++    s_bench_snapshot.sequence=current_frame.sequence;
++    s_bench_snapshot.pwm_generation=current_frame.pwm_generation;
++    s_bench_snapshot.encoder_raw=raw;
++    for(unsigned i=0;i<3;i++)s_bench_snapshot.phase_ma[i]=current_frame.ma[i];
++    s_bench_snapshot.estimated_bus_ma=(int32_t)(s_max_bus_est*1000.0f);
++    s_bench_snapshot.limits=s_max_limits;
+     s_control_updates++;
+     if(s_mode==CONTROL_MODE_MAX_OUTPUT)max_observe(&current_frame,raw,id,iq);
+     if ((s_state == MOTOR_STATE_RUNNING) && (s_mode == CONTROL_MODE_CURRENT) &&
+@@ -2600,3 +2614,16 @@
+     out6[2]=n?(uint16_t)lo:0u;out6[3]=n?(uint16_t)hi:0u;
+     out6[4]=id_abs;out6[5]=flags;
+ }
++
++void foc_mode_bench_snapshot(foc_bench_snapshot_t *out)
++{
++    uint32_t lock=mode_irq_lock();
++    *out=s_bench_snapshot;
++    if(s_state!=MOTOR_STATE_RUNNING){
++        out->position_count=s_position_count;
++        float speed=foc_encoder_pll_vel_counts_s();
++        if(ota_params_get(2u)==2)speed=-speed;
++        out->speed_mrpm=(int32_t)(speed*60000.0f/16384.0f);
++    }
++    mode_irq_unlock(lock);
++}
+--- a/foc/foc_mode.h
++++ b/foc/foc_mode.h
+@@ -33,6 +33,7 @@
+ #include "foc_config.h"   /* ★全部可调参数集中在这里 */
+ 
+ #include <stdint.h>
++#define FOC_CTRL_MAX_CURRENT_MA   30000     /* User-confirmed hardware limit: allow ID7 / Iq up to 30 A; defaults unchanged. */
+ 
+ /* ---------------- 模式编号 ----------------
+  * 模式0是正弦电压开环，不需要编码器换相。
+@@ -166,4 +167,13 @@
+ uint16_t foc_mode_max_trace_count(void);
+ int foc_mode_max_trace_read(uint16_t index,uint8_t* out40);
+ 
++typedef struct {
++    int64_t position_count;
++    int32_t iq_ma,id_ma,reference_ma,available_iq_ma,target_ma,speed_mrpm,estimated_bus_ma;
++    uint32_t source_us,sequence,pwm_generation;
++    int32_t phase_ma[3];uint16_t encoder_raw;
++    uint16_t limits;
++} foc_bench_snapshot_t;
++void foc_mode_bench_snapshot(foc_bench_snapshot_t *out);
++
+ #endif /* FOC_MODE_H */
+--- a/foc/foc_ntc.c
++++ b/foc/foc_ntc.c
+@@ -1,220 +1,223 @@
+-/*
+- * foc_ntc.c -- NTC 温度采样 + 过温保护 (后级保护)
+- * ===========================================================================
+- * 硬件: PA3 = ADC1_IN4, 与三相电流同属 ADC1 规则组 4 通道扫描的第二代数据。
+- *       所以本模块【不碰】ADC/DMA/采样时序, 只消费 foc_adc_raw(FOC_ADC_CH_AUX)。
+- *
+- * 换算链: raw -> mV -> NTC 电阻 (分压反解) -> Beta 公式 -> 0.1°C
+- *
+- * 安全设计:
+- *   - 读数无效 (开路/短路/超范围) 默认【也关输出】(FOC_NTC_TRIP_ON_INVALID=1):
+- *     保护功能的传感器坏了, 不能变成"没有保护"。
+- *   - 滞回: 跳闸 60°C, 允许再启动 55°C —— 避免在阈值附近反复起停。
+- *     (2026-09-28 用户明确指令: 从 50/45 提到 60/55。阈值本体在 foc_config.h 的
+- *      FOC_NTC_TRIP_C_X10 / FOC_NTC_CLEAR_C_X10, 这里只是说明。)
+- *   - 跳闸判定在 10kHz 硬件节拍里做整数比较, 最坏 100µs 关掉六路输出。
+- *   - 本模块只做"关输出"的判定, 具体动作由 foc_mode 的紧急停机统一执行。
+- */
+-#include "foc_ntc.h"
+-#include "foc_config.h"
+-#include "foc_adc.h"
+-#include "foc_tick.h"
+-#include "n32g45x.h"
+-
+-#include <math.h>
+-
+-/* SWD / 网页可读的诊断量 */
+-volatile int32_t  g_ntc_temp_x10;
+-volatile uint32_t g_ntc_raw;
+-volatile int32_t  g_ntc_mv;
+-volatile uint32_t g_ntc_valid;
+-volatile uint32_t g_ntc_trips;
+-
+-static uint32_t s_raw_filt;
+-static volatile uint8_t  s_primed;
+-static volatile uint8_t  s_valid;
+-static volatile int32_t s_temp_x10;
+-static volatile uint32_t s_otp_ms;   /* 超温起始 ms (去抖) */
+-static volatile uint32_t s_trips;    /* 累计跳闸次数 */
+-
+-#if FOC_NTC_ENABLE
+-
+-void foc_ntc_update(void)
+-{
+-    uint32_t raw = (uint32_t)foc_adc_raw(FOC_ADC_CH_AUX);
+-    int32_t  d;
+-    uint32_t f;
+-    int32_t  mv;
+-    float    v;
+-    float    vcc = (float)FOC_ADC_VDDA_MV * 0.001f;
+-    float    r;
+-    float    inv_t;
+-    float    tc;
+-    uint8_t  ok = 1u;
+-
+-    /* 一阶滤波 (1kHz 调用 -> 时间常数 ≈ 8ms) */
+-    if (s_primed == 0u)
+-    {
+-        s_raw_filt = raw;
+-        s_primed   = 1u;
+-    }
+-    else
+-    {
+-        d = (int32_t)raw - (int32_t)s_raw_filt;
+-        s_raw_filt = (uint32_t)((int32_t)s_raw_filt + (d >> (int32_t)FOC_NTC_FILTER_SHIFT));
+-    }
+-    f = s_raw_filt;
+-
+-    g_ntc_raw = f;
+-
+-    /* raw -> 分压点电压 (mV) */
+-    mv = (int32_t)(((uint32_t)f * (uint32_t)FOC_ADC_VDDA_MV + (FOC_ADC_FULLSCALE / 2u))
+-                   / (uint32_t)FOC_ADC_FULLSCALE);
+-    g_ntc_mv = mv;
+-
+-    v = (float)mv * 0.001f;
+-
+-    /* 电压贴到轨 = 一定不正常 (开路/短路), 先去抖地判掉 */
+-    if ((mv <= 0) || (mv >= (int32_t)FOC_ADC_VDDA_MV))
+-    {
+-        ok = 0u;
+-        r  = 0.0f;
+-    }
+-    else
+-    {
+-#if FOC_NTC_TOP
+-        /* NTC 在上: 温度↑ -> 电压↑ */
+-        r = ((float)FOC_NTC_R_SERIES_OHM * (vcc - v)) / v;
+-#else
+-        /* NTC 在下 (默认): 温度↑ -> 电压↓ */
+-        r = ((float)FOC_NTC_R_SERIES_OHM * v) / (vcc - v);
+-#endif
+-        if ((r < (float)FOC_NTC_R_MIN_OHM) || (r > (float)FOC_NTC_R_MAX_OHM))
+-        {
+-            ok = 0u;
+-        }
+-    }
+-
+-    if (ok != 0u)
+-    {
+-        /* Beta 公式: 1/T = 1/T25 + ln(R/R25)/BETA   (T: K) */
+-        inv_t = (1.0f / 298.15f) + (logf(r / (float)FOC_NTC_R25_OHM) / (float)FOC_NTC_BETA);
+-        if (inv_t <= 0.0f)
+-        {
+-            ok = 0u;
+-        }
+-        else
+-        {
+-            tc = (1.0f / inv_t) - 273.15f;
+-            if ((tc < (float)FOC_NTC_TEMP_MIN_C) || (tc > (float)FOC_NTC_TEMP_MAX_C))
+-            {
+-                ok = 0u;
+-            }
+-            else
+-            {
+-                s_temp_x10 = (int32_t)lroundf(tc * 10.0f);
+-                g_ntc_temp_x10 = s_temp_x10;
+-            }
+-        }
+-    }
+-
+-    __DMB();
+-    s_valid        = ok;  /* publish the temperature/valid result to TIM3 ISR */
+-    g_ntc_valid    = ok;
+-    if (ok == 0u)
+-    {
+-        g_ntc_temp_x10 = FOC_NTC_TEMP_INVALID;
+-    }
+-}
+-
+-int foc_ntc_check_trip_isr(void)
+-{
+-    int hot;
+-
+-    /* 还没量过 -> 不判 (避免上电瞬间误跳闸); 量过之后: 超温 或 读数无效(可配) */
+-    if (s_primed == 0u)
+-    {
+-        return 0;
+-    }
+-    if (s_valid != 0u)
+-    {
+-        hot = (s_temp_x10 >= (int32_t)FOC_NTC_TRIP_C_X10) ? 1 : 0;
+-    }
+-    else
+-    {
+-        hot = (FOC_NTC_TRIP_ON_INVALID != 0) ? 1 : 0;
+-    }
+-
+-    if (hot != 0)
+-    {
+-        uint32_t now = foc_tick_millis();
+-
+-        if (s_otp_ms == 0u)
+-        {
+-            s_otp_ms = (now == 0u) ? 1u : now;
+-        }
+-        else if ((now - s_otp_ms) >= FOC_NTC_DEBOUNCE_MS)
+-        {
+-            s_otp_ms = 0u;
+-            s_trips++;
+-            g_ntc_trips = s_trips;
+-            return 1;
+-        }
+-    }
+-    else
+-    {
+-        s_otp_ms = 0u;
+-    }
+-    return 0;
+-}
+-
+-int foc_ntc_over_temp(void)
+-{
+-    if (s_primed == 0u)
+-    {
+-        return 0;   /* 还没量过: 不拦启动 */
+-    }
+-    if (s_valid == 0u)
+-    {
+-        return (FOC_NTC_TRIP_ON_INVALID != 0) ? 1 : 0;
+-    }
+-    return (s_temp_x10 >= (int32_t)FOC_NTC_CLEAR_C_X10) ? 1 : 0;
+-}
+-
+-int foc_ntc_valid(void)
+-{
+-    return (s_valid != 0u) ? 1 : 0;
+-}
+-
+-int32_t foc_ntc_temp_c_x10(void)
+-{
+-    if ((s_primed == 0u) || (s_valid == 0u))
+-    {
+-        return FOC_NTC_TEMP_INVALID;
+-    }
+-    return s_temp_x10;
+-}
+-
+-uint16_t foc_ntc_raw(void)
+-{
+-    return (uint16_t)s_raw_filt;
+-}
+-
+-uint32_t foc_ntc_trips(void)
+-{
+-    return s_trips;
+-}
+-
+-#else  /* FOC_NTC_ENABLE == 0: 完全不参与, 全部返回"无温度信息" */
+-
+-volatile uint32_t g_ntc_disabled;
+-
+-void foc_ntc_update(void)                 { }
+-int  foc_ntc_check_trip_isr(void)         { return 0; }
+-int  foc_ntc_over_temp(void)              { return 0; }
+-int  foc_ntc_valid(void)                  { return 0; }
+-int32_t foc_ntc_temp_c_x10(void)          { return FOC_NTC_TEMP_INVALID; }
+-uint16_t foc_ntc_raw(void)                { return 0u; }
+-uint32_t foc_ntc_trips(void)              { return 0u; }
+-
+-#endif /* FOC_NTC_ENABLE */
++/*
++ * foc_ntc.c -- NTC 温度采样 + 过温保护 (后级保护)
++ * ===========================================================================
++ * 硬件: PA3 = ADC1_IN4, 与三相电流同属 ADC1 规则组 4 通道扫描的第二代数据。
++ *       所以本模块【不碰】ADC/DMA/采样时序, 只消费 foc_adc_raw(FOC_ADC_CH_AUX)。
++ *
++ * 换算链: raw -> mV -> NTC 电阻 (分压反解) -> Beta 公式 -> 0.1°C
++ *
++ * 安全设计:
++ *   - 读数无效 (开路/短路/超范围) 默认【也关输出】(FOC_NTC_TRIP_ON_INVALID=1):
++ *     保护功能的传感器坏了, 不能变成"没有保护"。
++ *   - 滞回: 跳闸 60°C, 允许再启动 55°C —— 避免在阈值附近反复起停。
++ *     (2026-09-28 用户明确指令: 从 50/45 提到 60/55。阈值本体在 foc_config.h 的
++ *      FOC_NTC_TRIP_C_X10 / FOC_NTC_CLEAR_C_X10, 这里只是说明。)
++ *   - 跳闸判定在 10kHz 硬件节拍里做整数比较, 最坏 100µs 关掉六路输出。
++ *   - 本模块只做"关输出"的判定, 具体动作由 foc_mode 的紧急停机统一执行。
++ */
++#include "foc_ntc.h"
++#include "foc_config.h"
++#include "foc_adc.h"
++#include "foc_tick.h"
++#include "n32g45x.h"
++
++#include <math.h>
++
++/* SWD / 网页可读的诊断量 */
++volatile int32_t  g_ntc_temp_x10;
++volatile uint32_t g_ntc_raw;
++volatile int32_t  g_ntc_mv;
++volatile uint32_t g_ntc_valid;
++volatile uint32_t g_ntc_trips;
++
++static uint32_t s_raw_filt;
++static uint32_t s_updated_us;
++uint32_t foc_ntc_updated_us(void){return s_updated_us;}
++static volatile uint8_t  s_primed;
++static volatile uint8_t  s_valid;
++static volatile int32_t s_temp_x10;
++static volatile uint32_t s_otp_ms;   /* 超温起始 ms (去抖) */
++static volatile uint32_t s_trips;    /* 累计跳闸次数 */
++
++#if FOC_NTC_ENABLE
++
++void foc_ntc_update(void)
++{
++    uint32_t raw = (uint32_t)foc_adc_raw(FOC_ADC_CH_AUX);
++    int32_t  d;
++    uint32_t f;
++    int32_t  mv;
++    float    v;
++    float    vcc = (float)FOC_ADC_VDDA_MV * 0.001f;
++    float    r;
++    float    inv_t;
++    float    tc;
++    uint8_t  ok = 1u;
++
++    /* 一阶滤波 (1kHz 调用 -> 时间常数 ≈ 8ms) */
++    if (s_primed == 0u)
++    {
++        s_raw_filt = raw;
++        s_primed   = 1u;
++    }
++    else
++    {
++        d = (int32_t)raw - (int32_t)s_raw_filt;
++        s_raw_filt = (uint32_t)((int32_t)s_raw_filt + (d >> (int32_t)FOC_NTC_FILTER_SHIFT));
++    }
++    f = s_raw_filt;
++
++    g_ntc_raw = f;
++
++    /* raw -> 分压点电压 (mV) */
++    mv = (int32_t)(((uint32_t)f * (uint32_t)FOC_ADC_VDDA_MV + (FOC_ADC_FULLSCALE / 2u))
++                   / (uint32_t)FOC_ADC_FULLSCALE);
++    g_ntc_mv = mv;
++
++    v = (float)mv * 0.001f;
++
++    /* 电压贴到轨 = 一定不正常 (开路/短路), 先去抖地判掉 */
++    if ((mv <= 0) || (mv >= (int32_t)FOC_ADC_VDDA_MV))
++    {
++        ok = 0u;
++        r  = 0.0f;
++    }
++    else
++    {
++#if FOC_NTC_TOP
++        /* NTC 在上: 温度↑ -> 电压↑ */
++        r = ((float)FOC_NTC_R_SERIES_OHM * (vcc - v)) / v;
++#else
++        /* NTC 在下 (默认): 温度↑ -> 电压↓ */
++        r = ((float)FOC_NTC_R_SERIES_OHM * v) / (vcc - v);
++#endif
++        if ((r < (float)FOC_NTC_R_MIN_OHM) || (r > (float)FOC_NTC_R_MAX_OHM))
++        {
++            ok = 0u;
++        }
++    }
++
++    if (ok != 0u)
++    {
++        /* Beta 公式: 1/T = 1/T25 + ln(R/R25)/BETA   (T: K) */
++        inv_t = (1.0f / 298.15f) + (logf(r / (float)FOC_NTC_R25_OHM) / (float)FOC_NTC_BETA);
++        if (inv_t <= 0.0f)
++        {
++            ok = 0u;
++        }
++        else
++        {
++            tc = (1.0f / inv_t) - 273.15f;
++            if ((tc < (float)FOC_NTC_TEMP_MIN_C) || (tc > (float)FOC_NTC_TEMP_MAX_C))
++            {
++                ok = 0u;
++            }
++            else
++            {
++                s_temp_x10 = (int32_t)lroundf(tc * 10.0f);
++                g_ntc_temp_x10 = s_temp_x10;
++            }
++        }
++    }
++
++    s_updated_us=foc_tick_micros();
++    __DMB();
++    s_valid        = ok;  /* publish the temperature/valid result to TIM3 ISR */
++    g_ntc_valid    = ok;
++    if (ok == 0u)
++    {
++        g_ntc_temp_x10 = FOC_NTC_TEMP_INVALID;
++    }
++}
++
++int foc_ntc_check_trip_isr(void)
++{
++    int hot;
++
++    /* 还没量过 -> 不判 (避免上电瞬间误跳闸); 量过之后: 超温 或 读数无效(可配) */
++    if (s_primed == 0u)
++    {
++        return 0;
++    }
++    if (s_valid != 0u)
++    {
++        hot = (s_temp_x10 >= (int32_t)FOC_NTC_TRIP_C_X10) ? 1 : 0;
++    }
++    else
++    {
++        hot = (FOC_NTC_TRIP_ON_INVALID != 0) ? 1 : 0;
++    }
++
++    if (hot != 0)
++    {
++        uint32_t now = foc_tick_millis();
++
++        if (s_otp_ms == 0u)
++        {
++            s_otp_ms = (now == 0u) ? 1u : now;
++        }
++        else if ((now - s_otp_ms) >= FOC_NTC_DEBOUNCE_MS)
++        {
++            s_otp_ms = 0u;
++            s_trips++;
++            g_ntc_trips = s_trips;
++            return 1;
++        }
++    }
++    else
++    {
++        s_otp_ms = 0u;
++    }
++    return 0;
++}
++
++int foc_ntc_over_temp(void)
++{
++    if (s_primed == 0u)
++    {
++        return 0;   /* 还没量过: 不拦启动 */
++    }
++    if (s_valid == 0u)
++    {
++        return (FOC_NTC_TRIP_ON_INVALID != 0) ? 1 : 0;
++    }
++    return (s_temp_x10 >= (int32_t)FOC_NTC_CLEAR_C_X10) ? 1 : 0;
++}
++
++int foc_ntc_valid(void)
++{
++    return (s_valid != 0u) ? 1 : 0;
++}
++
++int32_t foc_ntc_temp_c_x10(void)
++{
++    if ((s_primed == 0u) || (s_valid == 0u))
++    {
++        return FOC_NTC_TEMP_INVALID;
++    }
++    return s_temp_x10;
++}
++
++uint16_t foc_ntc_raw(void)
++{
++    return (uint16_t)s_raw_filt;
++}
++
++uint32_t foc_ntc_trips(void)
++{
++    return s_trips;
++}
++
++#else  /* FOC_NTC_ENABLE == 0: 完全不参与, 全部返回"无温度信息" */
++
++volatile uint32_t g_ntc_disabled;
++
++void foc_ntc_update(void)                 { }
++int  foc_ntc_check_trip_isr(void)         { return 0; }
++int  foc_ntc_over_temp(void)              { return 0; }
++int  foc_ntc_valid(void)                  { return 0; }
++int32_t foc_ntc_temp_c_x10(void)          { return FOC_NTC_TEMP_INVALID; }
++uint16_t foc_ntc_raw(void)                { return 0u; }
++uint32_t foc_ntc_trips(void)              { return 0u; }
++
++#endif /* FOC_NTC_ENABLE */
+--- a/foc/foc_ntc.h
++++ b/foc/foc_ntc.h
+@@ -1,43 +1,44 @@
+-/*
+- * foc_ntc.h -- NTC 温度采样 + 过温保护 (PA3 / ADC1_IN4)
+- * ===========================================================================
+- * 分工:
+- *   foc_ntc_update()          : 1kHz 任务里调 (foc_loop). 一阶滤波 + Beta 公式
+- *                               换算 + 有效性判定 (可含浮点, 不在中断里)
+- *   foc_ntc_check_trip_isr()  : 10kHz 硬件节拍里调 (foc_mode_current_isr).
+- *                               纯整数比较 + 去抖, 无浮点、无 RTOS API
+- *   foc_ntc_over_temp()       : 任务里调, 启动前的互锁 (FAULT 后要降温才能再启动)
+- *
+- * 为什么保护要放在 10kHz: 与过流保护同一条路径, 采样/判定在硬件节拍上,
+- *   最坏 100µs 就能关掉六路输出; 放 1ms 任务里最坏会晚 1ms —— 对"后级兜底"
+- *   够用, 但同路径更省事也更一致。
+- */
+-#ifndef FOC_NTC_H
+-#define FOC_NTC_H
+-
+-#include <stdint.h>
+-
+-/* 1kHz 任务里调: 取 AUX 通道原始值 -> 滤波 -> 温度。无阻塞, 可重复调。 */
+-void foc_ntc_update(void);
+-
+-/* 最近一次换算出的温度 (单位 0.1°C); 读数无效时返回 FOC_NTC_TEMP_INVALID */
+-#define FOC_NTC_TEMP_INVALID  ((int32_t)0x7FFFFFFF)
+-int32_t foc_ntc_temp_c_x10(void);
+-
+-/* 读数是否有效 (1 = 有效)。无效 = 开路/短路/超范围。 */
+-int foc_ntc_valid(void);
+-
+-/* 诊断: 滤波后的原始码 / 分压点电压(mV) / 累计跳闸次数 */
+-uint16_t foc_ntc_raw(void);
+-uint32_t foc_ntc_trips(void);
+-
+-/* ★10kHz 中断里调: 过温(或读数无效且配置为失效安全)并持续去抖时间到 -> 返回 1。
+- *   返回 1 时调用方必须立刻关输出 (foc_motor_emergency_stop)。
+- *   纯整数/计数器操作, 中断安全。 */
+-int foc_ntc_check_trip_isr(void);
+-
+-/* ★任务里调: 启动互锁。温度 ≥ FOC_NTC_CLEAR_C_X10 或读数无效(失效安全) -> 返回 1
+- *   (调用方应拒绝启动)。滞回: 跳闸在 TRIP, 允许重启在 CLEAR, 两者之间保持现状。 */
+-int foc_ntc_over_temp(void);
+-
+-#endif /* FOC_NTC_H */
++/*
++ * foc_ntc.h -- NTC 温度采样 + 过温保护 (PA3 / ADC1_IN4)
++ * ===========================================================================
++ * 分工:
++ *   foc_ntc_update()          : 1kHz 任务里调 (foc_loop). 一阶滤波 + Beta 公式
++ *                               换算 + 有效性判定 (可含浮点, 不在中断里)
++ *   foc_ntc_check_trip_isr()  : 10kHz 硬件节拍里调 (foc_mode_current_isr).
++ *                               纯整数比较 + 去抖, 无浮点、无 RTOS API
++ *   foc_ntc_over_temp()       : 任务里调, 启动前的互锁 (FAULT 后要降温才能再启动)
++ *
++ * 为什么保护要放在 10kHz: 与过流保护同一条路径, 采样/判定在硬件节拍上,
++ *   最坏 100µs 就能关掉六路输出; 放 1ms 任务里最坏会晚 1ms —— 对"后级兜底"
++ *   够用, 但同路径更省事也更一致。
++ */
++#ifndef FOC_NTC_H
++#define FOC_NTC_H
++
++#include <stdint.h>
++
++/* 1kHz 任务里调: 取 AUX 通道原始值 -> 滤波 -> 温度。无阻塞, 可重复调。 */
++void foc_ntc_update(void);
++
++/* 最近一次换算出的温度 (单位 0.1°C); 读数无效时返回 FOC_NTC_TEMP_INVALID */
++#define FOC_NTC_TEMP_INVALID  ((int32_t)0x7FFFFFFF)
++int32_t foc_ntc_temp_c_x10(void);
++uint32_t foc_ntc_updated_us(void);
++
++/* 读数是否有效 (1 = 有效)。无效 = 开路/短路/超范围。 */
++int foc_ntc_valid(void);
++
++/* 诊断: 滤波后的原始码 / 分压点电压(mV) / 累计跳闸次数 */
++uint16_t foc_ntc_raw(void);
++uint32_t foc_ntc_trips(void);
++
++/* ★10kHz 中断里调: 过温(或读数无效且配置为失效安全)并持续去抖时间到 -> 返回 1。
++ *   返回 1 时调用方必须立刻关输出 (foc_motor_emergency_stop)。
++ *   纯整数/计数器操作, 中断安全。 */
++int foc_ntc_check_trip_isr(void);
++
++/* ★任务里调: 启动互锁。温度 ≥ FOC_NTC_CLEAR_C_X10 或读数无效(失效安全) -> 返回 1
++ *   (调用方应拒绝启动)。滞回: 跳闸在 TRIP, 允许重启在 CLEAR, 两者之间保持现状。 */
++int foc_ntc_over_temp(void);
++
++#endif /* FOC_NTC_H */
+--- a/ota/ota_can.c
++++ b/ota/ota_can.c
+@@ -1,481 +1,499 @@
+-/*
+- * ota_can.c -- CAN2 (PB12/PB13) 初始化与轮询收发
+- */
+-#include "ota_can.h"
+-#include "ota_layout.h"
+-#include "ota_params.h"
+-
+-#include "n32g45x.h"
+-
+-/* ★阶段2: 仅 App(RTOS) 构建里引入 FreeRTOS, 用于 TX 邮箱忙时让出 CPU。
+- *   Bootloader 不定义 FOC_APP_USE_RTOS -> 同一份源码仍可原样编译。 */
+-#if defined(FOC_APP_USE_RTOS)
+-#include "FreeRTOS.h"
+-#include "task.h"
+-#include "queue.h"
+-#endif
+-
+-static uint8_t  s_node;
+-static uint16_t s_dev_id;
+-static uint16_t s_host_id;
+-static uint16_t s_pdev_id;
+-static uint16_t s_phost_id;
+-
+-static uint32_t s_rx_frames;
+-static uint32_t s_rx_other;
+-static uint32_t s_tx_fail;
+-
+-#if defined(FOC_APP_USE_RTOS)
+-/* ★阶段2: 正在等 TX 邮箱的任务 (由 CAN2_TX 中断唤醒)。必须在文件靠前声明,
+- *   因为发送函数在下面的 RX 队列块之前。 */
+-static volatile TaskHandle_t s_tx_waiter;
+-#endif
+-
+-static uint32_t s_pclk1;
+-static uint32_t s_presc;
+-static uint32_t s_tq_total;
+-
+-/* ------------------------------------------------------------------ */
+-/* GPIO: CAN2_RX = PB12 (上拉输入), CAN2_TX = PB13 (复用推挽)          */
+-/* ------------------------------------------------------------------ */
+-static void can_gpio_init(void)
+-{
+-    GPIO_InitType gpio;
+-
+-    RCC_EnableAPB2PeriphClk(RCC_APB2_PERIPH_AFIO | RCC_APB2_PERIPH_GPIOB, ENABLE);
+-
+-    GPIO_InitStruct(&gpio);
+-    gpio.Pin       = GPIO_PIN_12;
+-    gpio.GPIO_Mode = GPIO_Mode_IPU;
+-    GPIO_InitPeripheral(GPIOB, &gpio);
+-
+-    gpio.Pin        = GPIO_PIN_13;
+-    gpio.GPIO_Mode  = GPIO_Mode_AF_PP;
+-    gpio.GPIO_Speed = GPIO_Speed_50MHz;
+-    GPIO_InitPeripheral(GPIOB, &gpio);
+-
+-    /* CAN2_RMP = 00 (默认), 不需要 GPIO_ConfigPinRemap */
+-}
+-
+-/* ------------------------------------------------------------------ */
+-/* 位定时: 由 PCLK1 和目标波特率反算预分频 / BS1 / BS2                    */
+-/*   bit time = (1 + BS1 + BS2) tq,  tq = presc / PCLK1                */
+-/*   采样点尽量取 87.5%                                                  */
+-/* ------------------------------------------------------------------ */
+-static int can_bittiming(uint32_t pclk1, uint32_t baud, CAN_InitType* cfg)
+-{
+-    uint32_t presc;
+-
+-    if ((pclk1 == 0u) || (baud == 0u))
+-    {
+-        return -1;
+-    }
+-
+-    for (presc = 1u; presc <= 1024u; presc++)
+-    {
+-        uint32_t div = baud * presc;
+-        uint32_t tq_total;
+-        uint32_t bs1;
+-        uint32_t bs2;
+-
+-        if (div == 0u)
+-        {
+-            continue;
+-        }
+-        if ((pclk1 % div) != 0u)
+-        {
+-            continue;
+-        }
+-        tq_total = pclk1 / div;
+-        if ((tq_total < 8u) || (tq_total > 25u))
+-        {
+-            continue;
+-        }
+-
+-        bs2 = (tq_total + 4u) / 8u; /* 16tq -> 2tq, 20tq -> 3tq ... */
+-        if (bs2 < 1u)
+-        {
+-            bs2 = 1u;
+-        }
+-        if (bs2 > 8u)
+-        {
+-            bs2 = 8u;
+-        }
+-        if (tq_total < (bs2 + 2u))
+-        {
+-            continue;
+-        }
+-        bs1 = tq_total - 1u - bs2;
+-        if ((bs1 < 1u) || (bs1 > 16u))
+-        {
+-            continue;
+-        }
+-
+-        cfg->BaudRatePrescaler = (uint16_t)presc;
+-        cfg->TBS1              = (uint8_t)(bs1 - 1u); /* 编码: 0 => 1tq */
+-        cfg->TBS2              = (uint8_t)(bs2 - 1u);
+-        cfg->RSJW              = CAN_RSJW_1tq;
+-
+-        s_pclk1    = pclk1;
+-        s_presc    = presc;
+-        s_tq_total = tq_total;
+-        return 0;
+-    }
+-    return -1;
+-}
+-
+-void ota_can_set_ids(uint8_t node)
+-{
+-    s_node    = node;
+-    s_dev_id   = (uint16_t)(OTA_CAN_ID_DEV_BASE + node);
+-    s_host_id  = (uint16_t)(OTA_CAN_ID_HOST_BASE + node);
+-    s_pdev_id  = (uint16_t)(OTA_CAN_ID_PDEV_BASE + node);
+-    s_phost_id = (uint16_t)(OTA_CAN_ID_PHOST_BASE + node);
+-}
+-
+-int ota_can_init(uint32_t baud, uint8_t node)
+-{
+-    RCC_ClocksType     clk;
+-    CAN_InitType       ic;
+-    CAN_FilterInitType fc;
+-
+-    ota_can_set_ids(node);
+-    can_gpio_init();
+-
+-    RCC_EnableAPB1PeriphClk(RCC_APB1_PERIPH_CAN2, ENABLE);
+-    CAN_DeInit(CAN2);
+-
+-    RCC_GetClocksFreqValue(&clk);
+-
+-    CAN_InitStruct(&ic);
+-    if (can_bittiming(clk.Pclk1Freq, baud, &ic) != 0)
+-    {
+-        return -1;
+-    }
+-
+-    ic.OperatingMode = CAN_Normal_Mode;
+-    ic.TTCM          = DISABLE;
+-    ic.ABOM          = ENABLE; /* 自动离线恢复: 总线抖动后能自己回来 */
+-    ic.AWKUM         = DISABLE;
+-    ic.NART          = DISABLE; /* 允许自动重传, 单帧可靠性优先 */
+-    ic.RFLM          = DISABLE;
+-    ic.TXFP          = ENABLE;
+-
+-    if (CAN_Init(CAN2, &ic) != CAN_InitSTS_Success)
+-    {
+-        return -2;
+-    }
+-
+-    /* 两组硬件过滤器, 精确匹配两个通道的主机 ID, 并分进不同 FIFO:
+-     *   bank0: OTA  通道 0x600+node -> FIFO0
+-     *   bank1: 参数 通道 0x610+node -> FIFO1
+-     * 标准帧 32 位掩码布局: STID[31:21], IDE[2], RTR[1]
+-     * 好处: OTA 灌数据时不会把参数帧挤掉, 参数帧也不会混进 OTA 的帧计数。 */
+-    {
+-        uint32_t v0 = ((uint32_t)s_host_id << 21);
+-        uint32_t v1 = ((uint32_t)s_phost_id << 21);
+-        uint32_t mask = (0x7FFu << 21) | 0x06u; /* ID + IDE + RTR 全比对 */
+-
+-        fc.Filter_Mode  = CAN_Filter_IdMaskMode;
+-        fc.Filter_Scale = CAN_Filter_32bitScale;
+-        fc.Filter_Act   = ENABLE;
+-
+-        fc.Filter_Num        = 0u;
+-        fc.Filter_HighId     = (uint16_t)(v0 >> 16);
+-        fc.Filter_LowId      = (uint16_t)(v0 & 0xFFFFu);
+-        fc.FilterMask_HighId = (uint16_t)(mask >> 16);
+-        fc.FilterMask_LowId  = (uint16_t)(mask & 0xFFFFu);
+-        fc.Filter_FIFOAssignment = CAN_Filter_FIFO0;
+-        CAN2_InitFilter(&fc);
+-
+-        fc.Filter_Num        = 1u;
+-        fc.Filter_HighId     = (uint16_t)(v1 >> 16);
+-        fc.Filter_LowId      = (uint16_t)(v1 & 0xFFFFu);
+-        fc.FilterMask_HighId = (uint16_t)(mask >> 16);
+-        fc.FilterMask_LowId  = (uint16_t)(mask & 0xFFFFu);
+-        fc.Filter_FIFOAssignment = CAN_Filter_FIFO1;
+-        CAN2_InitFilter(&fc);
+-    }
+-
+-    return 0;
+-}
+-
+-static int can_send_on(uint16_t id, const uint8_t* data, uint8_t len)
+-{
+-    CanTxMessage tx;
+-    uint8_t      i;
+-    uint32_t     guard;
+-
+-    if (len > 8u)
+-    {
+-        len = 8u;
+-    }
+-
+-    tx.StdId = (uint32_t)id;
+-    tx.ExtId = 0u;
+-    tx.IDE   = (uint8_t)CAN_Standard_Id;
+-    tx.RTR   = (uint8_t)CAN_RTRQ_Data;
+-    tx.DLC   = len;
+-    for (i = 0u; i < 8u; i++)
+-    {
+-        tx.Data[i] = (i < len) ? data[i] : 0u;
+-    }
+-
+-    /* ★阶段2: 邮箱满时不再纯空转 4096 次 ——
+-     *   调度器已启动时用 taskYIELD() 让出 CPU (其它任务得以运行), 并统计失败;
+-     *   guard 仍然保留作为"有界"上限, 超时放弃由上位机超时重发兜底。
+-     *   注: 本函数只在任务上下文调用 (协议/遥测发送), 不在 ISR 里调用。 */
+-    /* ★阶段2: 邮箱满时【等 TX 完成通知】(有界 2ms/次, 最多 8 次), 不再靠
+-     *   4096 次空转/让出试探。TME 中断只在等待窗口内使能, 避免中断风暴。
+-     *   Bootloader(无调度器)仍走原来的有界重试。 */
+-    for (guard = 0u; guard < 8u; guard++)
+-    {
+-        if (CAN_TransmitMessage(CAN2, &tx) != CAN_TxSTS_NoMailBox)
+-        {
+-            return 0;
+-        }
+-#if defined(FOC_APP_USE_RTOS)
+-        if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING)
+-        {
+-            s_tx_waiter = xTaskGetCurrentTaskHandle();
+-            CAN_INTConfig(CAN2, CAN_INT_TME, ENABLE);
+-            (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2));   /* 等邮箱腾出来 */
+-            CAN_INTConfig(CAN2, CAN_INT_TME, DISABLE);
+-            s_tx_waiter = 0;
+-        }
+-#endif
+-    }
+-    s_tx_fail++;
+-    return -1;
+-}
+-
+-int ota_can_send(const uint8_t* data, uint8_t len)
+-{
+-    return can_send_on(s_dev_id, data, len);
+-}
+-
+-int ota_can_send_param(const uint8_t* data, uint8_t len)
+-{
+-    return can_send_on(s_pdev_id, data, len);
+-}
+-
+-#if defined(FOC_APP_USE_RTOS)
+-/* ===================================================================
+- * ★阶段2: CAN RX 事件化
+- *   问题: 原来靠主循环轮询 CAN FIFO —— RTOS 化后 poll 任务降到 1ms 一轮,
+- *         而 500kbps 下约 4.5 帧/ms, 硬件 FIFO 只有 3 级 -> 必然溢出丢帧,
+- *         OTA 会退化成不停重传(阶段1 实测轮询明显变慢就是这个原因)。
+- *   做法: 打开 FIFO0/FIFO1 的"报文挂起"中断, ISR 里把帧搬进【有界静态队列】,
+- *         协议任务再用 ota_can_rxq_recv() 有界取走。
+- *   优先级: CAN2_RX0/RX1 设为 6 (>= configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY=5),
+- *         所以 ISR 里可以合法调用 ...FromISR。
+- * =================================================================== */
+-#define OTA_CAN_RXQ_LEN   24u      /* 覆盖突发; 满了计数丢弃, 由 OTA 块重传兜底 */
+-
+-typedef struct
+-{
+-    uint8_t d[8];
+-    uint8_t len;
+-    uint8_t chan;      /* 0 = OTA 通道(0x600/0x580), 1 = 参数通道(0x610/0x590) */
+-} ota_can_rxitem_t;
+-
+-static QueueHandle_t  s_rxq;
+-static StaticQueue_t  s_rxq_ctrl;
+-static uint8_t        s_rxq_buf[OTA_CAN_RXQ_LEN * sizeof(ota_can_rxitem_t)];
+-static volatile uint32_t s_isr_frames;
+-static volatile uint32_t s_isr_drop;
+-
+-int ota_can_rxq_init(void)
+-{
+-    if (s_rxq != 0)
+-    {
+-        return 0;                       /* 幂等 */
+-    }
+-    s_rxq = xQueueCreateStatic(OTA_CAN_RXQ_LEN, sizeof(ota_can_rxitem_t),
+-                               s_rxq_buf, &s_rxq_ctrl);
+-    if (s_rxq == 0)
+-    {
+-        return -1;
+-    }
+-
+-    /* 两个 FIFO 都要中断: FIFO0 = OTA 通道, FIFO1 = 参数通道 (与过滤器分配一致) */
+-    CAN_INTConfig(CAN2, CAN_INT_FMP0, ENABLE);
+-    CAN_INTConfig(CAN2, CAN_INT_FMP1, ENABLE);
+-
+-    NVIC_SetPriority(CAN2_RX0_IRQn, 6u);
+-    NVIC_SetPriority(CAN2_RX1_IRQn, 6u);
+-    NVIC_EnableIRQ(CAN2_RX0_IRQn);
+-    NVIC_EnableIRQ(CAN2_RX1_IRQn);
+-
+-    /* ★阶段2: TX 邮箱空中断 —— 只在"等邮箱"时才使能(TME 会被反复置位,
+-     *   常开等于中断风暴), 所以这里只开 NVIC, 中断使能在等待处开关。 */
+-    NVIC_SetPriority(CAN2_TX_IRQn, 6u);
+-    NVIC_EnableIRQ(CAN2_TX_IRQn);
+-    return 0;
+-}
+-
+-/* 两个 FIFO 共用的搬运逻辑; ISR 里只做"取帧 + 入队", 不解析协议、不格式化 */
+-static void ota_can_rx_isr(uint8_t fifo)
+-{
+-    BaseType_t     hpw = pdFALSE;
+-    CanRxMessage   rx;
+-    uint16_t       want = (fifo == CAN_FIFO0) ? s_host_id : s_phost_id;
+-    uint8_t        chan = (fifo == CAN_FIFO0) ? 0u : 1u;
+-    uint32_t       guard = 0u;
+-
+-    /* 有界: 一次中断最多搬 8 帧, 避免在 ISR 里久留 */
+-    while ((CAN_PendingMessage(CAN2, fifo) != 0u) && (guard < 8u))
+-    {
+-        guard++;
+-        CAN_ReceiveMessage(CAN2, fifo, &rx);      /* 内部已释放 FIFO */
+-        s_isr_frames++;
+-
+-        if ((rx.IDE == (uint8_t)CAN_Standard_Id) && (rx.RTR == (uint8_t)CAN_RTRQ_Data) &&
+-            (rx.StdId == (uint32_t)want))
+-        {
+-            ota_can_rxitem_t it;
+-            uint8_t          i;
+-
+-            for (i = 0u; i < 8u; i++)
+-            {
+-                it.d[i] = rx.Data[i];
+-            }
+-            it.len  = (rx.DLC > 8u) ? 8u : (uint8_t)rx.DLC;
+-            it.chan = chan;
+-
+-            if (xQueueSendFromISR(s_rxq, &it, &hpw) != pdTRUE)
+-            {
+-                s_isr_drop++;      /* 队列满: 计数, 由 OTA 块重传兜底 */
+-            }
+-        }
+-        else
+-        {
+-            s_rx_other++;
+-        }
+-    }
+-    portYIELD_FROM_ISR(hpw);
+-}
+-
+-void CAN2_RX0_IRQHandler(void)
+-{
+-    ota_can_rx_isr(CAN_FIFO0);
+-}
+-
+-void CAN2_RX1_IRQHandler(void)
+-{
+-    ota_can_rx_isr(CAN_FIFO1);
+-}
+-
+-/* 协议任务用: 有界取一帧; wait=0 表示不阻塞 */
+-int ota_can_rxq_recv(uint8_t* data, uint8_t* len, uint8_t* chan, uint32_t wait_ticks)
+-{
+-    ota_can_rxitem_t it;
+-    uint8_t          i;
+-
+-    if ((s_rxq == 0) || (data == 0) || (len == 0) || (chan == 0))
+-    {
+-        return 0;
+-    }
+-    if (xQueueReceive(s_rxq, &it, (TickType_t)wait_ticks) != pdTRUE)
+-    {
+-        return 0;
+-    }
+-    for (i = 0u; i < 8u; i++)
+-    {
+-        data[i] = it.d[i];
+-    }
+-    *len  = it.len;
+-    *chan = it.chan;
+-    s_rx_frames++;
+-    return 1;
+-}
+-
+-uint32_t ota_can_isr_frames(void) { return s_isr_frames; }
+-uint32_t ota_can_isr_drop(void)   { return s_isr_drop; }
+-uint32_t ota_can_rxq_len(void)    { return (s_rxq != 0) ? (uint32_t)uxQueueMessagesWaiting(s_rxq) : 0u; }
+-
+-/* ★阶段2: TX 完成(邮箱空)中断 -> 唤醒正在等邮箱的任务, 让发送不再空转 */
+-void CAN2_TX_IRQHandler(void)
+-{
+-    CAN_ClearINTPendingBit(CAN2, CAN_INT_TME);
+-    if (s_tx_waiter != 0)
+-    {
+-        BaseType_t hpw = pdFALSE;
+-        vTaskNotifyGiveFromISR((TaskHandle_t)s_tx_waiter, &hpw);
+-        portYIELD_FROM_ISR(hpw);
+-    }
+-}
+-#endif /* FOC_APP_USE_RTOS */
+-
+-int ota_can_poll(uint8_t* data, uint8_t* len, uint8_t* chan)
+-{
+-    CanRxMessage rx;
+-    uint8_t      i;
+-    uint8_t      fifo;
+-    uint16_t     want;
+-
+-    if (CAN_PendingMessage(CAN2, CAN_FIFO0) != 0u)
+-    {
+-        fifo  = CAN_FIFO0;
+-        want  = s_host_id;
+-        *chan = 0u;
+-    }
+-    else if (CAN_PendingMessage(CAN2, CAN_FIFO1) != 0u)
+-    {
+-        fifo  = CAN_FIFO1;
+-        want  = s_phost_id;
+-        *chan = 1u;
+-    }
+-    else
+-    {
+-        return 0;
+-    }
+-
+-    /* 注意: 该函数内部已经释放 FIFO, 不要再调用 CAN_ReleaseFIFO */
+-    CAN_ReceiveMessage(CAN2, fifo, &rx);
+-
+-    if ((rx.IDE != (uint8_t)CAN_Standard_Id) || (rx.RTR != (uint8_t)CAN_RTRQ_Data) ||
+-        (rx.StdId != (uint32_t)want))
+-    {
+-        s_rx_other++;
+-        return 0;
+-    }
+-
+-    for (i = 0u; i < 8u; i++)
+-    {
+-        data[i] = rx.Data[i];
+-    }
+-    *len = (rx.DLC > 8u) ? 8u : rx.DLC;
+-    s_rx_frames++;
+-    return 1;
+-}
+-
+-uint32_t ota_can_rx_frames(void)
+-{
+-    return s_rx_frames;
+-}
+-
+-uint32_t ota_can_rx_other(void)
+-{
+-    return s_rx_other;
+-}
+-
+-uint32_t ota_can_tx_fail(void)
+-{
+-    return s_tx_fail;
+-}
+-
+-uint32_t ota_can_prescaler(void)
+-{
+-    return s_presc;
+-}
+-
+-uint32_t ota_can_tq_total(void)
+-{
+-    return s_tq_total;
+-}
+-
+-uint32_t ota_can_pclk1(void)
+-{
+-    return s_pclk1;
+-}
++/*
++ * ota_can.c -- CAN2 (PB12/PB13) 初始化与轮询收发
++ */
++#include "ota_can.h"
++#include "motor_bench_port.h"
++#include "ota_layout.h"
++#include "ota_params.h"
++
++#include "n32g45x.h"
++
++/* ★阶段2: 仅 App(RTOS) 构建里引入 FreeRTOS, 用于 TX 邮箱忙时让出 CPU。
++ *   Bootloader 不定义 FOC_APP_USE_RTOS -> 同一份源码仍可原样编译。 */
++#if defined(FOC_APP_USE_RTOS)
++#include "FreeRTOS.h"
++#include "task.h"
++#include "queue.h"
++#endif
++
++static uint8_t  s_node;
++static uint16_t s_dev_id;
++static uint16_t s_host_id;
++static uint16_t s_pdev_id;
++static uint16_t s_phost_id;
++
++static uint32_t s_rx_frames;
++static uint32_t s_rx_other;
++static uint32_t s_tx_fail;
++
++#if defined(FOC_APP_USE_RTOS)
++/* ★阶段2: 正在等 TX 邮箱的任务 (由 CAN2_TX 中断唤醒)。必须在文件靠前声明,
++ *   因为发送函数在下面的 RX 队列块之前。 */
++static volatile TaskHandle_t s_tx_waiter;
++#endif
++
++static uint32_t s_pclk1;
++static uint32_t s_presc;
++static uint32_t s_tq_total;
++
++/* ------------------------------------------------------------------ */
++/* GPIO: CAN2_RX = PB12 (上拉输入), CAN2_TX = PB13 (复用推挽)          */
++/* ------------------------------------------------------------------ */
++static void can_gpio_init(void)
++{
++    GPIO_InitType gpio;
++
++    RCC_EnableAPB2PeriphClk(RCC_APB2_PERIPH_AFIO | RCC_APB2_PERIPH_GPIOB, ENABLE);
++
++    GPIO_InitStruct(&gpio);
++    gpio.Pin       = GPIO_PIN_12;
++    gpio.GPIO_Mode = GPIO_Mode_IPU;
++    GPIO_InitPeripheral(GPIOB, &gpio);
++
++    gpio.Pin        = GPIO_PIN_13;
++    gpio.GPIO_Mode  = GPIO_Mode_AF_PP;
++    gpio.GPIO_Speed = GPIO_Speed_50MHz;
++    GPIO_InitPeripheral(GPIOB, &gpio);
++
++    /* CAN2_RMP = 00 (默认), 不需要 GPIO_ConfigPinRemap */
++}
++
++/* ------------------------------------------------------------------ */
++/* 位定时: 由 PCLK1 和目标波特率反算预分频 / BS1 / BS2                    */
++/*   bit time = (1 + BS1 + BS2) tq,  tq = presc / PCLK1                */
++/*   采样点尽量取 87.5%                                                  */
++/* ------------------------------------------------------------------ */
++static int can_bittiming(uint32_t pclk1, uint32_t baud, CAN_InitType* cfg)
++{
++    uint32_t presc;
++
++    if ((pclk1 == 0u) || (baud == 0u))
++    {
++        return -1;
++    }
++
++    for (presc = 1u; presc <= 1024u; presc++)
++    {
++        uint32_t div = baud * presc;
++        uint32_t tq_total;
++        uint32_t bs1;
++        uint32_t bs2;
++
++        if (div == 0u)
++        {
++            continue;
++        }
++        if ((pclk1 % div) != 0u)
++        {
++            continue;
++        }
++        tq_total = pclk1 / div;
++        if ((tq_total < 8u) || (tq_total > 25u))
++        {
++            continue;
++        }
++
++        bs2 = (tq_total + 4u) / 8u; /* 16tq -> 2tq, 20tq -> 3tq ... */
++        if (bs2 < 1u)
++        {
++            bs2 = 1u;
++        }
++        if (bs2 > 8u)
++        {
++            bs2 = 8u;
++        }
++        if (tq_total < (bs2 + 2u))
++        {
++            continue;
++        }
++        bs1 = tq_total - 1u - bs2;
++        if ((bs1 < 1u) || (bs1 > 16u))
++        {
++            continue;
++        }
++
++        cfg->BaudRatePrescaler = (uint16_t)presc;
++        cfg->TBS1              = (uint8_t)(bs1 - 1u); /* 编码: 0 => 1tq */
++        cfg->TBS2              = (uint8_t)(bs2 - 1u);
++        cfg->RSJW              = CAN_RSJW_1tq;
++
++        s_pclk1    = pclk1;
++        s_presc    = presc;
++        s_tq_total = tq_total;
++        return 0;
++    }
++    return -1;
++}
++
++void ota_can_set_ids(uint8_t node)
++{
++    s_node    = node;
++    s_dev_id   = (uint16_t)(OTA_CAN_ID_DEV_BASE + node);
++    s_host_id  = (uint16_t)(OTA_CAN_ID_HOST_BASE + node);
++    s_pdev_id  = (uint16_t)(OTA_CAN_ID_PDEV_BASE + node);
++    s_phost_id = (uint16_t)(OTA_CAN_ID_PHOST_BASE + node);
++}
++
++int ota_can_init(uint32_t baud, uint8_t node)
++{
++    RCC_ClocksType     clk;
++    CAN_InitType       ic;
++    CAN_FilterInitType fc;
++
++    ota_can_set_ids(node);
++    can_gpio_init();
++
++    RCC_EnableAPB1PeriphClk(RCC_APB1_PERIPH_CAN2, ENABLE);
++    CAN_DeInit(CAN2);
++
++    RCC_GetClocksFreqValue(&clk);
++
++    CAN_InitStruct(&ic);
++    if (can_bittiming(clk.Pclk1Freq, baud, &ic) != 0)
++    {
++        return -1;
++    }
++
++    ic.OperatingMode = CAN_Normal_Mode;
++    ic.TTCM          = DISABLE;
++    ic.ABOM          = ENABLE; /* 自动离线恢复: 总线抖动后能自己回来 */
++    ic.AWKUM         = DISABLE;
++    ic.NART          = DISABLE; /* 允许自动重传, 单帧可靠性优先 */
++    ic.RFLM          = DISABLE;
++    ic.TXFP          = ENABLE;
++
++    if (CAN_Init(CAN2, &ic) != CAN_InitSTS_Success)
++    {
++        return -2;
++    }
++
++    /* 两组硬件过滤器, 精确匹配两个通道的主机 ID, 并分进不同 FIFO:
++     *   bank0: OTA  通道 0x600+node -> FIFO0
++     *   bank1: 参数 通道 0x610+node -> FIFO1
++     * 标准帧 32 位掩码布局: STID[31:21], IDE[2], RTR[1]
++     * 好处: OTA 灌数据时不会把参数帧挤掉, 参数帧也不会混进 OTA 的帧计数。 */
++    {
++        uint32_t v0 = ((uint32_t)s_host_id << 21);
++        uint32_t v1 = ((uint32_t)s_phost_id << 21);
++        uint32_t mask = (0x7FFu << 21) | 0x06u; /* ID + IDE + RTR 全比对 */
++
++        fc.Filter_Mode  = CAN_Filter_IdMaskMode;
++        fc.Filter_Scale = CAN_Filter_32bitScale;
++        fc.Filter_Act   = ENABLE;
++
++        fc.Filter_Num        = 0u;
++        fc.Filter_HighId     = (uint16_t)(v0 >> 16);
++        fc.Filter_LowId      = (uint16_t)(v0 & 0xFFFFu);
++        fc.FilterMask_HighId = (uint16_t)(mask >> 16);
++        fc.FilterMask_LowId  = (uint16_t)(mask & 0xFFFFu);
++        fc.Filter_FIFOAssignment = CAN_Filter_FIFO0;
++        CAN2_InitFilter(&fc);
++
++        fc.Filter_Num        = 1u;
++        fc.Filter_HighId     = (uint16_t)(v1 >> 16);
++        fc.Filter_LowId      = (uint16_t)(v1 & 0xFFFFu);
++        fc.FilterMask_HighId = (uint16_t)(mask >> 16);
++        fc.FilterMask_LowId  = (uint16_t)(mask & 0xFFFFu);
++        fc.Filter_FIFOAssignment = CAN_Filter_FIFO1;
++        CAN2_InitFilter(&fc);
++        const uint16_t native_ids[]={0x081u,0x101u,0x401u,0x481u};
++        for(unsigned i=0;i<4u;i++) {
++            uint32_t v=(uint32_t)native_ids[i]<<21;
++            fc.Filter_Num=(uint8_t)(2u+i);
++            fc.Filter_HighId=(uint16_t)(v>>16);fc.Filter_LowId=(uint16_t)v;
++            CAN2_InitFilter(&fc);
++        }
++    }
++
++    return 0;
++}
++
++static int can_send_on(uint16_t id, const uint8_t* data, uint8_t len)
++{
++    CanTxMessage tx;
++    uint8_t      i;
++    uint32_t     guard;
++
++    if (len > 8u)
++    {
++        len = 8u;
++    }
++
++    tx.StdId = (uint32_t)id;
++    tx.ExtId = 0u;
++    tx.IDE   = (uint8_t)CAN_Standard_Id;
++    tx.RTR   = (uint8_t)CAN_RTRQ_Data;
++    tx.DLC   = len;
++    for (i = 0u; i < 8u; i++)
++    {
++        tx.Data[i] = (i < len) ? data[i] : 0u;
++    }
++
++    /* ★阶段2: 邮箱满时不再纯空转 4096 次 ——
++     *   调度器已启动时用 taskYIELD() 让出 CPU (其它任务得以运行), 并统计失败;
++     *   guard 仍然保留作为"有界"上限, 超时放弃由上位机超时重发兜底。
++     *   注: 本函数只在任务上下文调用 (协议/遥测发送), 不在 ISR 里调用。 */
++    /* ★阶段2: 邮箱满时【等 TX 完成通知】(有界 2ms/次, 最多 8 次), 不再靠
++     *   4096 次空转/让出试探。TME 中断只在等待窗口内使能, 避免中断风暴。
++     *   Bootloader(无调度器)仍走原来的有界重试。 */
++    for (guard = 0u; guard < 8u; guard++)
++    {
++        if (CAN_TransmitMessage(CAN2, &tx) != CAN_TxSTS_NoMailBox)
++        {
++            return 0;
++        }
++#if defined(FOC_APP_USE_RTOS)
++        if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING)
++        {
++            s_tx_waiter = xTaskGetCurrentTaskHandle();
++            CAN_INTConfig(CAN2, CAN_INT_TME, ENABLE);
++            (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2));   /* 等邮箱腾出来 */
++            CAN_INTConfig(CAN2, CAN_INT_TME, DISABLE);
++            s_tx_waiter = 0;
++        }
++#endif
++    }
++    s_tx_fail++;
++    return -1;
++}
++
++int ota_can_send(const uint8_t* data, uint8_t len)
++{
++    return can_send_on(s_dev_id, data, len);
++}
++
++int ota_can_send_param(const uint8_t* data, uint8_t len)
++{
++    return can_send_on(s_pdev_id, data, len);
++}
++
++#if defined(FOC_APP_USE_RTOS)
++/* ===================================================================
++ * ★阶段2: CAN RX 事件化
++ *   问题: 原来靠主循环轮询 CAN FIFO —— RTOS 化后 poll 任务降到 1ms 一轮,
++ *         而 500kbps 下约 4.5 帧/ms, 硬件 FIFO 只有 3 级 -> 必然溢出丢帧,
++ *         OTA 会退化成不停重传(阶段1 实测轮询明显变慢就是这个原因)。
++ *   做法: 打开 FIFO0/FIFO1 的"报文挂起"中断, ISR 里把帧搬进【有界静态队列】,
++ *         协议任务再用 ota_can_rxq_recv() 有界取走。
++ *   优先级: CAN2_RX0/RX1 设为 6 (>= configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY=5),
++ *         所以 ISR 里可以合法调用 ...FromISR。
++ * =================================================================== */
++#define OTA_CAN_RXQ_LEN   24u      /* 覆盖突发; 满了计数丢弃, 由 OTA 块重传兜底 */
++
++typedef struct
++{
++    uint8_t d[8];
++    uint8_t len;
++    uint8_t chan;      /* 0 = OTA 通道(0x600/0x580), 1 = 参数通道(0x610/0x590) */
++} ota_can_rxitem_t;
++
++static QueueHandle_t  s_rxq;
++static StaticQueue_t  s_rxq_ctrl;
++static uint8_t        s_rxq_buf[OTA_CAN_RXQ_LEN * sizeof(ota_can_rxitem_t)];
++static volatile uint32_t s_isr_frames;
++static volatile uint32_t s_isr_drop;
++
++int ota_can_rxq_init(void)
++{
++    if (s_rxq != 0)
++    {
++        return 0;                       /* 幂等 */
++    }
++    s_rxq = xQueueCreateStatic(OTA_CAN_RXQ_LEN, sizeof(ota_can_rxitem_t),
++                               s_rxq_buf, &s_rxq_ctrl);
++    if (s_rxq == 0)
++    {
++        return -1;
++    }
++
++    /* 两个 FIFO 都要中断: FIFO0 = OTA 通道, FIFO1 = 参数通道 (与过滤器分配一致) */
++    CAN_INTConfig(CAN2, CAN_INT_FMP0, ENABLE);
++    CAN_INTConfig(CAN2, CAN_INT_FMP1, ENABLE);
++
++    NVIC_SetPriority(CAN2_RX0_IRQn, 6u);
++    NVIC_SetPriority(CAN2_RX1_IRQn, 6u);
++    NVIC_EnableIRQ(CAN2_RX0_IRQn);
++    NVIC_EnableIRQ(CAN2_RX1_IRQn);
++
++    /* ★阶段2: TX 邮箱空中断 —— 只在"等邮箱"时才使能(TME 会被反复置位,
++     *   常开等于中断风暴), 所以这里只开 NVIC, 中断使能在等待处开关。 */
++    NVIC_SetPriority(CAN2_TX_IRQn, 6u);
++    NVIC_EnableIRQ(CAN2_TX_IRQn);
++    return 0;
++}
++
++/* 两个 FIFO 共用的搬运逻辑; ISR 里只做"取帧 + 入队", 不解析协议、不格式化 */
++static void ota_can_rx_isr(uint8_t fifo)
++{
++    BaseType_t     hpw = pdFALSE;
++    CanRxMessage   rx;
++    uint16_t       want = (fifo == CAN_FIFO0) ? s_host_id : s_phost_id;
++    uint8_t        chan = (fifo == CAN_FIFO0) ? 0u : 1u;
++    uint32_t       guard = 0u;
++
++    /* 有界: 一次中断最多搬 8 帧, 避免在 ISR 里久留 */
++    while ((CAN_PendingMessage(CAN2, fifo) != 0u) && (guard < 8u))
++    {
++        guard++;
++        CAN_ReceiveMessage(CAN2, fifo, &rx);      /* 内部已释放 FIFO */
++        s_isr_frames++;
++
++        if(rx.IDE==(uint8_t)CAN_Standard_Id && rx.RTR==(uint8_t)CAN_RTRQ_Data && rx.DLC==8u &&
++           motor_bench_rx_isr((uint16_t)rx.StdId,rx.Data))continue;
++        if ((rx.IDE == (uint8_t)CAN_Standard_Id) && (rx.RTR == (uint8_t)CAN_RTRQ_Data) &&
++            (rx.StdId == (uint32_t)want))
++        {
++            ota_can_rxitem_t it;
++            uint8_t          i;
++
++            for (i = 0u; i < 8u; i++)
++            {
++                it.d[i] = rx.Data[i];
++            }
++            it.len  = (rx.DLC > 8u) ? 8u : (uint8_t)rx.DLC;
++            it.chan = chan;
++
++            if (xQueueSendFromISR(s_rxq, &it, &hpw) != pdTRUE)
++            {
++                s_isr_drop++;      /* 队列满: 计数, 由 OTA 块重传兜底 */
++            }
++        }
++        else
++        {
++            s_rx_other++;
++        }
++    }
++    portYIELD_FROM_ISR(hpw);
++}
++
++void CAN2_RX0_IRQHandler(void)
++{
++    ota_can_rx_isr(CAN_FIFO0);
++}
++
++void CAN2_RX1_IRQHandler(void)
++{
++    ota_can_rx_isr(CAN_FIFO1);
++}
++
++/* 协议任务用: 有界取一帧; wait=0 表示不阻塞 */
++int ota_can_rxq_recv(uint8_t* data, uint8_t* len, uint8_t* chan, uint32_t wait_ticks)
++{
++    ota_can_rxitem_t it;
++    uint8_t          i;
++
++    if ((s_rxq == 0) || (data == 0) || (len == 0) || (chan == 0))
++    {
++        return 0;
++    }
++    if (xQueueReceive(s_rxq, &it, (TickType_t)wait_ticks) != pdTRUE)
++    {
++        return 0;
++    }
++    for (i = 0u; i < 8u; i++)
++    {
++        data[i] = it.d[i];
++    }
++    *len  = it.len;
++    *chan = it.chan;
++    s_rx_frames++;
++    return 1;
++}
++
++uint32_t ota_can_isr_frames(void) { return s_isr_frames; }
++uint32_t ota_can_isr_drop(void)   { return s_isr_drop; }
++uint32_t ota_can_rxq_len(void)    { return (s_rxq != 0) ? (uint32_t)uxQueueMessagesWaiting(s_rxq) : 0u; }
++
++/* ★阶段2: TX 完成(邮箱空)中断 -> 唤醒正在等邮箱的任务, 让发送不再空转 */
++void CAN2_TX_IRQHandler(void)
++{
++    CAN_ClearINTPendingBit(CAN2, CAN_INT_TME);
++    if (s_tx_waiter != 0)
++    {
++        BaseType_t hpw = pdFALSE;
++        vTaskNotifyGiveFromISR((TaskHandle_t)s_tx_waiter, &hpw);
++        portYIELD_FROM_ISR(hpw);
++    }
++}
++#endif /* FOC_APP_USE_RTOS */
++
++int ota_can_poll(uint8_t* data, uint8_t* len, uint8_t* chan)
++{
++    CanRxMessage rx;
++    uint8_t      i;
++    uint8_t      fifo;
++    uint16_t     want;
++
++    if (CAN_PendingMessage(CAN2, CAN_FIFO0) != 0u)
++    {
++        fifo  = CAN_FIFO0;
++        want  = s_host_id;
++        *chan = 0u;
++    }
++    else if (CAN_PendingMessage(CAN2, CAN_FIFO1) != 0u)
++    {
++        fifo  = CAN_FIFO1;
++        want  = s_phost_id;
++        *chan = 1u;
++    }
++    else
++    {
++        return 0;
++    }
++
++    /* 注意: 该函数内部已经释放 FIFO, 不要再调用 CAN_ReleaseFIFO */
++    CAN_ReceiveMessage(CAN2, fifo, &rx);
++
++    if ((rx.IDE != (uint8_t)CAN_Standard_Id) || (rx.RTR != (uint8_t)CAN_RTRQ_Data) ||
++        (rx.StdId != (uint32_t)want))
++    {
++        s_rx_other++;
++        return 0;
++    }
++
++    for (i = 0u; i < 8u; i++)
++    {
++        data[i] = rx.Data[i];
++    }
++    *len = (rx.DLC > 8u) ? 8u : rx.DLC;
++    s_rx_frames++;
++    return 1;
++}
++
++uint32_t ota_can_rx_frames(void)
++{
++    return s_rx_frames;
++}
++
++uint32_t ota_can_rx_other(void)
++{
++    return s_rx_other;
++}
++
++uint32_t ota_can_tx_fail(void)
++{
++    return s_tx_fail;
++}
++
++uint32_t ota_can_prescaler(void)
++{
++    return s_presc;
++}
++
++uint32_t ota_can_tq_total(void)
++{
++    return s_tq_total;
++}
++
++uint32_t ota_can_pclk1(void)
++{
++    return s_pclk1;
++}
++
++int ota_can_try_send_native(uint16_t id,const uint8_t data[8])
++{
++    CanTxMessage tx;
++    tx.StdId=id;tx.ExtId=0;tx.IDE=CAN_Standard_Id;tx.RTR=CAN_RTRQ_Data;tx.DLC=8;
++    for(unsigned i=0;i<8;i++)tx.Data[i]=data[i];
++    return CAN_TransmitMessage(CAN2,&tx)==CAN_TxSTS_NoMailBox?-1:0;
++}
+--- a/ota/ota_params.c
++++ b/ota/ota_params.c
+@@ -20,6 +20,7 @@
+ #    include "foc_config.h"
+ #    include "foc_mode.h"
+ #    define OTA_PARAMS_APP 1
++#    include "motor_bench_port.h"
+ #  endif
+ #endif
+ #ifndef FOC_MOTOR_POLE_PAIRS
+@@ -550,7 +551,16 @@
+     }
+     cmd = d[0];
+ #ifdef OTA_PARAMS_APP
+-    foc_mode_host_seen((cmd == OTA_PCMD_HEARTBEAT) ? 1u : 0u);   /* 上位机心跳监督 */
++    /* Production motor control belongs to MBP. Maintenance reads never renew it. */
++    if(cmd==OTA_PCMD_MOTOR_CTRL&&len>1u&&d[1]==0u)motor_bench_legacy_stop();
++    if(cmd==OTA_PCMD_SET_ONE||cmd==OTA_PCMD_SAVE||cmd==OTA_PCMD_LOAD||cmd==OTA_PCMD_CALIB) {
++        preply_nack(OTA_PERR_BUSY);return;
++    }
++    if(cmd==OTA_PCMD_CTRL_SET || cmd==OTA_PCMD_CUR_CTRL || cmd==OTA_PCMD_PHASE_TEST ||
++       cmd==OTA_PCMD_BRAKE_CTRL || (cmd==OTA_PCMD_MOTOR_CTRL && len>1u && d[1]!=0u)) {
++        preply_nack(OTA_PERR_BUSY);
++        return;
++    }
+ #endif
+ 
+     switch (cmd)
+--- a/ota_version.txt
++++ b/ota_version.txt
+@@ -1 +1 @@
+-0x0A3C
++0x0A3D

@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "motor": {"label":"SG-6010HB","nameplate":{"reduction_ratio":9.67}},
+  "provenance": {"reduction_ratio":"原电机档案 MOTOR_PROFILES SG-6010HB；本次保持原值，尚未重新确认","encoder_comparison_ratio":9.78,"encoder_comparison_status":"原编码器比较页值，与电机档案不同，待现场核对"}
+}

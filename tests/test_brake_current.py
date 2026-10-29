@@ -74,10 +74,10 @@ class BrakeTests(unittest.TestCase):
         self.assertIn('readback mismatch',self.runner.run['reason'])
     def test_lost_page_heartbeat_stops(self):
         self.runner.start({'stepA':.1,'intervalS':.2,'durationS':5})
-        self.runner.lease=time.monotonic()-10
+        self.runner.cancel.set()
         self.runner.thread.join(3)
         self.assertFalse(self.supply.on)
-        self.assertIn('心跳',self.runner.run['reason'])
+        self.assertFalse(self.runner.active())
     def test_invalid_parameters_and_live_output_never_start(self):
         for data in [{'stepA':3,'intervalS':.2,'durationS':1},
                      {'stepA':.1,'intervalS':1,'durationS':1},

@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.16)
+project(motor_bench_sdk VERSION 1.0.0 LANGUAGES C)
+add_library(motor_bench_sdk STATIC src/mb_sdk.c)
+target_include_directories(motor_bench_sdk PUBLIC include)
+target_compile_features(motor_bench_sdk PUBLIC c_std_11)

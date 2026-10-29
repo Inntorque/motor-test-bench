@@ -11,8 +11,9 @@ import uuid
 
 
 class BackgroundRecording:
-    def __init__(self, root, source, frames, rotate_seconds=900):
+    def __init__(self, root, source, frames, rotate_seconds=900, event_hub=None):
         self.root, self.source, self.frames = Path(root), source, frames
+        self.event_hub=event_hub;self.unsubscribe=None
         self.rotate_seconds = rotate_seconds
         self.queue = queue.Queue(maxsize=8192)
         self.cancel = threading.Event()
@@ -52,11 +53,13 @@ class BackgroundRecording:
         self.directory.mkdir()
         project = Path(__file__).resolve().parent
         self.code = {name:hashlib.sha256((project/name).read_bytes()).hexdigest()
-                     for name in ('hardware_bridge.py', 'motor_current.py', 'brake_current.py', 'background_recording.py',
-                                  'coupled_current.py','safety_control.py','power_limits.py','web/src/controlClient.js',
+                     for name in ('hardware_bridge.py', 'workbench/test_engine.py', 'brake_current.py', 'background_recording.py',
+                                  'coupled_current.py','workbench/control.py','power_limits.py','web/src/apiClient.js',
                                   'web/src/CoupledCurrentPanel.jsx','web/src/loadTrial.js','web/src/TorqueCharacteristics.jsx',
                                   'web/src/App.jsx', 'web/src/MotorCurrentPanel.jsx', 'web/src/BrakeCurrentPanel.jsx') if (project/name).is_file()}
         self.cancel.clear()
+        if self.event_hub:
+            self.unsubscribe=self.event_hub.subscribe(lambda event:self.observe(event['type'],event['data']) if event['type'] not in ('state','acquisition') else None)
         self.thread = threading.Thread(target=self._run, name='background-recording', daemon=True)
         self.thread.start()
         if not self.ready.wait(3) or self.error or not self.thread.is_alive():
@@ -65,7 +68,7 @@ class BackgroundRecording:
         return str(self.directory)
 
     def _manifest(self, running):
-        value = {'schema':1, 'directory':str(self.directory), 'startedAt':self.started_at,
+        value = {'schema':2, 'directory':str(self.directory), 'startedAt':self.started_at,
                  'workbenchRecording':self.session,
                  'updatedAt':time.time(), 'running':running, 'counts':self.counts,
                  'sensorFrames':self.sensor_frames, 'droppedEvents':self.dropped, 'error':self.error,
@@ -99,10 +102,11 @@ class BackgroundRecording:
                 part += 1
                 stream = (self.directory/f'events-{part:05d}.jsonl').open('a', encoding='utf-8')
                 opened = now
-            row = {'schema':1, 'recordedAt':time.time() if wall is None else wall,
+            row = {'schema':2, 'recordedAt':time.time() if wall is None else wall,
                    'elapsedS':(now if mono is None else mono)-self.began, 'kind':kind, 'payload':payload}
             stream.write(json.dumps(row, ensure_ascii=False, separators=(',', ':'), allow_nan=False)+'\n')
             self.counts[kind] = self.counts.get(kind, 0)+1
+            if self.event_hub and kind=='sensor_frames':self.sensor_frames+=len(payload.get('frames',[]))
 
         opened = 0
         try:
@@ -118,33 +122,34 @@ class BackgroundRecording:
                     if lost != self.dropped:
                         emit('event_gap', {'droppedSinceLast':self.dropped-lost, 'total':self.dropped})
                         lost = self.dropped
-                    for channel, state in self.source().items():
-                        encoded = json.dumps(state, ensure_ascii=False, sort_keys=True, allow_nan=False)
-                        if previous.get(channel) != encoded:
-                            emit('snapshot', {'channel':channel, 'state':state})
-                            previous[channel] = encoded
-                    packet = self.frames(cursor or 0)
-                    if packet is None:
-                        if cursor is not None:
-                            emit('sensor_stream_unavailable', {'lastSequence':cursor})
-                        cursor, sensor_config = None, None
-                    else:
-                        config = packet.get('config') or {}
-                        batch = packet.get('frames') or []
-                        if cursor is None:
-                            # Do not import pre-session ring-buffer history.
-                            batch = [row for row in batch if row[1] >= self.started_at]
-                        if config != sensor_config or packet.get('reset') or packet.get('dropped'):
-                            emit('sensor_stream', {'config':config, 'reset':packet.get('reset', False),
-                                                  'droppedFrames':packet.get('dropped', 0), 'previousSequence':cursor})
-                            sensor_config = copy.deepcopy(config)
-                        if batch:
-                            emit('sensor_frames', {'config':config, 'frames':batch})
-                            self.sensor_frames += len(batch)
-                        if packet.get('frames'):
-                            cursor = packet['frames'][-1][0]
-                        elif cursor is None:
-                            cursor = 0
+                    if not self.event_hub:
+                        for channel, state in self.source().items():
+                            encoded = json.dumps(state, ensure_ascii=False, sort_keys=True, allow_nan=False)
+                            if previous.get(channel) != encoded:
+                                emit('snapshot', {'channel':channel, 'state':state})
+                                previous[channel] = encoded
+                        packet = self.frames(cursor or 0)
+                        if packet is None:
+                            if cursor is not None:
+                                emit('sensor_stream_unavailable', {'lastSequence':cursor})
+                            cursor, sensor_config = None, None
+                        else:
+                            config = packet.get('config') or {}
+                            batch = packet.get('frames') or []
+                            if cursor is None:
+                                # Do not import pre-session ring-buffer history.
+                                batch = [row for row in batch if row[1] >= self.started_at]
+                            if config != sensor_config or packet.get('reset') or packet.get('dropped'):
+                                emit('sensor_stream', {'config':config, 'reset':packet.get('reset', False),
+                                                      'droppedFrames':packet.get('dropped', 0), 'previousSequence':cursor})
+                                sensor_config = copy.deepcopy(config)
+                            if batch:
+                                emit('sensor_frames', {'config':config, 'frames':batch})
+                                self.sensor_frames += len(batch)
+                            if packet.get('frames'):
+                                cursor = packet['frames'][-1][0]
+                            elif cursor is None:
+                                cursor = 0
                     now = time.monotonic()
                     if now-last_flush >= 1:
                         stream.flush()
@@ -175,6 +180,7 @@ class BackgroundRecording:
             except OSError as error:print(f'Background recording manifest: {error}', flush=True)
 
     def close(self):
+        if self.unsubscribe:self.unsubscribe();self.unsubscribe=None
         self.cancel.set()
         if self.thread:
             self.thread.join(4)

@@ -84,3 +84,11 @@ test("duration formatting handles invalid and fractional input", () => {
   assert.equal(formatDuration(-3), "00:00");
   assert.equal(formatDuration(Infinity), "00:00");
 });
+test('record exports include frozen motor and driver board names while old exports stay compatible', () => {
+  const subject={motor:{id:'m1',name:'电机 A'},driverBoard:{id:'d1',name:'驱动板, N32'}};
+  const samples=[{t:0,source:'hardware'}];
+  const result=toCsv(samples,subject);
+  assert.match(result,/motor_name,driver_board_name/);
+  assert.match(result,/电机 A,"驱动板, N32"/);
+  assert.doesNotMatch(toCsv(samples),/driver_board_name/);
+});

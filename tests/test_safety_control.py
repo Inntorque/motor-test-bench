@@ -10,7 +10,7 @@ from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 
 import hardware_bridge as bridge
-from safety_control import SafetyControl
+from workbench.control import ControlCoordinator
 from brake_current import BrakeCurrent
 from coupled_current import CoupledCurrent
 from test_coupled_current import TimedMotor, Sensor
@@ -52,7 +52,7 @@ class SafetyTests(unittest.TestCase):
         self.power=SafeSupply()
         self.brake=BrakeCurrent(self.brake_supply,lambda *_:None)
         self.joint=CoupledCurrent(self.motor,self.brake,Sensor(),self.power,lambda:False,lambda *_:None)
-        self.safety=SafetyControl({'motor-supply':self.power,'brake-supply':self.brake_supply},
+        self.safety=ControlCoordinator({'motor-supply':self.power,'brake-supply':self.brake_supply},
             self.motor,self.brake,self.joint,Path(self.temp.name)/'safety.json')
         self.safety.started=True
 
@@ -181,10 +181,10 @@ class SafetyTests(unittest.TestCase):
     def test_discharge_is_required_and_cancelled_recovery_cannot_reenable(self):
         self.power.remaining_voltage=2400
         with self.assertRaisesRegex(ValueError,'电压仍未降'):
-            SafetyControl.wait_discharged(self.power,timeout=.1)
+            ControlCoordinator.wait_discharged(self.power,timeout=.1)
         cancel=threading.Event();cancel.set()
         with self.assertRaisesRegex(ValueError,'取消'):
-            SafetyControl.wait_discharged(self.power,cancel)
+            ControlCoordinator.wait_discharged(self.power,cancel)
         self.assertNotIn(True,self.power.switches)
 
     def test_owner_lease_expiry_cuts_both_manual_supplies(self):
@@ -225,13 +225,14 @@ class SafetyTests(unittest.TestCase):
 class RecoveryMotor(TimedMotor):
     def __init__(self,failures=1):
         super().__init__();self.failures=failures;self.enables=0
-    def _request(self,route,**kwargs):
-        if route.startswith('/api/motor?enable=1'):
+        start=self.device.start
+        def attempt(prepared):
             self.enables+=1
             if self.failures:
                 self.failures-=1
-                raise ValueError('device refused motor command: 没有新鲜有效的编码器读数')
-        return super()._request(route,**kwargs)
+                raise ValueError('没有新鲜有效的编码器读数')
+            return start(prepared)
+        self.device.start=attempt
 
 
 class RecoveryTests(unittest.TestCase):
@@ -299,12 +300,12 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn('recoveryCount',runner.run)
 
     def test_temperature_protection_is_not_reset_by_power_cycle(self):
-        motor=RecoveryMotor();original=motor._request
-        def hot(route,**options):
-            result=original(route,**options)
-            if route=='/api/status':result['ntc'].update(over=True,temp_c=60)
+        motor=RecoveryMotor();original=motor.device.latest_snapshot
+        def hot():
+            result=original();result['ntc'].update(over=True,temp_c=60)
+            result['readiness'].update(flags=46,detail='NTC restart inhibited')
             return result
-        motor._request=hot
+        motor.device.latest_snapshot=hot
         power=SafeSupply(True);brake=BrakeCurrent(SafeSupply(),lambda *_:None)
         runner=CoupledCurrent(motor,brake,Sensor(),power,lambda:False,lambda *_:None,recovery=True)
         runner.start({'motor':{'stepA':.1,'intervalS':.2,'durationS':1},'brake':{'mode':'hold','currentA':.01,'durationS':1}})

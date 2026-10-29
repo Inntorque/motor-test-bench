@@ -1,48 +1,38 @@
 """Portable host/package checks using imports and in-memory state only."""
 import ast
-import hashlib
 import json
 from pathlib import Path
+from unittest.mock import patch
 import subprocess
 import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-HOST = ROOT / 'vendor' / 'xige_foc'
 
 
 class HostRuntimeTests(unittest.TestCase):
-    def test_vendor_inventory_matches_source_hashes(self):
-        source = json.loads((HOST / 'SOURCE.json').read_text(encoding='utf-8'))
-        actual = {p.name for p in (HOST / 'scripts').glob('*.py')}
-        self.assertEqual(set(source['files']), actual)
-        self.assertIn('max_output.py', actual)
-        for name, digest in source['files'].items():
-            with self.subTest(module=name):
-                self.assertEqual(hashlib.sha256((HOST / 'scripts' / name).read_bytes()).hexdigest(), digest)
+    def test_config_migration_keeps_old_node_only_in_backup(self):
+        import workbench_config
 
-    def test_host_imports_from_portable_directory_without_device_io(self):
-        code = '''
-from pathlib import Path
-import sys
-sys.path.insert(0, sys.argv[1])
-import foc_web, run_recorder, max_output, zqwl
-assert Path(foc_web.__file__).parent == Path(sys.argv[1])
-assert foc_web.CONTROL_MODE_MAX_WEB == 7
-assert foc_web.CONTROL_FIELDS['max_bus_a'][0] == 13
-assert foc_web.CONTROL_FIELDS['max_id_min_a'][0] == 14
-assert max_output.MIN_VERSION == 0x0A3C
-assert run_recorder.MODE_NAMES[7] == 'maximum_output'
-link = foc_web.Link(None, 0)
-assert link.bus is None and link.max_output_snapshot is None
-assert callable(max_output.monitor) and callable(max_output.export_trace)
-print('Portable host imports and maximum-output interfaces passed')
-'''
-        with tempfile.TemporaryDirectory() as directory:
-            result = subprocess.run([sys.executable, '-I', '-c', code, str(HOST / 'scripts')],
-                                    cwd=directory, capture_output=True, text=True, timeout=10)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        original = {'motor': {'node': 0, 'channel': '/dev/ttyACM0'}, 'xigeRoot': '/old/project'}
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            path = root / 'workbench.local.json'
+            path.write_text(json.dumps(original), encoding='utf-8')
+            with patch.object(workbench_config, 'ROOT', root):
+                workbench_config.migrate_config()
+                migrated = workbench_config.local_config()
+                workbench_config.migrate_config()
+            self.assertEqual(migrated, {'schema': 2, 'motor': {'nativeNode': 1, 'channel': '/dev/ttyACM0'}})
+            backups = list((root / '.runtime/config-migration').glob('*.json'))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(json.loads(backups[0].read_text(encoding='utf-8')), original)
+
+    def test_host_imports_without_legacy_server_or_device_io(self):
+        code="from workbench.service import Handler; from workbench.devices.motor import MotorDevice; m=MotorDevice(); assert m.bus is None; print('native host imports')"
+        result=subprocess.run([sys.executable,'-c',code],cwd=ROOT,capture_output=True,text=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
     def test_windows_package_includes_local_module_dependencies(self):
         tree = ast.parse((ROOT / 'scripts' / 'build_windows_package.py').read_text(encoding='utf-8'))

@@ -30,11 +30,13 @@ test('idle target uses fresh controller readback and never invents a zero from i
   assert.equal(motorTargetCurrentA({...device, run:{running:true, targetA:2}}),2);
 });
 
-test('encoder output readings use the reference profile ratio and leave stale readings empty', () => {
-  const device={connected:true, snapshot:{motorProfile:{nameplate:{reduction_ratio:9.67}},feedback:{position_deg:96.7,speed_rpm:193.4,position_stale:false,stale:false}}};
+test('encoder output readings use the selected setup ratio and leave stale readings empty', () => {
+  const device={connected:true,testSubject:{testSetup:{ratio:9.67}}, snapshot:{motorProfile:{nameplate:{reduction_ratio:100}},feedback:{position_deg:96.7,speed_rpm:193.4,position_stale:false,stale:false}}};
   const values=motorOutputFeedback(device);
   assert.equal(values.positionDeg,10);
   assert.equal(values.speedRpm,20);
+  assert.deepEqual(motorOutputFeedback({...device,testSubject:{testSetup:{ratio:1}}}),{positionDeg:96.7,speedRpm:193.4});
+  assert.deepEqual(motorOutputFeedback({...device,testSubject:null}),{positionDeg:null,speedRpm:null});
   assert.deepEqual(motorOutputFeedback({...device,connected:false}),{positionDeg:null,speedRpm:null});
   assert.deepEqual(motorOutputFeedback({...device,snapshot:{...device.snapshot,feedback:{...device.snapshot.feedback,position_stale:true}}}),{positionDeg:null,speedRpm:null});
 });

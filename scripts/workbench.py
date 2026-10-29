@@ -2,7 +2,6 @@
 import json
 import os
 from pathlib import Path
-import shutil
 import signal
 import socket
 import subprocess
@@ -14,18 +13,19 @@ import webbrowser
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workbench_config import local_config, xige_root, motor_arguments
+from workbench_config import local_config,migrate_config
 from scripts.lan_access import credentials, lan_urls
+from scripts.instance_lock import InstanceLock, InstanceBusy
 RUNTIME = ROOT / '.runtime'
 STATE = RUNTIME / 'services.json'
 WIN = os.name == 'nt'
 
 
-def request(path, data=None, token=None):
+def request(path, data=None, token=None, *, port=5173, versioned=True):
     headers = {'Content-Type': 'application/json'}
     if token:
         headers['X-MotorBench-Token'] = token
-    req = urllib.request.Request('http://127.0.0.1:8766' + path,
+    req = urllib.request.Request(f'http://127.0.0.1:{port}' + (path.replace('/api/','/api/v1/',1) if versioned else path),
                                  data=json.dumps(data).encode() if data is not None else None,
                                  headers=headers)
     with urllib.request.urlopen(req, timeout=10) as response:
@@ -60,27 +60,25 @@ def command_line(pid):
         return ''
 
 
-def spawn(name, argv, port, entries, cwd=ROOT, env=None):
+def web_status(port, lan=None, pid=None):
+    try:
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/__workbench/status', timeout=3) as response:
+            status = json.load(response)
+    except (OSError, ValueError) as error:
+        raise RuntimeError(f'端口 {port} 已被占用，无法确认是本工作台；请关闭占用程序后重试') from error
+    if (not isinstance(status, dict) or status.get('app') != 'motor-bench-web'
+            or status.get('hostApi') != 1 or status.get('directory') != str(ROOT)):
+        raise RuntimeError(f'端口 {port} 已被旧版工作台或其他服务占用；请先结束试验并通过原启动方式关闭')
+    if lan is not None and bool(status.get('lan')) != lan:
+        raise RuntimeError('工作台已运行，但局域网配置不同；请先正常关闭工作台再切换')
+    if pid is not None and status.get('pid') != pid:
+        raise RuntimeError(f'端口 {port} 已由另一个进程接管，未将其记录为本次启动的服务')
+    return status
+
+
+def spawn(name, argv, port, entries, cwd=ROOT, env=None, lan=False):
     if listening(port):
-        if name == 'bridge' and request('/api/health').get('app') != 'motor-test-bench-hardware':
-            raise RuntimeError('8766 被其他程序占用')
-        if name == 'web':
-            with urllib.request.urlopen('http://127.0.0.1:5173/', timeout=3) as r:
-                if '扭矩工作台' not in r.read().decode('utf-8'):
-                    raise RuntimeError('5173 被其他程序占用')
-        if name == 'motor':
-            with urllib.request.urlopen('http://127.0.0.1:8892/api/status', timeout=3) as r:
-                if Path(json.load(r).get('project_root', '')).resolve() != Path(cwd).resolve():
-                    raise RuntimeError('8892 不是所配置的电机参考工程，拒绝复用')
-        # Recognize this project's existing development service units.
-        unit = {'bridge': 'ai-job-torque-workbench-bridge.service',
-                'web': 'ai-job-torque-workbench-web.service'}.get(name)
-        if not WIN and unit and shutil.which('systemctl'):
-            info = subprocess.run(['systemctl', '--user', 'show', unit,
-                '--property=WorkingDirectory', '--property=ActiveState'], capture_output=True, text=True)
-            if f'WorkingDirectory={ROOT}' in info.stdout.splitlines() and 'ActiveState=active' in info.stdout.splitlines():
-                entries[name] = {'unit': unit, 'directory': str(ROOT)}
-                save(entries)
+        web_status(port, lan)
         print(f'{name}: 端口 {port} 已运行，复用现有服务', flush=True)
         return
     log = open(RUNTIME / (name + '.log'), 'ab')
@@ -92,12 +90,16 @@ def spawn(name, argv, port, entries, cwd=ROOT, env=None):
         log.close()
     entries[name] = {'pid': process.pid, 'identity': next((arg for arg in argv if arg.endswith('.py')), argv[1])}
     save(entries)
-    for _ in range(100):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            entries.pop(name)
+            save(entries)
+            break
         if listening(port):
+            web_status(port, lan, process.pid)
             print(f'{name}: 就绪（{port}）', flush=True)
             return
-        if process.poll() is not None:
-            break
         time.sleep(.1)
     raise RuntimeError(f'{name} 启动失败，请查看 {RUNTIME / (name + ".log")}')
 
@@ -105,40 +107,27 @@ def spawn(name, argv, port, entries, cwd=ROOT, env=None):
 def start():
     RUNTIME.mkdir(exist_ok=True)
     entries = state()
-    if not (ROOT / 'dist' / 'index.html').exists():
-        raise RuntimeError('缺少网页构建产物，请先执行 npm ci 和 npm run build；部署时携带 dist 目录')
+    config = local_config()
+    lan = bool(config.get('web', {}).get('lan', False))
+    running = listening(5173)
+    if running:
+        web_status(5173, lan)
+    else:
+        if listening(8766) or listening(8892):
+            raise RuntimeError('旧版 8766/8892 服务仍在运行；请先关闭旧上位机和电机工程网页，释放 USB-CAN 后再启动新版')
+        if not (ROOT / 'dist' / 'index.html').exists():
+            raise RuntimeError('缺少网页构建产物，请先执行 npm ci 和 npm run build；部署时携带 dist 目录')
     python = ROOT / '.venv' / ('Scripts/python.exe' if WIN else 'bin/python')
     bundled = ROOT / 'runtime' / 'python' / 'python.exe'
     python = str(bundled if WIN and bundled.exists() else python if python.exists() else Path(sys.executable))
-    if subprocess.run([python, '-c', 'import serial'], capture_output=True).returncode:
+    if not running and subprocess.run([python, '-c', 'import serial'], capture_output=True).returncode:
         raise RuntimeError(f'缺少 pySerial，请执行 "{python}" -m pip install -r requirements.txt')
     env = dict(os.environ)
-    config = local_config()
-    lan = bool(config.get('web', {}).get('lan', False))
+    if not running:
+        migrate_config()
     if lan:
         credentials(ROOT)
-        if listening(5173):
-            try:
-                with urllib.request.urlopen('http://127.0.0.1:5173/__workbench/status', timeout=3) as response:
-                    web_status = json.load(response)
-                if web_status.get('app') != 'motor-bench-web' or not web_status.get('lan') or Path(web_status.get('directory', '')).resolve() != ROOT:
-                    raise ValueError('different service')
-            except Exception:
-                raise RuntimeError('5173 已由其他或非局域网服务占用，请先关闭原工作台再启动') from None
-    xige = xige_root(config)
-    env['MOTORBENCH_XIGE_ROOT'] = str(xige.resolve())
-    foc = xige / 'scripts/foc_web.py'
-    if foc.exists():
-        foc_python = xige / '.venv' / ('Scripts/python.exe' if WIN else 'bin/python')
-        motor_python = str(foc_python) if foc_python.exists() else python
-        if not listening(8892) and subprocess.run([motor_python, '-c', 'import serial, can'], capture_output=True).returncode:
-            raise RuntimeError(f'电机服务缺少依赖，请执行 "{motor_python}" -m pip install pyserial python-can')
-        spawn('motor', [motor_python, '-X', 'utf8', '-u', str(foc), '--port', '8892', *motor_arguments(config)],
-              8892, entries, cwd=xige, env=env)
-    else:
-        print('提示：未找到 xige_foc，请设置 MOTORBENCH_XIGE_ROOT；电源和传感器仍可使用。', flush=True)
-    spawn('bridge', [python, '-X', 'utf8', '-u', str(ROOT / 'hardware_bridge.py')], 8766, entries, env=env)
-    spawn('web', [python, '-X', 'utf8', '-u', str(ROOT / 'scripts' / 'web_server.py'), *(['--lan'] if lan else [])], 5173, entries)
+    spawn('web',[python,'-X','utf8','-u',str(ROOT/'scripts/web_server.py'),*(['--lan'] if lan else [])],5173,entries,env=env,lan=lan)
     if not os.environ.get('MOTORBENCH_NO_BROWSER'):
         webbrowser.open('http://127.0.0.1:5173/')
     if lan:
@@ -154,18 +143,22 @@ def start():
 
 def stop():
     entries = state()
-    if listening(8766):
-        health = request('/api/health')
-        request('/api/control/stop', {}, health['token'])
+    legacy=listening(8766)
+    def stop_request(path,data=None,token=None):
+        return request(path,data,token,port=8766 if legacy else 5173,versioned=not legacy)
+    if legacy or listening(5173):
+        health = stop_request('/api/health')
+        if health.get('app')!='motor-test-bench-hardware':raise RuntimeError('通信服务身份不匹配，拒绝控制')
+        stop_request('/api/control/stop', {}, health['token'])
         deadline = time.monotonic()+20
         while True:
-            safety = request('/api/control/status')
+            safety = stop_request('/api/control/status')
             if not safety.get('stopping'):break
             if time.monotonic()>=deadline:raise RuntimeError('仍在停机确认，保留服务，请检查设备')
             time.sleep(.1)
         if safety.get('blocked'):
             raise RuntimeError('输出关闭未确认，保留服务：'+str(safety.get('errors')))
-        health = request('/api/health')
+        health = stop_request('/api/health')
         for key in ('motor-supply','brake-supply'):
             if key in safety.get('unusedChannels',[]):continue
             channel = health['channels'][key]
@@ -173,13 +166,13 @@ def stop():
             if (not channel.get('connected') or not snapshot or snapshot.get('status',0)&128
                     or channel.get('outputUncertain')):
                 raise RuntimeError(key+' 输出状态未知或仍开启，保留服务，禁止强制退出')
-        active_test = request('/api/specialized/status').get('current') or {}
+        active_test = stop_request('/api/specialized/status').get('current') or {}
         if active_test.get('state') in ('running','settling'):
-            request('/api/specialized/stop', {'id':active_test['id']}, health['token'])
-        recording = request('/api/recordings/status?history=0').get('current') or {}
+            stop_request('/api/specialized/stop', {'id':active_test['id']}, health['token'])
+        recording = stop_request('/api/recordings/status?history=0').get('current') or {}
         if recording.get('running'):
-            request('/api/recordings/stop', {'id':recording['id']}, health['token'])
-    for name in ('web', 'bridge', 'motor'):
+            stop_request('/api/recordings/stop', {'id':recording['id']}, health['token'])
+    for name in (('web','bridge','motor') if legacy else ('web',)):
         entry = entries.get(name)
         if not entry:
             continue
@@ -216,7 +209,10 @@ if __name__ == '__main__':
     try:
         if len(sys.argv) != 2 or sys.argv[1] not in ('start', 'stop'):
             raise RuntimeError('用法：python scripts/workbench.py start|stop')
-        start() if sys.argv[1] == 'start' else stop()
+        with InstanceLock(RUNTIME / 'launcher.lock'):
+            start() if sys.argv[1] == 'start' else stop()
+    except InstanceBusy:
+        print('工作台正在启动或关闭，请稍候；重复启动不会创建第二个后台实例。')
     except Exception as error:
         print(f'错误：{error}', file=sys.stderr)
         sys.exit(1)

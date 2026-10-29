@@ -1,3 +1,6 @@
+import {apiFetch} from './apiClient.js';
+import {sensorFrameBatch} from './deviceStore.js';
+import {useChartVisibility} from './useChartVisibility.js';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { appendSamples, plotColumns } from "./livePerformance.js";
 import { useLiveActions } from "./useLiveActions.js";
@@ -8,6 +11,7 @@ import TorqueCharacteristics from "./TorqueCharacteristics.jsx";
 import EncoderCompareView from "./EncoderCompareView.jsx";
 import {LoadTrial} from './loadTrial.js';
 import SpecializedTestsPanel from "./SpecializedTestsPanel.jsx";
+import TestSubjectPicker, {subjectText} from './TestSubjectPicker.jsx';
 import {supplyMeasurements, supplyPoint, supplyReadbackPoint, BRAKE_SUPPLY_CURRENT_LIMIT, MOTOR_SUPPLY_CURRENT_LIMIT, MOTOR_SUPPLY_PRESET_CURRENT_A, brakeModeText, supplyOperatingMode} from './supplyPolicy.js';
 import {
   STORE_KEY,
@@ -27,7 +31,7 @@ const CHANNELS = [
     key: "motorConnected",
     name: "电机驱动板",
     icon: "motor",
-    detail: "CAN · 西格电机 Iq 电流环",
+    detail: "MBP/1 · 电机 Iq 电流环",
   },
   {
     key: "sensorConnected",
@@ -45,7 +49,7 @@ const CHANNELS = [
     key: "motorSupplyConnected",
     name: "电机电源",
     icon: "power",
-    detail: "SSJ / 万瑞达 RU · Modbus RTU",
+    detail: "万瑞达 RU · Modbus RTU",
   },
 ];
 
@@ -79,21 +83,18 @@ function loadConfig(id) {
   try {
     const saved=JSON.parse(localStorage.getItem(`motor-bench:${id}:config`) || "{}");
     const next={ ...defaults, ...saved };
-    // Switch old browser profiles once; later manual protocol choices persist.
-    if(motor && saved.protocolDefaultRevision!=="ru-20261021" && saved.protocol!=="ru") {
+    if(motor && saved.protocol!=="ru") {
       Object.assign(next,{protocol:"ru",baud:"9600",parity:"N",stopbits:"1",address:"1",
         voltageDecimals:"2",currentDecimals:"2",measuredCurrentDecimals:"2",
         ratedVoltage:"",ratedCurrent:"",ratingsVerified:false});
     }
-    if(motor)next.protocolDefaultRevision="ru-20261021";
     // SSJ keeps its independently confirmed current scaling.
     if(id === "brake-supply") { next.protocol="ssj"; next.currentDecimals="3"; }
-    if(id === "motor-supply" && next.protocol === "ssj") next.currentDecimals="3";
     next.maxVoltage="24";
     next.maxCurrent=id === "motor-supply"?String(MOTOR_SUPPLY_CURRENT_LIMIT):String(BRAKE_SUPPLY_CURRENT_LIMIT);
     return next;
   } catch {
-    return { ...defaults, ...(motor?{protocolDefaultRevision:"ru-20261021"}:{}) };
+    return defaults;
   }
 }
 
@@ -206,7 +207,7 @@ function Icon({ name, size = 20, ...props }) {
   );
 }
 
-function PlotView({
+function PlotDrawing({
   samples,
   metric,
   range,
@@ -214,6 +215,7 @@ function PlotView({
   empty,
   onConnect,
   windowSeconds,
+  chartRef,
 }) {
   const svgRef = useRef(null);
   const [plotSize, setPlotSize] = useState({ width: 900, height: 220 });
@@ -278,7 +280,7 @@ function PlotView({
     drawing = true;
   }
   return (
-    <div className="plot-wrap">
+    <div className="plot-wrap" ref={chartRef}>
       <svg
         ref={svgRef}
         className="plot"
@@ -348,6 +350,13 @@ function PlotView({
   );
 }
 
+const MemoPlotDrawing=React.memo(PlotDrawing);
+function PlotView(props) {
+  const [chartRef,visible]=useChartVisibility();
+  const drawn=useRef(props);
+  if(visible)drawn.current=props;
+  return <MemoPlotDrawing {...drawn.current} chartRef={chartRef}/>;
+}
 const Plot = React.memo(PlotView);
 
 const SupplyPanel = React.memo(function SupplyPanel({
@@ -425,7 +434,7 @@ const SupplyPanel = React.memo(function SupplyPanel({
         <details className="hw-connection-config" open={!device?.connected}>
           <summary>独立通信参数</summary>
           <div className="hw-form-grid">
-            {supply.id === "motor-supply" && <label>电源型号 / 协议<select aria-label="电机电源协议" value={config.protocol || "ru"} disabled={locked} onChange={e=>patchConfig({protocol:e.target.value,ratedVoltage:"",ratedCurrent:"",parity:"N",stopbits:"1",baud:"9600",address:"1",voltageDecimals:"2",currentDecimals:e.target.value==='ssj'?"3":"2"})}><option value="ru">万瑞达 RU-36-6060 / RU 系列</option><option value="ssj">SSJ 电源</option></select></label>}
+            {motorSupply && <label>电源型号 / 协议<span>万瑞达 RU-36-6060 / RU 系列 · Modbus RTU</span></label>}
             <label>传输方式<select value={config.transport} disabled={locked} onChange={(e) => patchConfig({ transport: e.target.value })}><option value="serial">{ru ? "串口 RS485 / RS232" : "串口 RS485"}</option><option value="tcp">网口 RTU 透明透传</option></select></label>
             {config.transport === "serial" ? <>
               <label>串口<select value={config.device} disabled={locked} onChange={(e) => patchConfig({ device: e.target.value })}><option value="">选择串口</option>{ports.map((port) => <option key={port.port} value={port.port}>{port.port} · {port.description}</option>)}</select></label>
@@ -555,7 +564,7 @@ function Settings({ onClose, state, devices, bridgeReady, stopAll }) {
                 <div><dt>读数验证</dt><dd>{connected ? snapshot?.framesReceived != null ? "连续 HEX 帧 CRC 已验证" : "CRC、通信模式、停止位和缩放已验证" : "未完成握手"}</dd></div>
                 <div><dt>写入操作</dt><dd>只读；未执行清零或参数修改</dd></div>
               </> : deviceId === "current-motor" ? <>
-                <div><dt>接口</dt><dd>西格 CAN · Iq 电流环（模式 5）</dd></div>
+                <div><dt>接口</dt><dd>MBP/1 CAN · Iq 电流环</dd></div>
                 <div><dt>固件版本</dt><dd>{snapshot?.version || "—"}</dd></div>
                 <div><dt>电流上限</dt><dd>{snapshot?.limitA ?? "—"} A</dd></div>
                 <div><dt>设备输出</dt><dd>{connected ? snapshot?.motor?.output_on ? "输出开启" : "输出关闭" : "状态未知"}</dd></div>
@@ -859,7 +868,7 @@ export default function App() {
   finishRef.current = saveFinished;
 
   async function fetchJson(url, options = {}) {
-    const response = await fetch(url, options);
+    const response = await apiFetch(url, options);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = new Error(payload.error || `通信失败 (${response.status})`);
@@ -1054,10 +1063,11 @@ export default function App() {
       const sensor = devicesRef.current["torque-sensor"];
       if (active && sensor?.connected && ["hex6", "hex8"].includes(sensor.config?.protocol)) {
         try {
-          const batch = await fetchJson(`/api/sensors/torque-sensor/frames?since=${cursor}`,
+          const batch = sensorFrameBatch(cursor) || await fetchJson(`/api/sensors/torque-sensor/frames?since=${cursor}`,
             { signal: AbortSignal.timeout(2500), cache: "no-store" });
           if (!active) return;
           latestBatch = batch;
+          if(!frameRequest)frameRequest=requestAnimationFrame(displaySensor);
           streamError = false;
           if (batch.reset) { pending = []; resetView = true; }
           if (batch.frames?.length) {
@@ -1089,6 +1099,7 @@ export default function App() {
     }
     // At most 30 display updates/s, aligned to screen frames; keep all received samples.
     function displaySensor(now) {
+      frameRequest=0;
       if (!active) return;
       if (now - lastPaint >= 1000 / 30) {
         lastPaint = now - ((now - lastPaint) % (1000 / 30));
@@ -1102,14 +1113,14 @@ export default function App() {
           setSamples(previous => appendSamples(reset ? [] : previous, points, LIVE_SAMPLE_LIMIT));
         }
       }
-      if (now - rateStarted >= 1000) {
-        setDisplayRate(Math.round(paintCount * 1000 / (now - rateStarted)));
-        paintCount = 0; rateStarted = now;
-      }
-      frameRequest = requestAnimationFrame(displaySensor);
+      if(latestBatch||pending.length)frameRequest=requestAnimationFrame(displaySensor);
     }
+    const displayRateTimer=window.setInterval(()=>{
+      const now=performance.now();
+      setDisplayRate(Math.round(paintCount * 1000 / (now - rateStarted)));
+      paintCount=0;rateStarted=now;
+    },1000);
     void receiveSensor();
-    frameRequest = requestAnimationFrame(displaySensor);
     // Keep read-only motor feedback and the existing page lease while viewing test results.
     let motorPolling = false;
     const motorTimer = window.setInterval(async () => {
@@ -1136,7 +1147,7 @@ export default function App() {
       }
     }, SENSOR_POLL_MS);
     return () => { active = false; window.clearInterval(timer); window.clearInterval(sensorTimer);
-      window.clearTimeout(receiveTimer); window.clearInterval(motorTimer); cancelAnimationFrame(frameRequest); };
+      window.clearTimeout(receiveTimer); window.clearInterval(motorTimer); window.clearInterval(displayRateTimer); cancelAnimationFrame(frameRequest); };
 
   }, []);
 
@@ -1192,7 +1203,7 @@ export default function App() {
     const config = configs[id];
     const common = {
       transport: config.transport,
-      protocol: config.protocol || (id === "motor-supply" ? "ru" : "ssj"),
+      protocol: id === "motor-supply" ? "ru" : "ssj",
       address: Number(config.address),
       voltageDecimals: Number(config.voltageDecimals),
       currentDecimals: Number(config.currentDecimals),
@@ -1274,7 +1285,9 @@ export default function App() {
       engineOrigin: engine.current.t,
       samples: [first],
       fullRecordId:response.current.id,
+      testSubject:response.current.testSubject,
       config: {
+        testSubject:response.current.testSubject,
         fullRecordId:response.current.id,
         previewOnly:true,
         source: "hardware",
@@ -1305,7 +1318,7 @@ export default function App() {
       setToast("此记录无法导出，请检查本地记录提示。");
       return;
     }
-    const blob = new Blob([eventsOnly ? eventCsv(record.events || []) : toCsv(record.samples)], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([eventsOnly ? eventCsv(record.events || []) : toCsv(record.samples, record.testSubject || record.config?.testSubject)], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -1467,6 +1480,7 @@ export default function App() {
             </p>
           </div>
           <div className="header-actions">
+            <TestSubjectPicker />
             <label className="profile-select">
               <span>设备量程</span>
               <select
@@ -1533,35 +1547,36 @@ export default function App() {
             关闭制动输出
           </button>
         </section>
-        {disconnectedChannels.length > 0 && (
-          <div role="alert" className="connection-alert">
-            <p>
-              <strong>
-                {disconnectedChannels.map((ch) => ch.name).join("、")}
-                未连接。
-              </strong>
-              {!state.sensorConnected
-                ? "扭矩和转速不可用；"
-                : "对应设备反馈不可用；"}
-              {state.loadEnabled === true ? "制动电源输出仍开启。" : "未连接的接口不参与控制。"}
-              {activeRecord
-                ? "记录继续，未连接设备的读数留空。"
-                : "双电源与传感器在下方配置，西格电机在电流环面板独立连接与步进控制。"}
-            </p>
-            <button className="button small" onClick={() => setSettings(true)}>
-              检查连接
-            </button>
-          </div>
-        )}
         <section className="connection-notice" aria-label="一键连接">
-          <button className="button primary" onClick={connectAll}
-            disabled={!bridgeReady || connectingAll || sensorBusy || Object.values(busy).some(Boolean) || devices["current-motor"]?.run?.running}>
-            {connectingAll ? "正在轮询连接…" : "一键连接全部接口"}
-          </button>
-          <div role="status" aria-live="polite">
-            {connectionReport.length ? connectionReport.map((line, index) => <p key={index}>{line}</p>)
-              : <p>自动发现设备，按本机记住的 USB 标识恢复连接；首次使用的同型号电源需指定供电对象。连接不自动开启输出。</p>}
+          <div className="connection-summary" role={disconnectedChannels.length ? "alert" : "status"}>
+            <p className={disconnectedChannels.length ? "connection-summary-missing" : "connection-summary-ready"}>
+              <strong>{disconnectedChannels.length
+                ? `${disconnectedChannels.map((ch) => ch.name).join("、")}未连接`
+                : "全部接口已连接"}</strong>
+            </p>
+            <p>
+              {disconnectedChannels.length > 0 && <>
+                {!state.sensorConnected ? "扭矩和转速不可用；" : "对应设备反馈不可用；"}
+                {state.loadEnabled === true ? <strong>制动电源输出仍开启。</strong> : "未连接的接口不参与控制。"}
+                {activeRecord && "记录继续，未连接设备的读数留空。"}
+              </>}
+              连接不自动开启输出。
+            </p>
           </div>
+          <div className="connection-actions">
+            <button className="button primary" onClick={connectAll}
+              disabled={!bridgeReady || connectingAll || sensorBusy || Object.values(busy).some(Boolean) || devices["current-motor"]?.run?.running}>
+              {connectingAll ? "正在轮询连接…" : "一键连接全部接口"}
+            </button>
+            <button className="button small" onClick={() => setSettings(true)}>接口设置</button>
+          </div>
+          <details className="connection-details" open={connectingAll || connectionReport.length > 0}>
+            <summary>{connectingAll ? "正在连接…" : connectionReport.length ? "连接结果" : "连接说明"}</summary>
+            <div className="connection-report" role="status" aria-live="polite">
+              {connectionReport.map((line, index) => <p key={index}>{line}</p>)}
+              {!connectionReport.length && <p>自动发现设备，按本机记住的 USB 标识恢复连接；首次使用的电源需指定供电对象。双电源与传感器在下方配置，电机可在电流环面板独立连接与步进控制。</p>}
+            </div>
+          </details>
         </section>
         {storageError && (
           <div role="alert" className="storage-error">
@@ -1899,6 +1914,7 @@ export default function App() {
                         : '点击开始记录，同时开启完整参数与后台专用记录；未开始时不记录。停止记录后同步结束保存，导出 CSV 为完整时间序列。'}
                   </div>
                 </section>
+                <EncoderCompareView sensor={devices['torque-sensor']} motor={devices['current-motor']}/>
                 <section className="event-section">
                   <button
                     className="event-toggle"
@@ -1953,7 +1969,6 @@ export default function App() {
                 <div className="control-hint"><Icon name="info" size={17} /><p>扭矩和转速必须来自真实传感器。制动电源的 V/A 设置与输出状态由设备应答确认。</p></div>
               </aside>
             </div>
-            <EncoderCompareView devices={devices} />
           </>
         ) : view === "specialized" ? (
           <SpecializedTestsPanel token={token} bridgeReady={bridgeReady} onWorkbench={setView} />
@@ -1976,7 +1991,7 @@ export default function App() {
             </div>
             {fullHistory.length>0 && <section className="panel" aria-label="完整参数记录历史"><h3>完整参数记录（磁盘保存）</h3>
               <div className="records-table-wrap"><table className="records-table"><thead><tr><th>试验名称</th><th>开始时间</th><th>状态</th><th>完整数据</th></tr></thead><tbody>
-                {fullHistory.map(row=><tr key={row.id}><td>{row.name}</td><td>{new Date(row.startedAt*1000).toLocaleString()}</td><td>{row.running?'记录中':row.state==='interrupted'?`中断：${row.reason}`:'已保存'}</td><td>
+                {fullHistory.map(row=><tr key={row.id}><td>{row.name}<small className="record-subject">{subjectText(row.testSubject)}</small></td><td>{new Date(row.startedAt*1000).toLocaleString()}</td><td>{row.running?'记录中':row.state==='interrupted'?`中断：${row.reason}`:'已保存'}</td><td>
                   {!row.running && <><button className="button small" onClick={()=>downloadFull(row)}>CSV</button> <button className="button small" onClick={()=>downloadFull(row,'timeline.jsonl')}>JSONL</button> <button className="button small" onClick={()=>downloadFull(row,'report.json')}>报告</button></>}
                 </td></tr>)}
               </tbody></table></div></section>}
@@ -2058,6 +2073,7 @@ export default function App() {
                 <div className="panel-heading">
                   <div>
                     <h2>{selected.name}</h2>
+                    <small className="record-subject">{subjectText(selected.testSubject || selected.config?.testSubject)}</small>
                     <span className="panel-caption">
                       {selected.config?.fullRecordId?'压缩预览 · 导出 CSV 为完整时间序列':'完整记录'} · 相对试验起点计时 · {selected.samples[0]?.source === "hardware" ? "真实设备采集" : "历史演示数据"}
                     </span>

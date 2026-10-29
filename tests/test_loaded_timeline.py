@@ -23,6 +23,7 @@ class FixedLoadedTests(unittest.TestCase):
         self.frame_config = {'protocol': 'hex6', 'torqueDecimals': 2, 'speedDecimals': 1}
         self.measurements = SpecializedTests(Path(self.temp.name)/'passive', self.source, self.frames)
         self.auto = AutomaticTests(Path(self.temp.name)/'auto', self.motor, self.measurements, self.source)
+        self.auto.subjects = lambda:{'testSetup':{'id':'test','name':'测试配置','ratio':10,'axis':'output'}}
 
     def tearDown(self):
         if self.auto.active():
@@ -76,8 +77,8 @@ class FixedLoadedTests(unittest.TestCase):
         self.assertEqual(report['outcome'],'duration_complete')
         self.assertTrue(report['stopConfirmed'])
         self.assertEqual(report['steps'][0]['targetSpeedRpm'],1.5)
-        self.assertTrue(any('mode=2' in route for route in self.motor.writes))
-        self.assertTrue(any('field=speed_rpm&value=15.0' in route for route in self.motor.writes))
+        self.assertTrue(('start',3) in self.motor.writes)
+        self.assertTrue(('target',0x1009,15000) in self.motor.writes)
         self.assertFalse(any('/api/set?' in route for route in self.motor.writes))
         self.assertTrue(all('value=0' in route for route in self.motor.writes if 'field=current_a' in route))
         self.assertGreater(report['timeline']['counts']['sensor_frame'],500)
@@ -97,7 +98,7 @@ class FixedLoadedTests(unittest.TestCase):
         self.assertEqual(report['outcome'],'duration_complete')
         self.assertTrue(report['stopConfirmed'])
         self.assertEqual(report['steps'][0]['targetSpeedRpm'],-1.5)
-        self.assertTrue(any('field=speed_rpm&value=-15.0' in route for route in self.motor.writes))
+        self.assertTrue(('target',0x1009,-15000) in self.motor.writes)
         self.assertFalse(any('/api/set?' in route for route in self.motor.writes))
         self.assertLessEqual(report['peakOutputSpeedRpm'],report['controllerSpeedCeilingRpm'])
 
@@ -128,9 +129,9 @@ class FixedLoadedTests(unittest.TestCase):
         self.assertEqual(sequence, list(range(sequence[0], sequence[-1]+1)))
         with self.auto.file(record['id'], 'timeline.jsonl').open() as stream:
             events = [json.loads(line) for line in stream]
-        commands = [event['payload']['route'] for event in events if event['source']=='command_ack']
-        self.assertEqual(sum('field=current_a&value=0.5' in route for route in commands), 1)
-        self.assertTrue(any('enable=1&mode=5' in route for route in commands))
+        commands=[event['payload'] for event in events if event['source']=='command_ack']
+        self.assertEqual(sum(command.get('object')==0x1002 and command.get('value')==500 for command in commands),1)
+        self.assertTrue(any(command.get('opcode')=='START' for command in commands))
 
     def test_frame_overflow_stops_motor_and_preserves_partial_data(self):
         self.auto.start(self.config())

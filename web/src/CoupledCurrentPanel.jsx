@@ -1,3 +1,5 @@
+import {subscribeDevices} from './deviceStore.js';
+import {apiFetch} from './apiClient.js';
 import React, {useEffect, useRef, useState} from 'react';
 import {motorTargetCurrentA} from './model.js';
 import {TORQUE_SWEEP_DEFAULTS,torqueSweepError,torqueSweepRequest} from './torqueSweep.js';
@@ -34,27 +36,16 @@ function CoupledCurrentPanel({token,bridgeReady,sensorConnected,outputSpeedRpm,m
   }
   const applyRef=useRef(apply);applyRef.current=apply;
   useEffect(()=>{try{localStorage.setItem(KEY,JSON.stringify(form));}catch{}},[form]);
-  useEffect(()=>{
-    let active=true,polling=false;
-    async function poll() {
-      if(polling)return;polling=true;
-      const generation=epoch.current;
-      try {
-        const response=await fetch('/api/coupled-current/status?heartbeat=1',{cache:'no-store',signal:AbortSignal.timeout(3000)});
-        if(!response.ok)throw new Error('测试状态读取失败，请检查通信服务');
-        const data=await response.json();
-        if(active&&generation===epoch.current&&!pending.current){applyRef.current(data);setError(previous=>previous.startsWith('测试状态读取失败')?'':previous);}
-      } catch(failure){if(active&&generation===epoch.current&&!pending.current)setError(failure.message);}
-      finally{polling=false;}
-    }
-    void poll();const timer=window.setInterval(poll,400);
-    return()=>{active=false;window.clearInterval(timer);};
-  },[]);
+  useEffect(()=>subscribeDevices(state=>{
+    if(pending.current)return;
+    const data=state.routes?.['/api/coupled-current/status'];
+    if(data)applyRef.current(state.streamOnline===false?{...data,motor:{connected:false}}:data);
+  }),[]);
   const run=status.run||{},supported=status.capabilities?.fullIqRamp===true;
   const selectedMode=run.running?run.motorMode:(form.motorMode??'maximum_output');
   const maximum=selectedMode==='maximum_output';
   const mx=status.motor?.snapshot?.maximumOutput;
-  const maxFresh=mx&&Date.now()/1000-mx.receivedAt<2;
+  const maxFresh=mx&&mx.state===2&&Date.now()/1000-mx.receivedAt<2;
   const limitNames={current:'电流矢量',voltage:'电压',source_estimate:'估算供电电流',speed:'转速设置',adc_range:'ADC 量程'};
   const invalid=torqueSweepError(form,status.torqueCalibration);
   const blockedReason=!bridgeReady?'通信桥未连接。':!supported?'通信服务尚未支持新版流程。'
@@ -63,7 +54,7 @@ function CoupledCurrentPanel({token,bridgeReady,sensorConnected,outputSpeedRpm,m
     :status.safety?.blocked||run.stopConfirmed===false?'输出关闭未确认，请先重试停止。'
     :!motorSupplyOn?'电机电源输出关闭，请先手动开启电机电源。'
     :!status.motor?.connected?`电机通信未就绪：${status.motor?.error||'请连接电机并等待新鲜反馈。'}`
-    :maximum&&(status.motor?.snapshot?.versionRaw??0)<0x0A3C?'需先刷入 0x0A3C 或更新固件。'
+    :maximum&&!status.motor?.snapshot?.capabilities?.maximumOutput?'驱动板未声明最大输出能力。'
     :!status.brake?.device?.connected?'制动电源未连接。':!sensorConnected?'扭矩传感器未连接。':'';
   const ready=!blockedReason;
   const canLoad=ready&&run.running&&!run.loadRequested&&run.mode==='torque_sweep'&&run.phase==='awaiting_load';
@@ -82,11 +73,11 @@ function CoupledCurrentPanel({token,bridgeReady,sensorConnected,outputSpeedRpm,m
     epoch.current++;pending.current++;setBusy(true);setError('');
     try {
       if(name!=='stop'||!token.current){
-        const response=await fetch('/api/health',{cache:'no-store',signal:AbortSignal.timeout(3000)});
+        const response=await apiFetch('/api/health',{cache:'no-store',signal:AbortSignal.timeout(3000)});
         if(!response.ok)throw new Error('通信桥不可用');
         token.current=(await response.json()).token;
       }
-      const response=await fetch(`/api/coupled-current/${name}`,{method:'POST',
+      const response=await apiFetch(`/api/coupled-current/${name}`,{method:'POST',
         headers:{'Content-Type':'application/json','X-MotorBench-Token':token.current},
         body:JSON.stringify(name==='start'?torqueSweepRequest(form):name==='load'?{id:run.id}:{}),signal:AbortSignal.timeout(15000)});
       const data=await response.json();
@@ -115,7 +106,7 @@ function CoupledCurrentPanel({token,bridgeReady,sensorConnected,outputSpeedRpm,m
         <option value="maximum_output">最大输出（动态 Iq）</option><option value="full_current">固定 10 A（对照）</option></select></label>
       <p className="hw-safety-note">{maximum?'MCU 持续在现有电压、ADC 量程、相电流和供电能力内求最大 Iq；加载改变时自动重算，电压饱和与跟踪误差只记录。':'固定发送 10 A 目标，驱动按现有 100 A/s 斜坡拉升并保持。'}相电流保护 {status.motor?.snapshot?.supportedMaxA??'—'} A。①始终保持制动关闭。</p>
       {maximum&&<>
-        <p className="hw-readback">{maxFresh?`可用电流矢量 ${show(mx.operatingCurrentA)} A · Id 参考 ${show(mx.idReferenceA)} A · 电压边界 ${show(mx.voltageLimitV)} V`:'等待新鲜的最大输出诊断（需要固件 0x0A3C）'}</p>
+        <p className="hw-readback">{maxFresh?`可用电流矢量 ${show(mx.operatingCurrentA)} A · Id 参考 ${show(mx.idReferenceA)} A · 电压边界 ${show(mx.voltageLimitV)} V`:'等待新鲜的最大输出诊断（需要最大输出反馈能力）'}</p>
         {maxFresh&&<><p className="hw-readback">限制来源：{mx.limits.map(item=>limitNames[item]||item).join('、')||'电流拉升 / 暂无明确限制'} · 估算母线 {show(mx.estimatedBusA)} / {show(mx.busLimitA)} A</p>
           <p className="hw-readback">{mx.windowMs} ms 窗口：Iq {show(mx.iqMeanA)} A · Iq/Id 误差 RMS {show(mx.iqErrorRmsA)} / {show(mx.idErrorRmsA)} A · 饱和 {(mx.saturatedFraction*100).toFixed(0)}%</p>
           <p className="hw-safety-note">窗口证据：{mx.configuredBoundaryObserved?'已观察到配置边界且跟踪满足显示判据':'尚不足以确认已达到可用边界'}。质量标记：{mx.quality.join('、')||'本窗口未见已监测异常'}。达到已配置边界需同时核对跟踪误差、采样质量与电源实测；不能据此认定硬件绝对极限。</p></>}
@@ -150,7 +141,7 @@ function CoupledCurrentPanel({token,bridgeReady,sensorConnected,outputSpeedRpm,m
     {error&&<p className="hw-inline-error" role="alert">{error}</p>}
     {!supported&&<p className="hw-safety-note">新版测试流程待通信服务重新启动后可用。</p>}
     {!run.running&&supported&&!error&&<p className="hw-safety-note">{blockedReason||invalid||(curveHeld?'上一轮曲线已保留，可以直接重新启动①；新试验开始后自动切换曲线。':'参数已就绪，先启动①，待空载准备完成后再点击②。')}</p>}
-    <details className="coupled-help"><summary>测试与记录说明</summary><p className="hw-safety-note">两个启动步骤独立确认；①不会自动加载。最大输出模式自动调整参考；固定模式保持 10 A。相电流保护仍按既有流程设置并读回 ID7，不保存到 Flash；实际电流以反馈为准。任一路保护、通信失效、页面离开或停转，均停止两路输出。无自动重新上电或重新启动。停机后曲线保留，可以直接重新启动①，或点击“恢复实时”查看实时曲线。特性曲线保留②之前 1 秒的空载点及之后的加载数据；最大输出模式自动关联完整记录；MCU 连续统计与停机前快速轨迹保存在固件运行记录中。目标值和传感器实测值分别记录，电流参考只作初始估计，反馈调整以轴端实测力矩为准。</p></details>
+    <details className="coupled-help"><summary>测试与记录说明</summary><p className="hw-safety-note">两个启动步骤独立确认；①不会自动加载。最大输出模式自动调整参考；固定模式保持 10 A。运行边界由驱动板校验并读回，不保存到 Flash；实际电流以反馈为准。任一路保护、通信失效、页面离开或停转，均停止两路输出。无自动重新上电或重新启动。停机后曲线保留，可以直接重新启动①，或点击“恢复实时”查看实时曲线。特性曲线保留②之前 1 秒的空载点及之后的加载数据；最大输出模式自动关联完整记录；MCU 统计窗口保存在后台记录中；停机冻结轨迹可通过只读工具导出。目标值和传感器实测值分别记录，电流参考只作初始估计，反馈调整以轴端实测力矩为准。</p></details>
   </section>;
 }
 export default React.memo(CoupledCurrentPanel);

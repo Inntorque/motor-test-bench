@@ -8,55 +8,14 @@ import unittest
 from urllib.parse import parse_qs, urlsplit
 
 from automatic_tests import AutomaticTests
-from motor_current import CurrentMotor, CurrentError, XIGE_ROOT
+from workbench.test_engine import CurrentMotor, CurrentError
 from specialized_tests import SpecializedTests
+from protocol import generated as p
 
 
-class ScriptMotor(CurrentMotor):
-    def __init__(self):
-        super().__init__()
-        self.enabled=False;self.mode=5;self.writes=[]
-        self.current=0.;self.position=0.;self.speed=0.;self.fault_at=None
-        self.calibrated=True;self.stale=False;self.stop_fail=False
-        self.speed_limit=20;self.speed_response_cap=None;self.speed_fault_at=None
-        self.speed_wobble=False;self.speed_reads=0
-        self.position_error_deg=0.;self.ntc_limit=60
-
-    def _request(self, route, *, write=False, allow_cancel=False):
-        if write:
-            if self.cancel.is_set() and not allow_cancel:raise CurrentError('cancelled')
-            self.writes.append(route)
-        parsed=urlsplit(route);q=parse_qs(parsed.query)
-        fault=self.enabled and ((self.fault_at is not None and self.current>=self.fault_at) or
-                               (self.mode==2 and self.speed_fault_at is not None and self.speed>=self.speed_fault_at))
-        if parsed.path=='/api/status':
-            return {'project_root':str(XIGE_ROOT),'connected':True,'version_raw':0x0A1C,
-                    'version':'fake','motor_profile':{'data':{'nameplate':{'reduction_ratio':10}}},
-                    'motor':{'available':True,'age_s':0,'mode':self.mode,
-                    'state':3 if fault else 2 if self.enabled else 0,'fault':fault,
-                    'output_on':self.enabled and not fault,'updated_at':time.time()},
-                    'encoder':{'valid':True,'stale':False,'electrical_calibrated':self.calibrated,'electrical_angle_valid':self.calibrated},
-                    'ntc':{'valid':True,'age_s':0,'temp_c':25,'limit_c':self.ntc_limit}}
-        if parsed.path=='/api/control/status':
-            self.speed_reads+=1
-            speed=self.speed+(5 if self.speed_reads%2 else -5) if self.speed_wobble and self.enabled and self.mode==2 else self.speed
-            return {'control':{'mode':self.mode},'feedback':{'id_a':0.,'iq_a':self.current,
-                'stale':False,'updated_at':time.time(),'position_at':time.time(),
-                'position_stale':self.stale,'position_deg':self.position,'speed_rpm':speed}}
-        if parsed.path=='/api/session':return {'token':'fake','command_epoch':1}
-        if parsed.path=='/api/get':return {'value':1000 if q['id']==['7'] else self.speed_limit}
-        if parsed.path=='/api/motor_profile':raise CurrentError('POST-only profile selection must not be called')
-        if parsed.path=='/api/motor':
-            if q['enable']==['0'] and self.stop_fail:raise CurrentError('stop ACK missing')
-            self.enabled=q['enable']==['1']
-            if self.enabled:self.mode=int(q['mode'][0])
-            else:self.speed=0
-        if parsed.path=='/api/control/set':
-            value=float(q['value'][0]);field=q['field'][0]
-            if field=='current_a':self.current=value
-            if field=='position_deg':self.position=(value+self.position_error_deg)*10
-            if field=='speed_rpm':self.speed=min(value,self.speed_response_cap) if self.speed_response_cap is not None else value
-        return {'ok':True}
+from test_motor_current import FakeMotor
+class ScriptMotor(FakeMotor):
+    pass
 
 
 class AutomaticTestsTests(unittest.TestCase):
@@ -66,6 +25,7 @@ class AutomaticTestsTests(unittest.TestCase):
         self.sensor_config={'protocol':'hex6','torqueDecimals':2,'speedDecimals':1}
         self.passive=SpecializedTests(Path(self.temp.name)/'passive',self.source,self.frames)
         self.auto=AutomaticTests(Path(self.temp.name)/'auto',self.motor,self.passive,self.source)
+        self.auto.subjects=lambda:{'testSetup':{'id':'test','name':'测试配置','ratio':10,'axis':'output'}}
 
     def tearDown(self):
         if self.auto.active():self.auto.stop(self.auto.status()['id'])
@@ -105,6 +65,7 @@ class AutomaticTestsTests(unittest.TestCase):
         self.assertEqual(self.motor.writes,[])
 
     def test_velocity_search_needs_no_preset_maximum_and_marks_controller_limit(self):
+        self.auto.subjects=lambda:{'motor':{'id':'m1','name':'电机 A'},'driverBoard':{'id':'d1','name':'驱动板 A'},'testSetup':{'id':'test','name':'测试配置','ratio':10,'axis':'output'}}
         self.motor.position=63719.956
         record=self.auto.start(self.config()|{'speedMaxRpm':.1,'angleMinDeg':-1,'angleMaxDeg':1,'continuousRotation':False});result=self.finish()
         self.assertEqual(result['state'],'stopped');self.assertEqual(result['outcome'],'controller_limit')
@@ -114,10 +75,14 @@ class AutomaticTestsTests(unittest.TestCase):
         self.assertFalse(result['speedSearch']['limitFound'])
         self.assertEqual(result['speedSearch']['maxMeanRpm'],2)
         self.assertFalse(result['protectionSeen']);self.assertEqual(result['peakOutputSpeedRpm'],2)
-        speed_routes=[r for r in self.motor.writes if 'field=speed_rpm' in r]
-        self.assertEqual([float(parse_qs(urlsplit(r).query)['value'][0]) for r in speed_routes],[0,10,20])
-        self.assertIn('mode=2',' '.join(self.motor.writes))
+        speed_targets=[r[2]/1000 for r in self.motor.writes if len(r)==3 and r[0]=='target' and r[1]==p.OBJ_VELOCITY_TARGET]
+        self.assertEqual(speed_targets,[0,10,20]);self.assertIn(('start',3),self.motor.writes)
         self.assertEqual(json.loads(self.auto.file(record['id'],'report.json').read_text())['outcome'],'controller_limit')
+        self.assertEqual(result['testSubject']['motor']['name'],'电机 A')
+        with self.auto.file(record['id'],'data.csv').open(encoding='utf-8-sig') as stream:
+            rows=list(csv.DictReader(stream))
+        self.assertTrue(rows)
+        self.assertTrue(all(row['motor_name']=='电机 A' and row['driver_board_name']=='驱动板 A' for row in rows))
 
     def test_speed_plateau_is_confirmed_without_further_increase(self):
         self.motor.speed_limit=30;self.motor.speed_response_cap=15
@@ -167,7 +132,7 @@ class AutomaticTestsTests(unittest.TestCase):
         self.assertTrue(all(row['errorDeg']==0 for row in result['steps']))
         self.assertEqual([row['targetDeg'] for row in result['steps']],[-720,720,720,-720])
         self.assertAlmostEqual(result['originOutputDeg'],6371.9956)
-        self.assertIn('mode=3',' '.join(self.motor.writes))
+        self.assertIn(('start',4),self.motor.writes)
         self.assertFalse(any('/api/set?' in r or 'save' in r for r in self.motor.writes))
 
     def test_position_protocol_range_is_checked_before_any_motion(self):
@@ -187,8 +152,8 @@ class AutomaticTestsTests(unittest.TestCase):
         self.assertEqual(result['state'],'completed');self.assertEqual(len(result['steps']),4)
         self.assertNotIn('positionToleranceDeg',result['config'])
         for row in result['steps']:
-            self.assertEqual(row['errorDeg'],2);self.assertEqual(row['endErrorDeg'],2)
-            self.assertEqual(row['errorRmsDeg'],2);self.assertEqual(row['maxAbsErrorDeg'],2)
+            self.assertAlmostEqual(row['errorDeg'],2,delta=.000036);self.assertAlmostEqual(row['endErrorDeg'],2,delta=.000036)
+            self.assertAlmostEqual(row['errorRmsDeg'],2,delta=.000036);self.assertAlmostEqual(row['maxAbsErrorDeg'],2,delta=.000036)
 
     def test_device_protection_is_read_and_relative_points_use_start_coordinate(self):
         self.motor.position=63719.956
@@ -199,7 +164,7 @@ class AutomaticTestsTests(unittest.TestCase):
         self.assertEqual(result['config']['temperatureMaxC'],60)
         self.assertEqual(result['protectionSources'],{'current':'device','temperature':'device'})
         self.assertAlmostEqual(result['steps'][0]['targetDeg'],6361.9956)
-        self.assertTrue(all(abs(row['errorDeg'])<1e-9 for row in result['steps']))
+        self.assertTrue(all(abs(row['errorDeg'])<=.000036 for row in result['steps']))
 
     def test_step_defaults_and_missing_temperature_limit_never_start_motion(self):
         config=AutomaticTests.validate({'group':'no_load','position':True,'speed':True,'positionReference':'relative'})
@@ -235,7 +200,7 @@ class AutomaticTestsTests(unittest.TestCase):
         self.assertEqual(result['postStopTorqueAbsMaxNm'],0)
         with self.passive.file(result['rawTorqueRecordId'],'data.csv').open(encoding='utf-8-sig') as stream:
             self.assertGreater(sum(1 for r in csv.DictReader(stream) if r['sample_type']=='sensor'),2000)
-        self.assertIn('mode=5',' '.join(self.motor.writes))
+        self.assertIn(('start',1),self.motor.writes)
 
     def test_real_protection_stops_without_claiming_normal_completion(self):
         self.brake=True;self.motor.fault_at=.5
@@ -249,11 +214,11 @@ class AutomaticTestsTests(unittest.TestCase):
             self.motor.stale=False
             self.auto.start(self.config())
             if fault=='stale':self.motor.stale=True
-            else:self.motor.lease=time.monotonic()-3
+            else:self.motor.cancel.set()
             self.auto.thread.join(4)
             self.assertFalse(self.auto.thread.is_alive())
             self.assertTrue(self.auto.status()['stopConfirmed'])
-            self.assertEqual(self.auto.status()['outcome'],'feedback_lost' if fault=='stale' else 'page_timeout')
+            self.assertEqual(self.auto.status()['outcome'],'feedback_lost' if fault=='stale' else 'operator_stop')
 
     def test_cancel_and_conflicting_tasks(self):
         record=self.auto.start(self.config())

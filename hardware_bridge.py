@@ -23,16 +23,19 @@ from urllib.parse import urlparse, parse_qs
 
 import serial
 from serial.tools import list_ports
-from motor_current import CurrentMotor
+from workbench.test_engine import CurrentMotor
 from sensor_hex import HexSensorChannel
 from specialized_tests import SpecializedTests
 from automatic_tests import AutomaticTests
-from workbench_recordings import WorkbenchRecordings
+from workbench.recording import RecordManager
+from workbench.subjects import TestSubjects
 from background_recording import BackgroundRecording
+from workbench.events import HUB
+from protocol import generated as MBP
 from brake_current import BrakeCurrent
 from device_connections import ConnectionManager
 from coupled_current import CoupledCurrent
-from safety_control import SafetyControl
+from workbench.control import ControlCoordinator
 from power_limits import MOTOR_SUPPLY_CURRENT_LIMIT, MOTOR_SUPPLY_PRESET_CURRENT_A, power_problem, power_evidence
 
 
@@ -726,25 +729,29 @@ class SensorChannel:
         return self.channel.connect(config)
 
 
+TEST_SUBJECTS = TestSubjects(Path(__file__).resolve().parent / '.runtime/test-subjects.json',
+                            json.loads((Path(__file__).resolve().parent/'profiles/bench.json').read_text(encoding='utf-8')))
+CURRENT_MOTOR.subjects = TEST_SUBJECTS.selection
 TORQUE_SENSOR = SensorChannel()
 SPECIALIZED = SpecializedTests(
     Path(__file__).resolve().parent / 'recordings' / 'specialized',
     lambda: {'sensor': TORQUE_SENSOR.status(), 'motor': CURRENT_MOTOR.status(), 'brake': CHANNELS['brake-supply'].status()},
     lambda since: TORQUE_SENSOR.batch(since) if isinstance(TORQUE_SENSOR.channel, HexSensorChannel) else None,
+    subjects=TEST_SUBJECTS.selection,
 )
 AUTOMATIC = AutomaticTests(Path(__file__).resolve().parent / 'recordings' / 'automatic',
                            CURRENT_MOTOR, SPECIALIZED,
                            lambda: {'sensor': TORQUE_SENSOR.status(), 'motor': CURRENT_MOTOR.status(),
                                     'brake': CHANNELS['brake-supply'].cached_status(),
                                     'motorSupply': CHANNELS['motor-supply'].cached_status()},
-                           lambda: [channel.read() for channel in CHANNELS.values()])
-WORKBENCH_RECORDINGS = WorkbenchRecordings(Path(__file__).resolve().parent / 'recordings' / 'workbench',
-                                          AUTOMATIC.source, SPECIALIZED.frames)
-CURRENT_MOTOR.write_observer = lambda route,reply: WORKBENCH_RECORDINGS.observe('motor_command_ack', {'route':route, 'response':reply})
+                           None, subjects=TEST_SUBJECTS.selection)
+WORKBENCH_RECORDINGS = RecordManager(Path(__file__).resolve().parent / 'recordings' / 'workbench',
+                                          AUTOMATIC.source, SPECIALIZED.frames,event_hub=HUB,subjects=TEST_SUBJECTS.selection)
 BACKGROUND_RECORDING = BackgroundRecording(Path(__file__).resolve().parent/'recordings'/'background',
-                                           AUTOMATIC.source, SPECIALIZED.frames)
+                                           AUTOMATIC.source, SPECIALIZED.frames,event_hub=HUB)
 WORKBENCH_RECORDINGS.diagnostics = BACKGROUND_RECORDING
-CURRENT_MOTOR.diagnostic_observer = BACKGROUND_RECORDING.observe
+AUTOMATIC.recorder=WORKBENCH_RECORDINGS
+CURRENT_MOTOR.diagnostic_observer = HUB.publish
 def observe_brake(kind, payload):
     BACKGROUND_RECORDING.observe(kind, payload)
     WORKBENCH_RECORDINGS.observe(kind, payload)
@@ -759,6 +766,8 @@ def normalized_config(data, key=None):
         raise BridgeError("连接参数无效")
     transport = data.get("transport", "serial")
     protocol = data.get('protocol', 'ru' if key == 'motor-supply' else 'ssj')
+    if key == 'motor-supply' and protocol != 'ru':
+        raise BridgeError('电机电源只支持万瑞达 RU 系列 Modbus RTU')
     if protocol not in ('ru','ssj') or (key == 'brake-supply' and protocol != 'ssj'):
         raise BridgeError('电源协议无效')
     if protocol == 'ru':
@@ -782,11 +791,7 @@ def normalized_config(data, key=None):
         'maxCurrent':finite_number(data,'maxCurrent',0,65535,optional=True),
     }
     if key in CHANNEL_NAMES:
-        # 2026-10-21 panel confirmation: SSJ setpoint raw2000 = 2.000 A.
-        # Migrate the old two-decimal host profile without writing the device.
-        if protocol=='ssj' and key=='motor-supply' and config['currentDecimals']==2:
-            config['currentDecimals']=3
-        config['measuredCurrentDecimals']=3 if protocol=='ssj' and key=='motor-supply' else config['currentDecimals']
+        config['measuredCurrentDecimals']=config['currentDecimals']
         config['maxVoltage']=24
         config['maxCurrent']=MOTOR_SUPPLY_CURRENT_LIMIT if key=='motor-supply' else 2.3
         if protocol=='ssj':
@@ -885,7 +890,7 @@ def validate_supply_policy(key, data, *, limits=False):
 
 
 CONNECTIONS = ConnectionManager(globals(), Path(__file__).resolve().parent / '.runtime/connections.json')
-SAFETY = SafetyControl(CHANNELS,CURRENT_MOTOR,BRAKE_CURRENT,COUPLED_CURRENT,
+SAFETY = ControlCoordinator(CHANNELS,CURRENT_MOTOR,BRAKE_CURRENT,COUPLED_CURRENT,
                        Path(__file__).resolve().parent/'.runtime/safety.json')
 for _channel in CHANNELS.values():_channel.start_guard=SAFETY.check
 CURRENT_MOTOR.start_guard=BRAKE_CURRENT.start_guard=SAFETY.check
@@ -894,6 +899,17 @@ CURRENT_MOTOR.output_hold=lambda:any(channel.verifying_power for channel in CHAN
 CHANNELS['motor-supply'].on_power_on=CURRENT_MOTOR.powered_on
 SAFETY.automatic=AUTOMATIC
 SAFETY.observe=observe_brake
+
+
+def test_configuration_locked():
+    return bool(CURRENT_MOTOR.run.get('running') or (CURRENT_MOTOR.snapshot or {}).get('motor', {}).get('output_on')
+                or BRAKE_CURRENT.run.get('running') or COUPLED_CURRENT.run.get('running')
+                or (AUTOMATIC.live or {}).get('running') or (WORKBENCH_RECORDINGS.live or {}).get('running')
+                or (SPECIALIZED.live or {}).get('running') or (SPECIALIZED.live or {}).get('state') in ('running','settling')
+                or SAFETY.stopping)
+
+
+TEST_SUBJECTS.busy = test_configuration_locked
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -917,7 +933,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Control-Epoch',str(SAFETY.epoch))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if self.command!='HEAD':self.wfile.write(body)
 
     def _valid_host(self):
         return self.headers.get("Host", "").lower() in {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
@@ -934,6 +950,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._valid_host():
             return self._send({"error": "仅支持本机访问"}, 403)
         path = urlparse(self.path).path
+        if path == '/api/test-subjects':
+            return self._send(TEST_SUBJECTS.status())
         if path == '/api/control/status':return self._send(SAFETY.status())
         if path == '/api/connections/status':
             return self._send(CONNECTIONS.status())
@@ -1025,6 +1043,21 @@ class Handler(BaseHTTPRequestHandler):
             self.request_data=json.loads(self.rfile.read(length) or b'{}')
             if not isinstance(self.request_data,dict):raise ValueError('请求参数必须为对象')
         except (ValueError,OSError) as error:return self._send({'error':str(error)},400)
+        if path[:2] == ['api', 'test-subjects']:
+            self.recording_request = None
+            try:
+                with COUPLED_CURRENT.control, WORKBENCH_RECORDINGS.control:
+                    if path == ['api','test-subjects','create']:
+                        return self._send(TEST_SUBJECTS.create(self.request_data.get('kind'), self.request_data.get('name')))
+                    if path == ['api','test-subjects','save-setup']:
+                        return self._send(TEST_SUBJECTS.save_setup(self.request_data))
+                    if path == ['api','test-subjects','select']:
+                        return self._send(TEST_SUBJECTS.select(self.request_data))
+                raise ValueError('未知测试对象操作')
+            except (ValueError, OSError) as error:
+                return self._send({'error': str(error)}, 400)
+        if path == ['api','control','heartbeat']:
+            return self._send(SAFETY.heartbeat(self.headers.get('X-Workbench-Client')))
         if SAFETY.started:
             if path == ['api','control','release']:
                 if self.headers.get('X-Workbench-Client') and self.headers.get('X-Workbench-Client')==SAFETY.owner:
@@ -1043,7 +1076,7 @@ class Handler(BaseHTTPRequestHandler):
         with COUPLED_CURRENT.control:
             if SAFETY.started:
                 try:
-                    energizing=(path[-1]=='start' and path[:2] in (['api','coupled-current'],['api','motor-current'],['api','brake-current'],['api','automatic'])) or path==['api','coupled-current','load'] or (path[:2]==['api','supplies'] and path[-1]=='output' and self.request_data.get('on') is True)
+                    energizing=(path[-1]=='start' and path[:2] in (['api','coupled-current'],['api','motor-current'],['api','brake-current'],['api','automatic'],['api','motor'])) or path==['api','coupled-current','load'] or (path[:2]==['api','supplies'] and path[-1]=='output' and self.request_data.get('on') is True)
                     restoring=path[-1]=='connect' or path==['api','connections','start']
                     keys=([path[2]] if path[:2]==['api','supplies'] else list(CHANNELS) if path[:2]==['api','coupled-current']
                           else ['brake-supply'] if path[:2]==['api','brake-current'] else ['motor-supply'])
@@ -1054,6 +1087,44 @@ class Handler(BaseHTTPRequestHandler):
                 with BRAKE_CURRENT.control:
                     return self._do_POST()
             return self._do_POST()
+
+    def _native_motor(self,action,data):
+        if COUPLED_CURRENT.active() or AUTOMATIC.active():raise BridgeError('请先结束当前测试')
+        if action=='prepare':
+            if CURRENT_MOTOR.run.get('running'):raise BridgeError('请先停止当前电机输出')
+            if SAFETY.owner!=self.headers.get('X-Workbench-Client'):raise BridgeError('请先申请控制权')
+            mode={'IQ':1,'VELOCITY':3,'POSITION':4,'MAX_AVAILABLE_IQ':5}.get(data.get('mode'))
+            if mode is None:raise BridgeError('无效控制模式')
+            mapping={'iqTargetA':(MBP.OBJ_IQ_TARGET,1000),'phaseLimitA':(MBP.OBJ_PHASE_RUN_LIMIT,1000),
+                     'busBudgetA':(MBP.OBJ_BUS_CURRENT_BUDGET,1000),'busVoltageV':(MBP.OBJ_BUS_VOLTAGE_BASIS,1000),
+                     'negativeIdMinA':(MBP.OBJ_NEGATIVE_ID_MIN,1000),'speedLimitRpm':(MBP.OBJ_SPEED_SOFT_LIMIT,1000),
+                     'velocityRpm':(MBP.OBJ_VELOCITY_TARGET,1000),'positionTurns':(MBP.OBJ_POSITION_TARGET,1000000)}
+            if any(k not in {*mapping,'mode','direction'} for k in data):raise BridgeError('未知运行配置')
+            config={MBP.OBJ_RUN_MODE:mode,MBP.OBJ_DIRECTION:data.get('direction',1)}
+            for key,(oid,scale) in mapping.items():
+                if key in data:
+                    value=float(data[key])
+                    if not math.isfinite(value):raise BridgeError('运行配置必须为有限数值')
+                    config[oid]=round(value*scale)
+            CURRENT_MOTOR.cancel=threading.Event()
+            prepared=CURRENT_MOTOR.device.prepare_run(config);SAFETY.check()
+            SAFETY.manual_prepared=(SAFETY.epoch,prepared,SAFETY.owner)
+            return self._send({'preparedId':prepared,'configuration':config})
+        if action=='start':
+            expected=(SAFETY.epoch,data.get('preparedId'),SAFETY.owner)
+            if SAFETY.manual_prepared!=expected or not expected[1]:raise BridgeError('准备结果已失效，请重新准备')
+            SAFETY.check();CURRENT_MOTOR.device.start(expected[1]);SAFETY.check()
+            if CURRENT_MOTOR.cancel.is_set():raise BridgeError('启动已取消')
+            CURRENT_MOTOR.run.update(running=True,phase='manual',stopConfirmed=None)
+            SAFETY.manual_prepared=None
+            return self._send(CURRENT_MOTOR.status())
+        if action=='target':
+            if CURRENT_MOTOR.run.get('phase')!='manual' or not CURRENT_MOTOR.run.get('running'):raise BridgeError('当前没有独立电机输出')
+            value=float(data['iqTargetA'])
+            if not math.isfinite(value):raise BridgeError('电流目标无效')
+            SAFETY.check();CURRENT_MOTOR.device.set_target(value)
+            return self._send(CURRENT_MOTOR.status())
+        raise BridgeError('未知电机动作')
 
     def _do_POST(self):
         self.recording_request = None
@@ -1078,6 +1149,10 @@ class Handler(BaseHTTPRequestHandler):
                     COUPLED_CURRENT.stop()
                 elif not restoring and path[-1] != 'read' and path[:2] != ['api', 'recordings']:
                     raise BridgeError('联动试验正在运行，请使用统一停止后再单独操作')
+            if path == ['api','control','claim']:
+                return self._send(SAFETY.claim_control(self.headers.get('X-Workbench-Client'),self.headers.get('X-Control-Epoch')))
+            if path[:2]==['api','motor'] and len(path)==3:
+                return self._native_motor(path[2],data)
             if path == ['api', 'connections', 'start']:
                 return self._send(CONNECTIONS.start(data))
             if CONNECTIONS.active() and path[-1] not in ('read', 'stop'):
@@ -1172,7 +1247,7 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "disconnect":
                     return self._send(channel.disconnect())
                 if action == "read":
-                    return self._send(channel.read())
+                    return self._send(channel.status() if SAFETY.started else channel.read())
                 raise BridgeError("未知传感器操作")
             else:
                 raise BridgeError("未知请求")
@@ -1230,54 +1305,30 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(payload, 500)
 
 
-def serve():
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
-    server.daemon_threads = True
-    SPECIALIZED.recover_interrupted()
-    AUTOMATIC.recover_interrupted()
-    WORKBENCH_RECORDINGS.recover_interrupted()
-    SAFETY.start()
-    # Restore only known device identities, then reconcile any unowned outputs.
-    CONNECTIONS.start({})
-    def terminate(*_):
-        threading.Thread(target=server.shutdown,daemon=True).start()
-    signal.signal(signal.SIGTERM,terminate)
-    if hasattr(signal,'SIGBREAK'):signal.signal(signal.SIGBREAK,terminate)
-    print(f"Motor test bench hardware bridge listening at http://{HOST}:{PORT}")
-    print("Power supplies start disconnected; output state is only reported after a valid Modbus RTU response.")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        SAFETY.close()
-        if COUPLED_CURRENT.active():
-            try:COUPLED_CURRENT.stop(wait=True)
-            except Exception as error:print(f'Coupled stop not confirmed: {error}')
-        if BRAKE_CURRENT.active():
-            try:BRAKE_CURRENT.stop()
-            except Exception as error:print(f'Brake stop not confirmed: {error}')
-        if WORKBENCH_RECORDINGS.active():
-            try:WORKBENCH_RECORDINGS.stop(WORKBENCH_RECORDINGS.status()['id'])
-            except Exception as error:print(f'Workbench recording stop: {error}')
-        if AUTOMATIC.active():
-            try:
-                AUTOMATIC.stop(AUTOMATIC.status()['id'])
-            except Exception as error:
-                print(f'Automatic script stop: {error}')
-        if SPECIALIZED.status():
-            SPECIALIZED.stop(SPECIALIZED.status()['id'])
-        if CURRENT_MOTOR.run["running"]:
-            try:
-                CURRENT_MOTOR.stop()
-            except Exception as error:
-                print(f"Motor stop not confirmed: {error}")
-        for channel in [*CHANNELS.values(), TORQUE_SENSOR]:
-            try:channel.disconnect()
-            except Exception as error:print(f'Output state unknown; preserving safety journal: {error}')
-        BACKGROUND_RECORDING.close()
-        server.server_close()
-
-
-if __name__ == "__main__":
-    serve()
+def close_devices():
+    SAFETY.close()
+    if COUPLED_CURRENT.active():
+        try:COUPLED_CURRENT.stop(wait=True)
+        except Exception as error:print(f'Coupled stop not confirmed: {error}')
+    if BRAKE_CURRENT.active():
+        try:BRAKE_CURRENT.stop()
+        except Exception as error:print(f'Brake stop not confirmed: {error}')
+    if WORKBENCH_RECORDINGS.active():
+        try:WORKBENCH_RECORDINGS.stop(WORKBENCH_RECORDINGS.status()['id'])
+        except Exception as error:print(f'Workbench recording stop: {error}')
+    if AUTOMATIC.active():
+        try:
+            AUTOMATIC.stop(AUTOMATIC.status()['id'])
+        except Exception as error:
+            print(f'Automatic script stop: {error}')
+    if SPECIALIZED.status():
+        SPECIALIZED.stop(SPECIALIZED.status()['id'])
+    if CURRENT_MOTOR.run["running"]:
+        try:
+            CURRENT_MOTOR.stop()
+        except Exception as error:
+            print(f"Motor stop not confirmed: {error}")
+    for channel in [*CHANNELS.values(), TORQUE_SENSOR]:
+        try:channel.disconnect()
+        except Exception as error:print(f'Output state unknown; preserving safety journal: {error}')
+    BACKGROUND_RECORDING.close()

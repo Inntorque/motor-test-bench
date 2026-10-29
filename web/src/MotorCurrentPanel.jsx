@@ -1,3 +1,5 @@
+import {subscribeDevices} from './deviceStore.js';
+import {apiFetch} from './apiClient.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { motorTemperatureC, motorTargetCurrentA, motorOutputFeedback, motorDeviceState, motorStepInputError } from './model.js';
 
@@ -39,25 +41,11 @@ function MotorCurrentPanel({ token, bridgeReady, onState, onEvent }) {
     try { localStorage.setItem(FORM_KEY, JSON.stringify(form)); } catch { /* Storage may be unavailable. */ }
   }, [form]);
 
-  useEffect(() => {
-    let active = true, polling = false;
-    async function poll() {
-      if (polling) return;
-      polling = true;
-      const epoch = actionEpoch.current;
-      try {
-        const response = await fetch('/api/motor-current/status', { cache: 'no-store', signal: AbortSignal.timeout(2500) });
-        if (!response.ok) throw new Error('电机通信桥不可用');
-        const result = await response.json();
-        if (active && epoch === actionEpoch.current && !pendingActions.current) { setDevice(result); callback.current(result); }
-      } catch {
-        if (active && epoch === actionEpoch.current && !pendingActions.current) { setDevice((previous) => ({ ...previous, connected: false, snapshot: null })); callback.current({ connected: false }); }
-      } finally { polling = false; }
-    }
-    void poll();
-    const timer = window.setInterval(poll, 250);
-    return () => { active = false; window.clearInterval(timer); };
-  }, []);
+  useEffect(()=>subscribeDevices(state=>{
+    if(pendingActions.current)return;
+    const result=state.streamOnline===false?{connected:false,run:{}}:state.routes?.['/api/motor-current/status'];
+    if(result){setDevice(result);callback.current(result);}
+  }),[]);
 
   async function action(name) {
     if (name === 'stop' && stopInFlight.current) return;
@@ -72,11 +60,11 @@ function MotorCurrentPanel({ token, bridgeReady, onState, onEvent }) {
     try {
       // Obtain the current bridge token after service restarts, for every action.
       if(name!=='stop'||!token.current){
-        const health = await fetch('/api/health', {cache:'no-store', signal:AbortSignal.timeout(2500)});
+        const health = await apiFetch('/api/health', {cache:'no-store', signal:AbortSignal.timeout(2500)});
         if (!health.ok) throw new Error('通信桥不可用，无法发送指令');
         token.current = (await health.json()).token;
       }
-      const response = await fetch(`/api/motor-current/${name}`, {
+      const response = await apiFetch(`/api/motor-current/${name}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'X-MotorBench-Token': token.current },
         body: JSON.stringify(name === 'start' ? { stepA: step, intervalS: interval, durationS: duration } : {}),
         signal: AbortSignal.timeout(12000),
@@ -109,8 +97,8 @@ function MotorCurrentPanel({ token, bridgeReady, onState, onEvent }) {
       <div><span>实际 Iq</span><strong>{show(feedback?.stale ? null : feedback?.iq_a)}<small>A</small></strong></div>
       <div><span>实际 Id</span><strong>{show(feedback?.stale ? null : feedback?.id_a)}<small>A</small></strong></div>
       <div><span>电机温度</span><strong>{temperature == null ? '—' : temperature.toFixed(1)}<small>°C</small></strong><span>{temperatureStatus}</span></div>
-      <div><span>编码器输出角度</span><strong>{show(outputFeedback.positionDeg)}<small>°</small></strong><span>按参考工程减速比换算</span></div>
-      <div><span>编码器输出转速</span><strong>{show(outputFeedback.speedRpm)}<small>rpm</small></strong></div>
+      <div><span>被测轴折算角度</span><strong>{show(outputFeedback.positionDeg)}<small>°</small></strong><span>{device.testSubject?.testSetup?`按测试配置 ${device.testSubject.testSetup.ratio}:1 换算`:'未选择测试配置'}</span></div>
+      <div><span>被测轴折算转速</span><strong>{show(outputFeedback.speedRpm)}<small>rpm</small></strong></div>
     </div>
     <div className="hw-form-grid">
       {[
@@ -122,7 +110,7 @@ function MotorCurrentPanel({ token, bridgeReady, onState, onEvent }) {
     </div>
     <details className="motor-current-help">
       <summary>步进说明</summary>
-      <p className="hw-safety-note">西格电机 · Iq 从 0 A 按步长递增，Id 目标固定 0 A。</p>
+      <p className="hw-safety-note">电机电流模式 · Iq 从 0 A 按步长递增，Id 目标固定 0 A。</p>
       <p className="hw-safety-note">步进间隔 0.2–10 s；持续时间 1–255 s。每隔指定秒数增加一次电流，达到设备上限后保持；保护、通信或页面心跳超时、到期都会停止。</p>
     </details>
     {snapshot?.startBlockReason && !run.running && <p className="hw-inline-error">{snapshot.startBlockReason}</p>}

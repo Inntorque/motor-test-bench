@@ -1,0 +1,35 @@
+VERSION "MBP/1.0"
+NS_ :
+BS_:
+BU_: Host Drive
+BO_ 129 STOP_NODE1: 8 Host
+ SG_ magic : 0|32@1+ (1,0) [0|4294967295] "raw" Drive
+ SG_ stop_id : 32|32@1+ (1,0) [0|4294967295] "raw" Drive
+BO_ 257 CONTROL_HEARTBEAT_NODE1: 8 Host
+ SG_ session_id : 0|64@1+ (1,0) [0|18446744073709551615] "raw" Drive
+BO_ 321 DEVICE_HEARTBEAT_NODE1: 8 Drive
+ SG_ boot_tag : 0|32@1+ (1,0) [0|4294967295] "raw" Host
+ SG_ uptime_ms : 32|32@1+ (1,0) [0|4294967295] "raw" Host
+BO_ 385 STATUS_NODE1: 8 Drive
+ SG_ state : 0|8@1+ (1,0) [0|255] "raw" Host
+ SG_ mode : 8|8@1+ (1,0) [0|255] "raw" Host
+ SG_ flags : 16|16@1+ (1,0) [0|65535] "raw" Host
+ SG_ last_stop_id : 32|32@1+ (1,0) [0|4294967295] "raw" Host
+BO_ 513 SAMPLE_NODE1: 8 Drive
+ SG_ sample_seq : 0|16@1+ (1,0) [0|65535] "raw" Host
+ SG_ field_id : 16|8@1+ (1,0) [0|255] "raw" Host
+ SG_ flags : 24|8@1+ (1,0) [0|255] "raw" Host
+ SG_ raw_value : 32|32@1+ (1,0) [0|4294967295] "raw" Host
+BO_ 577 EVENT_NODE1: 8 Drive
+ SG_ event_code : 0|16@1+ (1,0) [0|65535] "raw" Host
+ SG_ severity : 16|8@1+ (1,0) [0|255] "raw" Host
+ SG_ source : 24|8@1+ (1,0) [0|255] "raw" Host
+ SG_ device_ms : 32|32@1+ (1,0) [0|4294967295] "raw" Host
+BO_ 1025 REQUEST_NODE1: 8 Host
+ SG_ isotp_payload : 0|64@1+ (1,0) [0|18446744073709551615] "raw" Drive
+BO_ 1089 RESPONSE_NODE1: 8 Drive
+ SG_ isotp_payload : 0|64@1+ (1,0) [0|18446744073709551615] "raw" Host
+BO_ 1153 DIAGNOSTIC_REQUEST_NODE1: 8 Host
+ SG_ isotp_payload : 0|64@1+ (1,0) [0|18446744073709551615] "raw" Drive
+BO_ 1217 DIAGNOSTIC_RESPONSE_NODE1: 8 Drive
+ SG_ isotp_payload : 0|64@1+ (1,0) [0|18446744073709551615] "raw" Host

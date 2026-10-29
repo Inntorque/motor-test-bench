@@ -4,31 +4,13 @@ import time
 import unittest
 from urllib.parse import urlsplit,parse_qs
 from unittest.mock import patch
-from motor_current import CurrentError
+from workbench.test_engine import CurrentError
 from test_motor_current import FakeMotor
 import test_torque_sweep as torque_fixture
 
 class MaximumMotor(FakeMotor):
     def __init__(self):
-        super().__init__();self.version=0x0A3C;self.device_mode=5;self.window=0
-    def _request(self,route,**kwargs):
-        p=urlsplit(route);q=parse_qs(p.query)
-        if p.path=='/api/control/set' and q['field']!=['current_a']:
-            self.writes.append(route);return {'ok':True}
-        if p.path=='/api/max-output/status':
-            self.window+=1
-            return {'ok':True,'maximumOutput':dict(schema=1,iqReferenceA=24.,idReferenceA=0,
-                windowId=self.window,mcuTimeUs=self.window*200000,receivedAt=time.time(),
-                quality=['sampling_window_unverified'],limits=['adc_range'])}
-        result=super()._request(route,**kwargs)
-        if p.path=='/api/motor' and q['enable']==['1']:self.device_mode=int(q['mode'][0])
-        if p.path=='/api/status':result['motor']['mode']=self.device_mode
-        if p.path=='/api/control/status':
-            now=time.time();result['control']['mode']=self.device_mode
-            result['feedback'].update(id_a=0.,iq_a=23.9 if self.enabled else 0,
-                speed_rpm=100,position_deg=time.monotonic()*600,updated_at=now,
-                position_at=now,position_stale=False)
-        return result
+        super().__init__();self.mode=5
 
 class MaximumTests(unittest.TestCase):
     def wait_for(self,predicate,heartbeat=None,timeout=5):
@@ -46,16 +28,16 @@ class MaximumTests(unittest.TestCase):
                 self.wait_for(lambda:m.run.get('targetA')==24,heartbeat=lambda:setattr(m,'lease',time.monotonic()))
                 self.assertTrue(m.run['running']);self.assertFalse(m.run['limitReached'])
                 self.assertEqual(m.run['targetA'],24)
-                self.assertFalse(any('field=current_a' in route and float(parse_qs(urlsplit(route).query)['value'][0])>0 for route in m.writes))
+                self.assertEqual(m.positive_writes(),[])
                 self.assertEqual(m.current_limit_ma,30000)
-                self.assertTrue(any('enable=1&mode=7&seconds=0' in w for w in m.writes))
-                self.assertTrue(any('field=max_id_min_a&value=0' in w for w in m.writes))
-                self.assertFalse(any('/api/save' in w for w in m.writes))
+                self.assertIn(('start',5),m.writes)
+                prepared=next(w[1] for w in m.writes if w[0]=='prepare')
+                self.assertEqual(prepared[0x1006],0)
             finally:m.stop()
         self.assertFalse(m.enabled);self.assertTrue(m.run['stopConfirmed'])
     def test_old_firmware_refused_before_start_or_parameter_write(self):
-        m=MaximumMotor();m.version=0x0A3B
-        with self.assertRaisesRegex(CurrentError,'0x0A3C'):m.prepare({'mode':'maximum_output'})
+        m=MaximumMotor();m.maximum_supported=False
+        with self.assertRaisesRegex(CurrentError,'MAX_AVAILABLE'):m.prepare({'mode':'maximum_output'})
         self.assertEqual(m.writes,[])
     def test_invalid_maximum_options_fail_without_output(self):
         m=MaximumMotor()

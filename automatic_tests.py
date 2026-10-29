@@ -6,9 +6,11 @@ from pathlib import Path
 import threading
 import time
 import uuid
-from urllib.parse import urlencode
+from protocol import generated as p
 from specialized_tests import finite, Stats
 from loaded_timeline import LoadedTimeline
+from workbench.recording import RecordingView
+from workbench.subjects import SETUP_COLUMNS, setup_columns, setup_parameters
 
 # Allow the 300 ms bootstrap phase and the next motor-status polling cycle.
 STARTUP_TIMEOUT_S = 2.0
@@ -21,12 +23,15 @@ class ScriptEnd(Exception):
 
 
 class AutomaticTests:
-    def __init__(self, root, motor, measurements, source, poll_supplies=None):
+    def __init__(self, root, motor, measurements, source, poll_supplies=None, subjects=None):
         self.root = Path(root)
         self.motor = motor
         self.measurements = measurements
+        measurements.active_executor = self
         self.source = source
         self.poll_supplies = poll_supplies
+        self.subjects = subjects
+        self.recorder=None
         self.lock = threading.RLock()
         self.live = None
         self.thread = None
@@ -133,7 +138,8 @@ class AutomaticTests:
                 records.append(json.loads(path.read_text(encoding='utf-8')))
             except (ValueError, OSError):
                 pass
-        return sorted(records, key=lambda r:r['startedAt'], reverse=True)[:200]
+        from workbench.specialized_runner import public_report
+        return [public_report(r) if r.get('specializedSchema')==2 else r for r in sorted(records, key=lambda r:r['startedAt'], reverse=True)[:200]]
 
     def recover_interrupted(self):
         for report in self.history():
@@ -146,11 +152,17 @@ class AutomaticTests:
         if not isinstance(test_id, str) or not re.fullmatch('[a-f0-9]{32}',test_id) or name not in ('data.csv','report.json','timeline.csv','timeline.jsonl'):
             raise ValueError('无效脚本记录')
         path = self.root/test_id/name
+        if name in ('timeline.csv','timeline.jsonl') and not path.exists() and self.recorder:
+            report=json.loads((self.root/test_id/'report.json').read_text())
+            return self.recorder.file(report.get('recordingId'),name)
         if not path.is_file():
             raise ValueError('文件不存在')
         return path
 
     def start(self, data):
+        if isinstance(data,dict) and data.get('suite') in ('performance','position','thermal'):
+            from workbench.specialized_runner import start_active
+            return start_active(self,data)
         config = self.validate(data)
         motor = self.motor
         with motor.action_lock:
@@ -158,17 +170,19 @@ class AutomaticTests:
                 raise ValueError('已有电机任务正在运行')
             if (self.measurements.status() or {}).get('state') in ('running','settling'):
                 raise ValueError('先结束当前被动专项采集，再启动自动脚本')
+            modes=(motor.snapshot or {}).get('capabilities',{}).get('modes',0) if motor.snapshot else motor.device.latest_snapshot().get('capabilities',{}).get('modes',0)
+            required=([4] if config['position'] else [])+([3] if config['speed'] or config.get('loadedMode')=='speed_hold' else [])+([1] if config['group']=='loaded' and config.get('loadedMode')!='speed_hold' else [])
+            if any(not modes&(1<<m) for m in required):raise ValueError('驱动板未声明本次脚本所需控制模式')
             source = self._brake_check(config)
             snapshot = motor._refresh()
             motor._healthy(snapshot, starting=True)
             device_current = motor._limit()
-            # /api/motor_profile changes the selected profile and is POST-only.
-            # Read the active profile already supplied by the read-only status.
-            profile = (snapshot.get('motorProfile') or {}).get('nameplate') or {}
-            ratio = profile.get('reduction_ratio')
+            subject = self.subjects() if self.subjects else {}
+            ratio = setup_parameters(subject)['ratio']
             if not finite(ratio) or ratio <= 0:
                 raise ValueError('未取得有效减速比')
-            speed_limit = motor._request('/api/get?id=11').get('value')
+            speed_limit = snapshot.get('limits',{}).get(str(p.OBJ_ROTOR_SPEED_ABS_MAX))
+            speed_limit = speed_limit/1000 if finite(speed_limit) else None
             if not finite(speed_limit) or speed_limit <= 0:
                 raise ValueError('无法确认设备当前速度上限')
             current_source='device' if config['currentMaxA'] is None else 'operator'
@@ -205,8 +219,8 @@ class AutomaticTests:
             if config.get('loadedMode')=='ramp' and (config['currentStepA']>config['currentMaxA'] or math.ceil(config['currentMaxA']/config['currentStepA'])*config['dwellS']>240):
                 raise ValueError('带载步长不能超过当前电流范围，累计保持时间不能超过 240 秒')
             motor.cancel = threading.Event()
-            motor.lease = time.monotonic()
             report = {'id':uuid.uuid4().hex,'startedAt':time.time(),'config':config,'running':True,
+                      'testSubject': subject,
                       'state':'starting','phase':'准备','outcome':None,'reason':'','stopConfirmed':None,
                       'ratio':ratio,'originOutputDeg':origin,'deviceCurrentLimitA':device_current,
                       'positionTargetsDeg':targets,'deviceTemperatureLimitC':device_temperature,
@@ -276,23 +290,22 @@ class AutomaticTests:
             with motor.lock:motor.run.update(elapsed=report['elapsedS'],reason=report.get('reason',''))
             with motor.lock:motor.run['steps']=len(report['steps'])
             if save:self.measurements._save(directory/'report.json',report)
-        def request(route):
-            try:
-                reply=motor._request(route,write=True)
-            except Exception as error:
-                if timeline:timeline.event('command_error',{'route':route,'error':str(error)})
-                raise
-            if timeline:timeline.event('command_ack',{'route':route,'response':reply})
-            return reply
+        targets={}
         def command(field,value):
             if motor.cancel.is_set():raise ScriptEnd('operator_stop','操作者停止')
-            request('/api/control/set?'+urlencode({'field':field,'value':value}))
+            oid,raw={'current_a':(p.OBJ_IQ_TARGET,round(value*1000)),
+                     'speed_rpm':(p.OBJ_VELOCITY_TARGET,round(value*1000)),
+                     'position_deg':(p.OBJ_POSITION_TARGET,round(value*ratio/360*1000000))}[field]
+            targets[oid]=raw
+            if mode is not None:
+                if motor.start_guard:motor.start_guard()
+                result=motor.device.set_object_target(oid,raw)
+                if timeline:timeline.event('command_ack',{'object':oid,'value':raw,'result':result})
             if field=='current_a':
                 with motor.lock:motor.run['targetA']=value
         def sample():
             nonlocal last_saved
             if motor.cancel.is_set():raise ScriptEnd('operator_stop','操作者停止')
-            if time.monotonic()-motor.lease > 2:raise ScriptEnd('page_timeout','工作台页面心跳超时')
             if timeline and timeline.error:raise ScriptEnd('recording_error',timeline.error)
             if poll_errors:raise ScriptEnd('power_supply_lost',poll_errors[0])
             if stage_deadline is not None and time.monotonic()>stage_deadline:
@@ -300,7 +313,7 @@ class AutomaticTests:
             snapshot=motor._refresh()
             ntc=snapshot.get('ntc') or {};state=snapshot['motor'];feedback=snapshot['feedback']
             temperature=ntc.get('temp_c')
-            if state.get('fault') or state.get('state')==3 or ntc.get('tripped') or ntc.get('tripped_latched'):
+            if state.get('fault') or state.get('state')==4 or ntc.get('tripped') or ntc.get('tripped_latched'):
                 report.update(protectionSeen=True,protectionObservedAt=time.time())
                 raise ScriptEnd('protection','设备实际报告保护，停止递增并结束脚本')
             motor._healthy(snapshot)
@@ -336,7 +349,9 @@ class AutomaticTests:
             report.update(lastNtcC=temperature,temperatureChangeC=temperature-report['initialNtcC'])
             row={'t':time.monotonic()-began,'position':pos,'speed':speed,'iq':iq,'temp':temperature,
                  'positionAt':feedback.get('position_at'),'feedbackAt':feedback.get('updated_at')}
-            writer.writerow([row['t'],time.time(),phase,mode,target,pos,speed,iq,feedback.get('id_a'),temperature,sensor.get('torque'),sensor.get('speed')])
+            writer.writerow([row['t'],time.time(),phase,mode,target,pos,speed,iq,feedback.get('id_a'),temperature,sensor.get('torque'),sensor.get('speed'),
+                             (report['testSubject'].get('motor') or {}).get('name',''),(report['testSubject'].get('driverBoard') or {}).get('name',''),
+                             *setup_columns(report['testSubject']).values(),feedback.get('position_deg'),feedback.get('speed_rpm')])
             if row['t']-last_saved>=.5:
                 publish(save=True);csv_file.flush();last_saved=row['t']
             return row
@@ -351,8 +366,17 @@ class AutomaticTests:
             return rows
         def enable(which,seconds):
             nonlocal mode,enabled_at,stage_deadline
+            if motor.cancel.is_set():raise ScriptEnd('operator_stop','操作者停止')
+            if motor.start_guard:motor.start_guard()
+            config_objects={p.OBJ_RUN_MODE:which,p.OBJ_DIRECTION:1,p.OBJ_IQ_TARGET:targets.get(p.OBJ_IQ_TARGET,0),p.OBJ_PHASE_RUN_LIMIT:0}
+            if which==3:config_objects[p.OBJ_VELOCITY_TARGET]=targets.get(p.OBJ_VELOCITY_TARGET,0)
+            if which==4:config_objects[p.OBJ_POSITION_TARGET]=targets.get(p.OBJ_POSITION_TARGET,0)
+            prepared=motor.device.prepare_run(config_objects)
+            if motor.cancel.is_set():raise ScriptEnd('operator_stop','操作者停止')
+            if motor.start_guard:motor.start_guard()
+            motor.device.start(prepared)
+            if timeline:timeline.event('command_ack',{'opcode':'START','mode':which,'preparedId':prepared})
             mode=which;enabled_at=time.monotonic();stage_deadline=enabled_at+seconds+10
-            request(f'/api/motor?enable=1&mode={which}&seconds={min(255,math.ceil(seconds+15))}')
         def disable():
             nonlocal mode,drive_stopped,stage_deadline
             def log_stop(route,reply):
@@ -386,15 +410,13 @@ class AutomaticTests:
             return item
         try:
             if fixed:
-                timeline=LoadedTimeline(directory,self.source,self.measurements.frames,ratio,
-                                        {'config':config,'sourceAtStart':report['sourceAtStart'],'ratio':ratio})
+                timeline=RecordingView(self.recorder,'自动定值带载',ratio,test_subject=report['testSubject']) if self.recorder else LoadedTimeline(directory,self.source,self.measurements.frames,ratio,
+                                        {'config':config,'sourceAtStart':report['sourceAtStart'],'ratio':ratio,'testSubject':report['testSubject']})
                 if self.poll_supplies:
                     poll_thread=threading.Thread(target=poll_supplies,daemon=True);poll_thread.start()
             csv_file=(directory/'data.csv').open('w',newline='',encoding='utf-8-sig')
             writer=csv.writer(csv_file)
-            writer.writerow(['elapsed_s','pc_received_unix_s','phase','mode','target','output_position_deg','output_speed_rpm','actual_iq_A','actual_id_A','motor_ntc_C','torque_sensor_Nm','torque_sensor_rpm'])
-            request('/api/telem?enable=1&period_ms=20')
-            sample()
+            writer.writerow(['elapsed_s','pc_received_unix_s','phase','mode','target','output_position_deg','output_speed_rpm','actual_iq_A','actual_id_A','motor_ntc_C','torque_sensor_Nm','torque_sensor_rpm','motor_name','driver_board_name',*SETUP_COLUMNS,'rotor_position_deg','rotor_speed_rpm'])
             if config['group']=='no_load':
                 if config['position']:
                     phase='空载定位往返';target=report['originOutputDeg'];command('position_deg',target)
@@ -402,7 +424,7 @@ class AutomaticTests:
                     for cycle in range(int(config['cycles'])):
                         route.extend((cycle,p,'forward') for p in report['positionTargetsDeg'])
                         route.extend((cycle,p,'reverse') for p in reversed(report['positionTargetsDeg']))
-                    enable(3,len(route)*config['dwellS'])
+                    enable(4,len(route)*config['dwellS'])
                     for cycle,point,direction in route:
                         target=point;command('position_deg',target);rows=hold(config['dwellS'])
                         settled=list({r['positionAt']:r for r in rows if r['t']>=rows[-1]['t']-.4}.values())
@@ -431,7 +453,7 @@ class AutomaticTests:
                     search=report['speedSearch'];search['state']='running'
                     search_deadline=time.monotonic()+config['speedSearchDurationS']
                     ceiling=report['controllerSpeedCeilingRpm']
-                    enable(2,config['speedSearchDurationS'])
+                    enable(3,config['speedSearchDurationS'])
                     level=0
                     while True:
                         level+=1
@@ -456,7 +478,7 @@ class AutomaticTests:
                 field='speed_rpm' if speed_hold else 'current_a'
                 target=config['targetSpeedRpm'] if speed_hold else config['targetIqA']
                 phase='低速闭环带载启动' if speed_hold else '指定 Iq 带载启动'
-                command(field,0);enable(2 if speed_hold else 5,config['durationS']+config['settleS']+2)
+                command(field,0);enable(3 if speed_hold else 1,config['durationS']+config['settleS']+2)
                 startup_deadline=time.monotonic()+STARTUP_TIMEOUT_S
                 while sample() and (motor.snapshot.get('motor') or {}).get('state')!=2:
                     if time.monotonic()>=startup_deadline:raise ScriptEnd('start_timeout','电机未进入运行状态')
@@ -465,6 +487,7 @@ class AutomaticTests:
                 phase='低速闭环运行等待' if speed_hold else '指定 Iq 运行等待';hold(config['settleS'])
                 timeline.start_recording()
                 report['recordingStartedAt']=timeline.recording_at
+                if isinstance(timeline,RecordingView):report['recordingId']=timeline.identifier
                 phase='恒速带载 · 全参数时间序列记录' if speed_hold else '恒流带载 · 全参数时间序列记录';publish(save=True)
                 hold(config['durationS'])
                 timeline.end_measurement()
@@ -477,7 +500,7 @@ class AutomaticTests:
                 count=math.ceil(config['currentMaxA']/config['currentStepA'])
                 measurement=self.measurements.start({'kind':'loaded_peak','durationS':min(3600,count*config['dwellS']+30),'name':'自动带载逐帧扭矩记录'})
                 recording_id=measurement['id'];report['rawTorqueRecordId']=recording_id
-                command('current_a',0);enable(5,count*config['dwellS'])
+                command('current_a',0);enable(1,count*config['dwellS'])
                 for i in range(count):
                     target=min(config['currentMaxA'],round((i+1)*config['currentStepA'],3));command('current_a',target)
                     hold(config['dwellS'])

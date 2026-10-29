@@ -9,11 +9,35 @@ import unittest
 import urllib.error
 import urllib.request
 from unittest.mock import patch
-from workbench_recordings import WorkbenchRecordings
+from workbench.recording import RecordManager
 from background_recording import BackgroundRecording
 
 
 class WorkbenchRecordingTests(unittest.TestCase):
+    def test_selected_names_are_frozen_in_report_timeline_and_background(self):
+        from workbench.subjects import TestSubjects
+
+        subjects = TestSubjects(Path(self.temp.name)/'subjects.json')
+        motor = subjects.create('motor', '电机 A')['item']
+        board = subjects.create('driverBoard', '驱动板 A')['item']
+        subjects.select({'motorId': motor['id'], 'driverBoardId': board['id']})
+        self.manager.subjects = subjects.selection
+        self.manager.diagnostics = BackgroundRecording(Path(self.temp.name)/'background', self.source, self.frames)
+        report = self.manager.start({})
+        replacement = subjects.create('motor', '电机 B')['item']
+        subjects.select({'motorId': replacement['id']})
+        time.sleep(.06)
+        report = self.manager.stop(report['id'])
+        self.assertEqual(report['testSubject'], {'motor': motor, 'driverBoard': board})
+        with self.manager.file(report['id'], 'timeline.csv').open(encoding='utf-8-sig') as stream:
+            rows = list(csv.DictReader(stream))
+        self.assertTrue(rows)
+        self.assertTrue(all(row['motor_name']=='电机 A' and row['driver_board_name']=='驱动板 A' for row in rows))
+        rows = [json.loads(line) for line in self.manager.file(report['id'], 'timeline.jsonl').read_text().splitlines()]
+        self.assertTrue(all(row['motor_name']=='电机 A' and row['driver_board_name']=='驱动板 A' for row in rows))
+        manifest = json.loads((Path(report['backgroundDirectory'])/'manifest.json').read_text())
+        self.assertEqual(manifest['workbenchRecording']['testSubject'], report['testSubject'])
+
     def test_background_follows_homepage_start_stop_and_restarts_cleanly(self):
         diagnostics = BackgroundRecording(Path(self.temp.name)/'background',self.source,self.frames)
         self.manager.diagnostics = diagnostics
@@ -58,7 +82,7 @@ class WorkbenchRecordingTests(unittest.TestCase):
         self.drop = False
         self.target = .2
         self.frame_config = {'protocol':'hex6','torqueDecimals':2,'speedDecimals':1}
-        self.manager = WorkbenchRecordings(Path(self.temp.name), self.source, self.frames)
+        self.manager = RecordManager(Path(self.temp.name), self.source, self.frames)
 
     def tearDown(self):
         if self.manager.active():self.manager.stop(self.manager.status()['id'])
@@ -100,7 +124,7 @@ class WorkbenchRecordingTests(unittest.TestCase):
         self.assertTrue({'motor','brake','motorSupply','sensor_frame','motor_command_ack'} <= {row['source'] for row in rows})
         self.assertTrue(any(row['commanded_iq_A']=='0.7' for row in rows))
         self.assertEqual(json.loads(next(row for row in rows if row['source']=='brake')['payload_json'])['snapshot']['futureField'],123)
-        reloaded = WorkbenchRecordings(Path(self.temp.name),self.source,self.frames)
+        reloaded = RecordManager(Path(self.temp.name),self.source,self.frames)
         self.assertEqual(reloaded.history()[0]['id'],report['id'])
 
     def test_missing_encoder_ratio_and_sensor_are_kept_empty(self):

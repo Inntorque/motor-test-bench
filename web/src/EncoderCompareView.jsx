@@ -1,6 +1,8 @@
 import React, {useEffect,useMemo,useRef,useState} from 'react';
 import {characteristicAxisMax,motorTemperatureC} from './model.js';
 import './EncoderCompareView.css';
+import {EncoderBins} from './encoderBins.js';
+import {useChartVisibility} from './useChartVisibility.js';
 
 // User-confirmed encoder-to-output reduction ratio; this view does not reuse
 // the motor profile value because the requested ratio differs from it.
@@ -25,9 +27,49 @@ function savedTorqueMax(){
   }catch{return 5;}
 }
 
-function EncoderCompareView({devices}) {
-  const sensor=devices?.['torque-sensor'];
-  const motor=devices?.['current-motor'];
+const EncoderChartDrawing=React.memo(function EncoderChartDrawing({chart,torqueMax,chartRef}) {
+  return (
+    <div className="encoder-chart-wrap" ref={chartRef}>
+      <svg className="encoder-chart" viewBox={`0 0 ${W} ${H}`} role="img"
+        aria-label="制动扭矩与扭矩传感器转速、编码器推算转速、电机温度对比曲线">
+        <defs><clipPath id="encoder-plot"><rect x={L} y={T} width={W-L-R} height={H-T-B}/></clipPath></defs>
+        {Array.from({length:5},(_,i)=>{
+          const y=T+i*(H-T-B)/4;
+          return <g key={i}>
+            <line x1={L} x2={W-R} y1={y} y2={y} stroke={i===4?'#c8d2de':'#e7ecf2'} strokeDasharray="4 5"/>
+            <text x={L-9} y={y+4} textAnchor="end" fill="#607087">{tick(chart.speedMax-i*chart.speedMax/4)}</text>
+            <text x={W-R+9} y={y+4} fill="#607087">{tick(chart.tempMax-i*chart.tempMax/4)}</text>
+          </g>;
+        })}
+        {Array.from({length:6},(_,i)=>{
+          const x=L+i*(W-L-R)/5;
+          return <g key={i}>
+            <line x1={x} x2={x} y1={T} y2={H-B} stroke="#f1f3f6"/>
+            <text x={x} y={H-B+22} textAnchor="middle" fill="#7b8798">{tick(i*torqueMax/5)}</text>
+          </g>;
+        })}
+        <text x={L} y={15} fill="#318978" fontSize="12">转速 rpm</text>
+        <text x={W-R} y={15} fill="#d64545" fontSize="12" textAnchor="end">温度 °C</text>
+        <text x={(L+W-R)/2} y={H-6} textAnchor="middle" fill="#607087" fontSize="12">制动扭矩 N·m</text>
+        <g clipPath="url(#encoder-plot)">
+          <path d={chart.sensorPath} fill="none" stroke="#318978" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round"/>
+          <path d={chart.encoderPath} fill="none" stroke="#d28131" strokeWidth="2.2" strokeDasharray="6 4" strokeLinejoin="round" strokeLinecap="round"/>
+          <path d={chart.tempPath} fill="none" stroke="#d64545" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round"/>
+        </g>
+      </svg>
+      {!chart.hasData&&<div className="encoder-empty">等待真实制动扭矩数据</div>}
+    </div>
+  );
+});
+
+function EncoderChart(props) {
+  const [chartRef,visible]=useChartVisibility();
+  const drawn=useRef(props);
+  if(visible)drawn.current=props;
+  return <EncoderChartDrawing {...drawn.current} chartRef={chartRef}/>;
+}
+
+function EncoderCompareView({sensor,motor}) {
   const sensorSnapshot=sensor?.connected?sensor.snapshot:null;
   const motorSnapshot=motor?.connected?motor.snapshot:null;
   const feedback=motorSnapshot?.feedback;
@@ -61,12 +103,15 @@ function EncoderCompareView({devices}) {
 
   const latest=useRef({});
   latest.current={torque:torque==null?null:Math.abs(torque),temp:temperature,sensorRpm,encoderRpm};
-  const [history,setHistory]=useState([]);
+  const bins=useRef(null);
+  if(!bins.current)bins.current=new EncoderBins(torqueMax,MAX_POINTS);
+  const [revision,setRevision]=useState(0);
   useEffect(()=>{
     const append=()=>{
       const point=latest.current;
       if(!Number.isFinite(point.torque))return;
-      setHistory(previous=>[...previous,{t:Date.now(),...point}].slice(-MAX_POINTS));
+      bins.current.append(point);
+      setRevision(value=>value+1);
     };
     append();
     const timer=window.setInterval(append,SAMPLE_MS);
@@ -74,26 +119,8 @@ function EncoderCompareView({devices}) {
   },[]);
 
   const chart=useMemo(()=>{
-    const limit=torqueMax;
-    const width=Math.max(.001,limit/80);
-    const bins=new Map();
-    let clipped=false;
-    for(const point of history){
-      const x=point.torque;
-      if(!Number.isFinite(x))continue;
-      if(x>limit){clipped=true;continue;}
-      const key=Math.floor(x/width);
-      let bin=bins.get(key);
-      if(!bin){bin={x:0,count:0,temp:0,tempN:0,sensor:0,sensorN:0,encoder:0,encoderN:0};bins.set(key,bin);}
-      bin.x+=x;bin.count++;
-      if(Number.isFinite(point.temp)){bin.temp+=point.temp;bin.tempN++;}
-      if(Number.isFinite(point.sensorRpm)){bin.sensor+=point.sensorRpm;bin.sensorN++;}
-      if(Number.isFinite(point.encoderRpm)){bin.encoder+=point.encoderRpm;bin.encoderN++;}
-    }
-    const rows=[...bins.values()].map(bin=>({torque:bin.x/bin.count,
-      temp:bin.tempN?bin.temp/bin.tempN:null,
-      sensorRpm:bin.sensorN?bin.sensor/bin.sensorN:null,
-      encoderRpm:bin.encoderN?bin.encoder/bin.encoderN:null})).sort((a,b)=>a.torque-b.torque);
+    bins.current.setLimit(torqueMax);
+    const limit=torqueMax,rows=bins.current.rows(),clipped=bins.current.clipped>0;
     const speedMax=characteristicAxisMax(Math.max(1,...rows.map(row=>Math.max(row.sensorRpm??0,row.encoderRpm??0))));
     const tempMax=characteristicAxisMax(Math.max(10,...rows.map(row=>row.temp??0)));
     const plotW=W-L-R,plotH=H-T-B;
@@ -113,7 +140,7 @@ function EncoderCompareView({devices}) {
     return {speedMax,tempMax,sensorPath:pathFor('sensorRpm',ySpeed),
       encoderPath:pathFor('encoderRpm',ySpeed),tempPath:pathFor('temp',yTemp),
       hasData:rows.length>0,clipped};
-  },[history,torqueMax]);
+  },[revision,torqueMax]);
 
   const temperatureStatus=!motor?.connected?'电机未连接':ntc?.fault?'NTC 故障'
     :temperature==null?'温度无效或已过期':ntc?.tripped||ntc?.tripped_latched?'过温保护':'NTC 实时反馈';
@@ -154,36 +181,7 @@ function EncoderCompareView({devices}) {
       </article>
     </div>
     <p className="encoder-diff">差值（扭矩传感器 − 编码器）：{diffText} <span>转速均取幅值 · 减速比 9.78</span></p>
-    <div className="encoder-chart-wrap">
-      <svg className="encoder-chart" viewBox={`0 0 ${W} ${H}`} role="img"
-        aria-label="制动扭矩与扭矩传感器转速、编码器推算转速、电机温度对比曲线">
-        <defs><clipPath id="encoder-plot"><rect x={L} y={T} width={W-L-R} height={H-T-B}/></clipPath></defs>
-        {Array.from({length:5},(_,i)=>{
-          const y=T+i*(H-T-B)/4;
-          return <g key={i}>
-            <line x1={L} x2={W-R} y1={y} y2={y} stroke={i===4?'#c8d2de':'#e7ecf2'} strokeDasharray="4 5"/>
-            <text x={L-9} y={y+4} textAnchor="end" fill="#607087">{tick(chart.speedMax-i*chart.speedMax/4)}</text>
-            <text x={W-R+9} y={y+4} fill="#607087">{tick(chart.tempMax-i*chart.tempMax/4)}</text>
-          </g>;
-        })}
-        {Array.from({length:6},(_,i)=>{
-          const x=L+i*(W-L-R)/5;
-          return <g key={i}>
-            <line x1={x} x2={x} y1={T} y2={H-B} stroke="#f1f3f6"/>
-            <text x={x} y={H-B+22} textAnchor="middle" fill="#7b8798">{tick(i*torqueMax/5)}</text>
-          </g>;
-        })}
-        <text x={L} y={15} fill="#318978" fontSize="12">转速 rpm</text>
-        <text x={W-R} y={15} fill="#d64545" fontSize="12" textAnchor="end">温度 °C</text>
-        <text x={(L+W-R)/2} y={H-6} textAnchor="middle" fill="#607087" fontSize="12">制动扭矩 N·m</text>
-        <g clipPath="url(#encoder-plot)">
-          <path d={chart.sensorPath} fill="none" stroke="#318978" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round"/>
-          <path d={chart.encoderPath} fill="none" stroke="#d28131" strokeWidth="2.2" strokeDasharray="6 4" strokeLinejoin="round" strokeLinecap="round"/>
-          <path d={chart.tempPath} fill="none" stroke="#d64545" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round"/>
-        </g>
-      </svg>
-      {!chart.hasData&&<div className="encoder-empty">等待真实制动扭矩数据</div>}
-    </div>
+    <EncoderChart chart={chart} torqueMax={torqueMax}/>
     <div className="encoder-legend">
       <span><i style={{background:'#318978'}}/>扭矩传感器输出转速 rpm（左轴）</span>
       <span><i style={{background:'#d28131'}}/>编码器推算转速 rpm（左轴，虚线）</span>

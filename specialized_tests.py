@@ -49,10 +49,12 @@ class Stats:
 
 
 class SpecializedTests:
-    def __init__(self, root, source, frames):
+    def __init__(self, root, source, frames, subjects=None):
         self.root = Path(root)
         self.source = source
         self.frames = frames
+        self.subjects = subjects
+        self.active_executor = None
         self.lock = threading.RLock()
         self.control = threading.Lock()
         self.thread = None
@@ -149,10 +151,11 @@ class SpecializedTests:
                     reports.append(json.loads(path.read_text(encoding='utf-8')))
                 except (ValueError, OSError):
                     continue
-        return sorted(reports, key=lambda report: report['startedAt'], reverse=True)[:200]
+        from workbench.specialized_runner import public_report
+        return [public_report(r) if r.get('specializedSchema')==2 else r for r in sorted(reports, key=lambda report: report['startedAt'], reverse=True)[:200]]
 
     def file(self, test_id, name):
-        if not re.fullmatch(r'[a-f0-9]{32}', test_id) or name not in ('data.csv', 'report.json'):
+        if not re.fullmatch(r'[a-f0-9]{32}', test_id) or name not in ('data.csv', 'report.json', 'timeline.jsonl'):
             raise ValueError('无效记录文件')
         path = self.root / test_id / name
         if not path.is_file():
@@ -160,6 +163,9 @@ class SpecializedTests:
         return path
 
     def start(self, data):
+        if isinstance(data,dict) and data.get('suite') in ('performance','thermal'):
+            from workbench.specialized_runner import start_passive
+            return start_passive(self,data)
         with self.control:
             if self.thread and self.thread.is_alive():
                 raise ValueError('已有专项测试正在采集，请先结束当前采集')
@@ -171,6 +177,7 @@ class SpecializedTests:
             self.cancel = threading.Event()
             now = time.time()
             report = {'id': uuid.uuid4().hex, 'kind': config['kind'], 'name': config['name'],
+                      'testSubject': self.subjects() if self.subjects else {},
                       'config': config, 'state': 'settling' if config['settleS'] else 'running',
                       'startedAt': now, 'elapsedS': 0, 'reason': '', 'valid': False,
                       'sensorSamples': 0, 'temperatureSamples': 0,
@@ -242,7 +249,9 @@ class SpecializedTests:
                 writer = csv.writer(file)
                 writer.writerow(['sample_type', 'elapsed_s', 'pc_received_unix_s', 'sensor_sequence', 'included_in_statistics',
                                  'torque_Nm', 'speed_rpm', 'shaft_power_W', 'target_iq_A', 'actual_iq_A', 'actual_id_A',
-                                 'motor_snapshot_unix_s', 'motor_ntc_C'])
+                                 'motor_snapshot_unix_s', 'motor_ntc_C', 'motor_name', 'driver_board_name'])
+                subject = initial.get('testSubject') or {}
+                names = [(subject.get('motor') or {}).get('name', ''), (subject.get('driverBoard') or {}).get('name', '')]
                 while True:
                     elapsed = time.monotonic() - begin
                     if self.cancel.is_set():
@@ -281,7 +290,7 @@ class SpecializedTests:
                     if motor_fresh and ntc.get('valid') and not ntc.get('fault') and finite(ntc.get('age_s')) and 0 <= ntc['age_s'] + max(0, time.time()-snapshot.get('receivedAt', 0)) <= 1.5 and finite(ntc.get('temp_c')) and snapshot.get('receivedAt') != last_temp:
                         last_temp = snapshot['receivedAt']
                         temp_count += 1
-                        writer.writerow(['temperature', elapsed, last_temp, '', measured, '', '', '', target, iq, id_a, last_temp, ntc['temp_c']])
+                        writer.writerow(['temperature', elapsed, last_temp, '', measured, '', '', '', target, iq, id_a, last_temp, ntc['temp_c']]+names)
                         if measured:
                             stats['temperature'].add(ntc['temp_c'])
                             latest_points['temperature'] = [elapsed, ntc['temp_c']]
@@ -310,7 +319,7 @@ class SpecializedTests:
                                 used = wall >= initial['startedAt'] + config['settleS']
                                 power = abs(torque * speed) / 9550 * 1000
                                 raw_count += 1
-                                writer.writerow(['sensor', wall - initial['startedAt'], wall, seq, used, torque, speed, power, target, iq, id_a, snapshot.get('receivedAt') if motor_fresh else '', ''])
+                                writer.writerow(['sensor', wall - initial['startedAt'], wall, seq, used, torque, speed, power, target, iq, id_a, snapshot.get('receivedAt') if motor_fresh else '', '']+names)
                                 if used:
                                     stats['torque'].add(torque); stats['speed'].add(speed); stats['powerW'].add(power)
                                     latest_points['torque'] = [wall-initial['startedAt'], torque]
@@ -323,7 +332,7 @@ class SpecializedTests:
                                 torque, speed = sensor['torque'], sensor['speed']
                                 power = abs(torque * speed) / 9550 * 1000
                                 raw_count += 1
-                                writer.writerow(['sensor', wall-initial['startedAt'], wall, '', measured, torque, speed, power, target, iq, id_a, snapshot.get('receivedAt') if motor_fresh else '', ''])
+                                writer.writerow(['sensor', wall-initial['startedAt'], wall, '', measured, torque, speed, power, target, iq, id_a, snapshot.get('receivedAt') if motor_fresh else '', '']+names)
                                 if measured:
                                     stats['torque'].add(torque); stats['speed'].add(speed); stats['powerW'].add(power)
                                     latest_points['torque'] = [wall-initial['startedAt'], torque]

@@ -5,7 +5,7 @@ import unittest
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import hardware_bridge as bridge
 
@@ -84,6 +84,67 @@ class RuPowerTests(unittest.TestCase):
         for change in ({'parity':'E'},{'stopbits':2}):
             with self.assertRaises(bridge.BridgeError):bridge.normalized_config(self.config|change,'motor-supply')
         with self.assertRaises(bridge.BridgeError):bridge.normalized_config(self.config,'brake-supply')
+        with self.assertRaisesRegex(bridge.BridgeError,'只支持万瑞达'):
+            bridge.normalized_config(self.config|{'protocol':'ssj'},'motor-supply')
+
+    def test_saved_motor_ssj_profile_migrates_to_ru_before_connecting(self):
+        from types import SimpleNamespace
+        from device_connections import ConnectionManager
+        motor=Mock(connected=False,config=None)
+        motor.connect.side_effect=lambda config:dict(connected=True,config=config)
+        brake=Mock(connected=True,config={'device':'BRAKE'})
+        sensor=Mock(connected=True,config={'device':'SENSOR'})
+        drive=Mock();drive.status.return_value={'connected':True}
+        api=dict(bridge.CONNECTIONS.api,CHANNELS={'motor-supply':motor,'brake-supply':brake},
+                 TORQUE_SENSOR=sensor,CURRENT_MOTOR=drive)
+        manager=ConnectionManager(api,'unused-connections.json')
+        profile={'config':self.config|{'protocol':'ssj','currentDecimals':3}}
+        with patch.object(manager,'profiles',return_value={'motor-supply':profile}), \
+                patch.object(manager,'remember') as remember, \
+                patch('device_connections.list_ports.comports',return_value=[SimpleNamespace(device='TEST_RU',vid=1)]):
+            manager._run({})
+        config=motor.connect.call_args.args[0]
+        self.assertEqual((config['protocol'],config['device'],config['currentDecimals']),('ru','TEST_RU',2))
+        remember.assert_called_once_with('motor-supply',config)
+        brake.connect.assert_not_called()
+        self.assertIn('电机电源：已连接 TEST_RU',manager.status()['report'])
+
+    def test_unbound_motor_supply_discovery_only_probes_ru(self):
+        from types import SimpleNamespace
+        from device_connections import ConnectionManager
+        motor=Mock(connected=False,config=None)
+        brake=Mock(connected=True,config={'device':'BRAKE'})
+        sensor=Mock(connected=True,config={'device':'SENSOR'})
+        drive=Mock();drive.status.return_value={'connected':True}
+        probe=Mock();probe.connect.return_value={'snapshot':{'settings':[1,2400,20000]}}
+        factory=Mock(return_value=probe)
+        api=dict(bridge.CONNECTIONS.api,CHANNELS={'motor-supply':motor,'brake-supply':brake},
+                 TORQUE_SENSOR=sensor,CURRENT_MOTOR=drive,PowerSupplyChannel=factory)
+        manager=ConnectionManager(api,'unused-connections.json')
+        with patch.object(manager,'profiles',return_value={}), \
+                patch('device_connections.list_ports.comports',return_value=[SimpleNamespace(device='TEST_RU',vid=1)]), \
+                patch('device_connections.serial.Serial',side_effect=OSError('not a streaming sensor')):
+            manager._run({})
+        factory.assert_called_once_with('discovery')
+        self.assertEqual(probe.connect.call_args.args[0]['protocol'],'ru')
+        self.assertTrue(any(item.get('type')=='ru' for item in manager.status()['candidates']))
+        brake.connect.assert_not_called()
+
+    def test_motor_on_preserves_panel_24v_20a_and_only_writes_output_coil(self):
+        self.transport.holdings[150]=20000
+        self.channel.connect(self.config)
+        self.transport.frames.clear()
+        snapshot=self.channel.set_output(True,{'voltage':24,'current':20})
+        self.assertEqual(snapshot['settings'][1:3],[2400,20000])
+        self.assertEqual([struct.unpack('>BBHH',f[:6]) for f in self.transport.writes()],[(1,5,133,0xff00)])
+
+    def test_wrong_panel_preset_never_rewrites_va_or_enables(self):
+        self.channel.connect(self.config)
+        self.transport.frames.clear()
+        with self.assertRaisesRegex(bridge.BridgeError,'5 A'):
+            self.channel.set_output(True,{'voltage':24,'current':20})
+        self.assertEqual(self.transport.holdings[150],5000)
+        self.assertEqual(self.transport.writes(),[])
 
     def test_connect_reads_only_documented_registers_and_scales_from_device(self):
         state=self.channel.connect(self.config)
@@ -194,6 +255,10 @@ class RuPowerTests(unittest.TestCase):
         with patch.object(bridge,'PORT',port),patch.object(bridge,'CHANNELS',{'motor-supply':self.channel}):
             worker.start()
             try:
+                with self.assertRaises(urllib.error.HTTPError) as failure:
+                    post('connect',{'protocol':'ssj','device':'TEST_RU','transport':'serial'})
+                self.assertEqual(failure.exception.code,400)
+                self.assertEqual(self.transport.frames,[])
                 with self.assertRaises(urllib.error.HTTPError) as failure:post('limits',{'maxVoltage':20,'maxCurrent':2},'bad')
                 self.assertEqual(failure.exception.code,403)
                 post('connect',{'protocol':'ru','device':'TEST_RU','transport':'serial'})
