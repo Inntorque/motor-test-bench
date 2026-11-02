@@ -8,7 +8,7 @@
 
 每台测试电脑先运行本机连接服务，再从网页选择 APP。服务下载并校验该 APP 的独立网页版本，使用原本的同源控制、心跳、SSE、下载和记录接口。页面可分别维护，运行中的测试不会被网页更新中断；控制接口指纹不匹配时要求更新本机运行包。USB-CAN / RS485、测试记录和控制任务仍在测试电脑，不由 GitHub Pages 直接访问硬件。
 
-`gateway/apps.json` 管理入口与端口，`site/` 为最终 Pages 内容，`dist/` 继续提供原桌面测功机页面。新增 Windows 独立运行包、Ubuntu / Python 运行包及对应启停脚本。构建和部署从 `motor-test-bench` 分支发布，不合并 `main`；发布前须由管理员确认 `github-pages` 环境允许该分支。部署顺序、逐 APP 更新、配置、原协议/固件限制及验证边界见 [总网关部署与使用说明](docs/gateway-deployment.md)。
+`gateway/apps.json` 管理入口与端口，`site/` 为最终 Pages 内容，`dist/` 继续提供原桌面测功机页面。新增 Windows 独立运行包、Ubuntu / Python 运行包及对应启停脚本。`motor-test-bench` 保留为开发分支，已校验版本合入同一仓库的 `main`，由 `main` 的工作流更新原 Pages 网址。总网关、各 APP 网页版本与本机运行包分别维护。部署顺序、逐 APP 更新、配置、原协议/固件限制及验证边界见 [总网关部署与使用说明](docs/gateway-deployment.md)。
 
 发布前的隔离副本检查通过：干净依赖安装、**Python 全量 260/260、JavaScript 51/51**、像素头像/配置/最大输出/专项四组页面检查、网页构建、两个运行包及文件校验和核对。发布工作流另外在 Windows 上使用包内解释器验证三个离线 HTTP 应用；这些软件检查不连接真实设备，USB-CAN、RS485、固件匹配及实际测试仍需在测试电脑验收。
 

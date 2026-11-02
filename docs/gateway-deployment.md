@@ -52,8 +52,8 @@ python scripts/build_gateway_package.py --windows
 
 ## 一次推送的部署顺序
 
-Pages 来源使用 Actions，发布工作流监听 `motor-test-bench`，依次执行构建/软件检查、Windows 运行包构建、Pages 内容装配与部署，不合并 `main`。
+Pages 来源使用 Actions。`motor-test-bench` 保留为开发分支，已校验版本合入同一仓库的 `main`；发布工作流只监听 `main`，依次执行构建/软件检查、Windows 运行包构建、Pages 内容装配与部署。仍更新原地址 `https://inntorque.github.io/motor-test-bench/`，首页为总网关，原工作台从“测功机”APP 进入。
 
-推送前，仓库管理员须在 **Settings → Environments → github-pages → Deployment branches** 确认允许 `motor-test-bench`。环境允许分支是 GitHub 仓库设置，无法仅靠代码推送修改；只允许 `main` 时，分支代码推送可以成功，但 Pages 部署会被拒绝。其他分支的部署权限由仓库发布策略决定，不自动删除。参见 [GitHub Pages 自定义工作流](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)。
+`github-pages` 环境沿用已有的 `main` 部署许可，不需要放行开发分支或新建环境。开发分支推送不触发正式 Pages 部署；正式发布由 `main` 的构建结果生成，不能把工作目录的缓存产物直接当成线上版本。参见 [GitHub Pages 自定义工作流](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)。
 
-校验通过且部署分支已放行后，推送 `motor-test-bench`，等待 Actions 与 Pages 部署成功，再在测试电脑下载对应运行包、授予本机网络权限并实际连接验证。校验通过降低部署失败概率，不保证外部网络、GitHub 服务、驱动或实物通信必然成功。需要回退时，重新部署上一版 Pages 工作流产物并使用匹配的本机运行包；不覆盖或删除测试记录。
+校验通过后同步开发分支和 `main`，等待 `main` 的 Actions 与 Pages 部署成功，再在测试电脑下载对应运行包、授予本机网络权限并实际连接验证。校验通过降低部署失败概率，不保证外部网络、GitHub 服务、驱动或实物通信必然成功。需要回退时，重新部署上一版 Pages 工作流产物并使用匹配的本机运行包；不覆盖或删除测试记录。

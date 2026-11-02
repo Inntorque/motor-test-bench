@@ -3,7 +3,7 @@ name: Deploy Inntorque test gateway to GitHub Pages
 on:
   push:
     branches:
-      - motor-test-bench
+      - main
   workflow_dispatch:
 
 permissions:
