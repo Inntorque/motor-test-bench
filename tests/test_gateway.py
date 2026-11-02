@@ -219,7 +219,7 @@ class GatewaySourceTests(unittest.TestCase):
 class GatewayIntegrationTests(unittest.TestCase):
     def test_three_original_http_apps_without_device_io(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             for path in ROOT.glob('*.py'):
                 shutil.copy2(path, root / path.name)
             for name in ['gateway', 'workbench', 'protocol', 'profiles', 'dist']:
