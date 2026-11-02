@@ -32,6 +32,31 @@ const movingRegions = Object.entries({
   };
 });
 const types = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png'};
+async function checkCentered(page) {
+  const alignment = await page.locator('.app-icon canvas').evaluateAll(canvases => canvases.map(canvas => {
+    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let left = canvas.width, right = -1, top = canvas.height, bottom = -1;
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < canvas.width; x++) {
+        if (!pixels[(y * canvas.width + x) * 4 + 3]) continue;
+        left = Math.min(left, x); right = Math.max(right, x);
+        top = Math.min(top, y); bottom = Math.max(bottom, y);
+      }
+    }
+    const image = canvas.getBoundingClientRect(), tile = canvas.parentElement.getBoundingClientRect();
+    return {
+      visible: right >= left && bottom >= top,
+      content: [(left + right + 1 - canvas.width) / 2, (top + bottom + 1 - canvas.height) / 2],
+      frame: [image.x + image.width / 2 - tile.x - tile.width / 2, image.y + image.height / 2 - tile.y - tile.height / 2],
+    };
+  }));
+  for (const icon of alignment) {
+    assert.ok(icon.visible, 'motor must be visible before checking its center');
+    assert.ok(icon.content.every(offset => Math.abs(offset) <= 1.5), `motor silhouette is off-center: ${JSON.stringify(icon.content)}`);
+    assert.ok(icon.frame.every(offset => Math.abs(offset) < .01), `canvas is off-center in its tile: ${JSON.stringify(icon.frame)}`);
+  }
+  return alignment;
+}
 const server = createServer(async (request, response) => {
   const path = new URL(request.url, 'http://localhost').pathname;
   try {
@@ -76,6 +101,7 @@ try {
   assert.deepEqual(info.sizes, [[240,240], [240,240], [240,240]]);
   assert.equal(info.pixels, true);
   assert.deepEqual(info.names, ['测功机', 'SG-6010HB', '7010 上位机']);
+  const alignment = await checkCentered(page);
   const images = await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => c.toDataURL()));
   assert.equal(new Set(images).size, 3, 'shared renderer must preserve three distinct motors');
   const idle = await page.evaluate(() => window.iconProbe.frames);
@@ -107,6 +133,7 @@ try {
     const fps = (end.frames - start.frames) / ((end.time - start.time) / 1000);
     assert.ok(fps > 0 && fps <= 26, `unexpected draw rate: ${fps}`);
     rates.push(Number(fps.toFixed(1)));
+    await checkCentered(page);
     await page.screenshot({path: resolve(output, `gateway-hover-${index}.png`)});
     const after = await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => c.toDataURL()));
     for (let other = 0; other < 3; other++) if (other !== index) assert.equal(after[other], before[other], 'other APPs must stay frozen');
@@ -157,9 +184,10 @@ try {
   await page.setViewportSize({width: 390, height: 844});
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   assert.deepEqual(await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => [c.width, c.height])), info.sizes);
+  await checkCentered(page);
   await page.screenshot({path: resolve(output, 'gateway-mobile.png')});
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({passed: true, contexts: info.contexts, sizes: info.sizes, hoverFps: rates, hoverScale: 1.08, fixedTile: true, idleStatic: true, hoverOnly: true, fixedHousingAndCamera: true, pointerLeaveStops: true, hiddenPause: true, offscreenPause: true, reducedMotion: true, responsive: true, errors}, null, 2));
+  console.log(JSON.stringify({passed: true, contexts: info.contexts, sizes: info.sizes, alignment, hoverFps: rates, hoverScale: 1.08, fixedTile: true, idleStatic: true, hoverOnly: true, fixedHousingAndCamera: true, pointerLeaveStops: true, hiddenPause: true, offscreenPause: true, reducedMotion: true, responsive: true, errors}, null, 2));
 } finally {
   await browser?.close();
   await new Promise(done => server.close(done));

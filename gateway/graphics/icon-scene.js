@@ -42,8 +42,30 @@ export function createIconScene(id) {
     }
   }
   const half = size * 1.08;
-  camera.left = camera.bottom = -half;
-  camera.right = camera.top = half;
+  const projectedBounds = new THREE.Box3();
+  const instance = new THREE.Matrix4();
+  const transform = new THREE.Matrix4();
+  const point = new THREE.Vector3();
+  model.traverse(mesh => {
+    if (!mesh.isMesh) return;
+    const positions = mesh.geometry.getAttribute('position');
+    const count = mesh.isInstancedMesh ? mesh.count : 1;
+    for (let i = 0; i < count; i++) {
+      transform.multiplyMatrices(camera.matrixWorldInverse, mesh.matrixWorld);
+      if (mesh.isInstancedMesh) {
+        mesh.getMatrixAt(i, instance);
+        transform.multiply(instance);
+      }
+      for (let vertex = 0; vertex < positions.count; vertex++) {
+        projectedBounds.expandByPoint(point.fromBufferAttribute(positions, vertex).applyMatrix4(transform));
+      }
+    }
+  });
+  const projectedCenter = projectedBounds.getCenter(new THREE.Vector3());
+  camera.left = projectedCenter.x - half;
+  camera.right = projectedCenter.x + half;
+  camera.bottom = projectedCenter.y - half;
+  camera.top = projectedCenter.y + half;
   camera.updateProjectionMatrix();
   return {scene, camera, rotor, axis};
 }
