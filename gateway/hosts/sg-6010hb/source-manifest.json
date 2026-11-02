@@ -1,0 +1,24 @@
+{
+  "sourceProject": "xige_foc",
+  "files": {
+    "foc_web.py": "278649781a41c6e648a2b5bf097e75d012e0858e423a2b80d91a647c67c4e656",
+    "web_client.py": "2b04a2e6ed6b86d320dbb7a5e8793263be70c4f52ef38f5c4c0539b611677a03",
+    "zqwl.py": "612c27df3302e45cbdf9d0b204025b97fb1b125297ce2eb4299074e36dddc152",
+    "usb_gs.py": "85306619c384753a97d93240b42ae9269cb28fdbf3eb82ae9fdba5ae7a5bccbc",
+    "ota_host.py": "53eb712785fb21c683bf466fde9ded14361826388748d768a005877ad184fa2f",
+    "ota_onekey.py": "0f40df5ad85c9a302a45f40623a65b10bda29a3a7e2b162679ec692625564a85",
+    "run_recorder.py": "2c5c5b4936e7968c32b7e6a32360fb1af6974514eb0a58131cc8dcebe245d1f1",
+    "max_output.py": "0dc4d0e28b41a4bd14bcac66a68887d23f2198568193830ff30964df00ed8eb9"
+  },
+  "importedFiles": {
+    "foc_web.py": "8b67518c7266d9f36f22b0a457d1fdb118d9ef9475baf00c9375580c94a35209",
+    "web_client.py": "3312ed26821834fadd65f6dfb76fbc1d3fcb90b3cca04623d0fd7314516ec21e",
+    "zqwl.py": "612c27df3302e45cbdf9d0b204025b97fb1b125297ce2eb4299074e36dddc152",
+    "usb_gs.py": "85306619c384753a97d93240b42ae9269cb28fdbf3eb82ae9fdba5ae7a5bccbc",
+    "ota_host.py": "53eb712785fb21c683bf466fde9ded14361826388748d768a005877ad184fa2f",
+    "ota_onekey.py": "0f40df5ad85c9a302a45f40623a65b10bda29a3a7e2b162679ec692625564a85",
+    "run_recorder.py": "2c5c5b4936e7968c32b7e6a32360fb1af6974514eb0a58131cc8dcebe245d1f1",
+    "max_output.py": "0dc4d0e28b41a4bd14bcac66a68887d23f2198568193830ff30964df00ed8eb9"
+  },
+  "uiSha256": "2e8acaf98f185a069507473d1183bce3db75ae7c84bfbeed19478abdc875d0d7"
+}

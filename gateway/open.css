@@ -1,0 +1,7 @@
+:root { font-family: "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif; color: #43515b; background: #fff; }
+body { margin: 0; min-height: 100dvh; display: grid; place-items: center; }
+main { max-width: 560px; padding: 32px; line-height: 1.8; }
+h1 { font-size: 20px; font-weight: 500; }
+p { font-size: 14px; }
+a { color: #436b82; }
+#detail { color: #7d8992; }

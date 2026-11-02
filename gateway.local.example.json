@@ -1,0 +1,4 @@
+{
+  "sg-6010hb": {"interface": "zqwl", "channel": "COM4", "baud": 500000, "node": 0},
+  "rm-7010": {"interface": "zqwl", "channel": "COM5", "baud": 500000, "node": 0}
+}

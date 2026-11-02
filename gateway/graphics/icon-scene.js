@@ -1,0 +1,49 @@
+import * as THREE from 'three';
+import {OutlineEffect} from 'three/addons/effects/OutlineEffect.js';
+import {createMotorIconModel, motorIconViews} from './motor-models.js';
+
+export const ICON_SIZE = 240;
+
+export function createIconRenderer() {
+  const renderer = new THREE.WebGLRenderer({alpha: true, antialias: false, powerPreference: 'low-power'});
+  renderer.setSize(ICON_SIZE, ICON_SIZE);
+  renderer.setPixelRatio(1);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  const outline = new OutlineEffect(renderer, {
+    defaultThickness: .007,
+    defaultColor: new THREE.Color('#3f5a63').toArray(),
+  });
+  outline.autoClear = true;
+  return {renderer, outline};
+}
+
+export function createIconScene(id) {
+  const scene = new THREE.Scene();
+  const {model, rotor, axis} = createMotorIconModel(id);
+  scene.add(model);
+  scene.add(new THREE.AmbientLight(0xffffff, .8));
+  const key = new THREE.DirectionalLight(0xffffff, 2.2);
+  key.position.set(-3, 6, 5);
+  scene.add(key);
+  const bounds = new THREE.Box3().setFromObject(model);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const camera = new THREE.OrthographicCamera(-2, 2, 2, -2, .1, 40);
+  const direction = new THREE.Vector3(...motorIconViews[id]).normalize();
+  camera.position.copy(center).addScaledVector(direction, 10);
+  camera.lookAt(center);
+  camera.updateMatrixWorld(true);
+  let size = 0;
+  for (const x of [bounds.min.x, bounds.max.x]) {
+    for (const y of [bounds.min.y, bounds.max.y]) {
+      for (const z of [bounds.min.z, bounds.max.z]) {
+        const p = new THREE.Vector3(x, y, z).applyMatrix4(camera.matrixWorldInverse);
+        size = Math.max(size, Math.abs(p.x), Math.abs(p.y));
+      }
+    }
+  }
+  const half = size * 1.08;
+  camera.left = camera.bottom = -half;
+  camera.right = camera.top = half;
+  camera.updateProjectionMatrix();
+  return {scene, camera, rotor, axis};
+}

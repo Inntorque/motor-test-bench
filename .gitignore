@@ -1,6 +1,7 @@
 # Local dependencies and generated output
 node_modules/
 dist/
+site/
 build/
 .venv/
 __pycache__/
@@ -24,6 +25,7 @@ Thumbs.db
 
 # Per-machine paths and CAN adapter selection
 /workbench.local.json
+/gateway.local.json
 /runtime/
 /LAN-ACCESS.txt
 /局域网访问说明.txt

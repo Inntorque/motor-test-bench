@@ -1,0 +1,3404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MotorTune Pro · RM-7010</title>
+<!-- ★内联 favicon: 不写它浏览器会去要 /favicon.ico, 服务端没这个路由 ->
+     每个页面都是唯一一条 404, 控制台一直挂着一个红点 (2026-09-27 清掉)。 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231677ff'/%3E%3Cpath d='M17.5 5 9 18h5.5L13 27l9-13.5h-5.5z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+:root { --bg:#0e1726; --panel:#1a0a0a; --line:#223650; --fg:#c5d1e3;
+        --dim:#9ea8b8; --ok:#20b767; --bad:#e54855; --warn:#d99011;
+        --acc:#1677ff; --nav:#0a131e; --nav-soft:#101e2c; }
+* { box-sizing:border-box; }
+html { scroll-behavior:smooth; }
+body { margin:0; background:var(--bg); color:var(--fg);
+       font:15px/1.5 "Microsoft YaHei UI","Microsoft YaHei",Arial,sans-serif; }
+button, input, select { font:inherit; }
+button { cursor:pointer; }
+.app-shell { min-height:100vh; display:grid; grid-template-columns:134px minmax(0,1fr); }
+#sidebar { position:sticky; top:0; height:100vh; display:flex; flex-direction:column;
+           padding:14px 10px 12px; color:#d8e4f2; background:linear-gradient(180deg,#0c1622,#0a121c); }
+.side-brand { height:46px; display:flex; align-items:center; justify-content:center; margin-bottom:16px; }
+.brand-mark { width:31px; height:31px; display:grid; place-items:center; border-radius:10px;
+              color:#ffffff; background:#1683ff; box-shadow:0 5px 14px #07182e55; }
+.side-nav { display:grid; gap:5px; }
+.side-nav a { min-height:46px; display:flex; align-items:center; gap:12px; padding:0 11px;
+              color:#afc0d4; text-decoration:none; border-radius:8px; transition:.16s ease; }
+.side-nav a:hover,.side-nav a.active { color:#ffffff; background:#16283a; }
+.side-nav a.active { box-shadow:inset 3px 0 #5aa7ff; }
+.side-nav svg { width:19px; height:19px; flex:none; }
+.side-foot { margin-top:auto; padding:10px 9px 0; color:#91a7bf; font-size:13px; }
+.workspace { min-width:0; }
+#bar { min-height:52px; position:sticky; z-index:5; top:0; display:flex; align-items:center;
+       justify-content:space-between; gap:16px; padding:8px 20px; color:#f4f8ff;
+       background:linear-gradient(100deg,#0e1a28,#121d2c 64%,#0c1622);
+       box-shadow:0 2px 9px #172a4020; }
+.brand-lockup { display:flex; align-items:center; gap:12px; min-width:0; }
+.brand-lockup .brand-mark { width:30px; height:30px; }
+.brand-title { font-size:18px; font-weight:700; letter-spacing:.2px; white-space:nowrap; }
+.brand-subtitle { margin-left:10px; color:#b9c9dc; font-size:14px; white-space:nowrap; }
+.header-tools { display:flex; align-items:center; gap:12px; }
+.header-device { display:flex; align-items:center; gap:8px; padding:6px 10px; color:#e9f2fc;
+                 border:1px solid #3b1c1c20; border-radius:999px; background:#1a0a0a0d; }
+.header-device:before { content:""; width:8px; height:8px; border-radius:50%; background:#25c46a;
+                       box-shadow:0 0 0 3px #25c46a26; }
+.header-device.disconnected:before { background:#e54855; box-shadow:0 0 0 3px #e5485526; }
+.header-separator { height:22px; border-left:1px solid #3b1c1c35; }
+#motor_label { color:#f4f8ff; font-size:15px; white-space:nowrap; }
+#bar button { padding:7px 10px; color:#e6f0fd; background:#1a0a0a12; border:1px solid #3b1c1c2c;
+              border-radius:7px; }
+#bar button:hover { background:#1a0a0a20; }
+#bar button:disabled { opacity:.5; cursor:default; }
+.k { color:var(--dim); }
+.ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+#v_errbox { display:block; order:1; margin:0 0 8px; padding:0 2px; color:var(--bad); font-size:14px; }
+#v_errbox:empty { display:none; }
+main { max-width:1900px; margin:0 auto; padding:14px 14px 22px; display:flex; flex-direction:column; }
+.page-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:12px;
+                margin:0 0 11px; order:0; }
+.page-heading { display:none; }
+.page-heading h1 { margin:0; font-size:20px; font-weight:700; letter-spacing:.2px; }
+.page-heading p { margin:3px 0 0; color:var(--dim); font-size:14px; }
+.page-stamp { color:#94a1b2; font-size:13px; white-space:nowrap; }
+.work-mode-switch { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin:0 0 10px;
+  padding:9px 11px; order:1; background:#1a0a0a; border:1px solid var(--line); border-radius:9px;
+  box-shadow:0 2px 7px #23395308; }
+.work-mode-switch strong { margin-right:3px; color:#afbfd2; font-size:14px; }
+.work-mode-switch button { min-height:32px; padding:6px 10px; color:#aab8c8; background:#0d1724;
+  border:1px solid #263c54; border-radius:6px; font-weight:650; }
+.work-mode-switch button.selected { color:#ffffff; background:#1677ff; border-color:#1677ff; }
+.work-mode-switch button.stop-view { margin-left:auto; color:#e16572; background:#28070a;
+  border-color:#6d1b23; }
+.work-mode-note { color:#95a1b1; font-size:12px; }
+.status-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:9px; margin-bottom:10px; order:2; }
+.status-card,.panel { min-width:0; background:var(--panel); border:1px solid var(--line);
+                       border-radius:9px; box-shadow:0 2px 7px #23395308; }
+.status-card { width:auto; min-width:0; min-height:94px;
+               display:flex; align-items:center; gap:11px; padding:12px 13px; }
+.status-icon { width:42px; height:42px; display:grid; place-items:center; flex:none; color:#4794ff;
+               border-radius:50%; background:#081a30; }
+.status-icon.green { color:#5ee8a1; background:#0e351f; }
+.status-icon.red { color:#e85e6a; background:#2a070a; }
+.status-icon svg { width:22px; height:22px; }
+.status-copy { min-width:0; }
+.status-label { display:block; margin-bottom:3px; color:#a4b0c0; font-size:13px; }
+.status-value { display:block; overflow:hidden; color:#c7d3e4; font-size:17px; font-weight:700;
+                text-overflow:ellipsis; white-space:nowrap; }
+.status-note { display:block; overflow:hidden; margin-top:2px; color:#909eb0; font-size:12px;
+               text-overflow:ellipsis; white-space:nowrap; }
+.overview-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px;
+                 margin-bottom:10px; align-items:start; order:3; }
+.overview-grid > * { width:auto; min-width:0; }
+.panel { padding:11px 12px; }
+.resizable-module { position:relative; flex:0 1 auto; max-width:100%; min-width:150px; min-height:40px;
+                    overflow:auto; resize:none; }
+.resize-grip { position:absolute; z-index:4; display:block; touch-action:none; opacity:.35; }
+.resize-grip:hover { background:#1677ff; opacity:.8; }
+.resize-grip-n,.resize-grip-s { left:12px; right:12px; height:6px; cursor:ns-resize; }
+.resize-grip-n { top:0; } .resize-grip-s { bottom:0; }
+.resize-grip-e,.resize-grip-w { top:12px; bottom:12px; width:6px; cursor:ew-resize; }
+.resize-grip-e { right:0; } .resize-grip-w { left:0; }
+.resize-grip-ne,.resize-grip-nw,.resize-grip-se,.resize-grip-sw { width:11px; height:11px; }
+.resize-grip-ne { top:0; right:0; cursor:nesw-resize; }
+.resize-grip-nw { top:0; left:0; cursor:nwse-resize; }
+.resize-grip-se { right:0; bottom:0; cursor:nwse-resize; }
+.resize-grip-sw { bottom:0; left:0; cursor:nesw-resize; }
+.dashboard-resizing,.dashboard-resizing * { user-select:none !important; }
+.panel-heading { display:flex; align-items:center; justify-content:space-between; gap:8px;
+                 min-height:24px; margin:0 0 8px; padding-bottom:7px; border-bottom:1px solid #223347; }
+.panel-heading h2 { display:flex; align-items:center; gap:8px; margin:0; font-size:15px; font-weight:700; }
+.panel-heading h2:before { content:""; width:3px; height:15px; border-radius:4px; background:#2788ff; }
+.panel-heading small { color:#909eb0; font-size:13px; }
+.connection-rows { display:grid; gap:8px; }
+.connection-row { display:flex; justify-content:space-between; gap:10px; color:#a8b4c4; font-size:14px; }
+.connection-row strong { color:#bdccdf; font-weight:600; text-align:right; }
+#motor_info { display:block; margin-top:8px; padding:7px 8px; color:#9ca7b8; background:#0b1624;
+              border-radius:6px; font-size:12px !important; line-height:1.5; overflow-wrap:anywhere; }
+.connection-actions { margin-top:8px; }
+.connection-actions button { width:100%; padding:7px 10px; color:#ffffff; background:#1677ff;
+                             border:1px solid #1677ff; border-radius:6px; font-weight:600; }
+.connection-actions button:hover { background:#0768e8; }
+#profile_note { display:block; margin-top:7px; padding:7px 8px; color:#deb868; background:#312609;
+                border-radius:6px; font-size:12px; line-height:1.5; }
+.live-values { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
+.live-value { padding:10px 8px; text-align:center; border-radius:7px; background:#0b1624; }
+.live-value span { display:block; color:#9ea8b8; font-size:13px; }
+.live-value strong { display:block; margin-top:4px; color:#c1cfe1; font-size:17px; font-variant-numeric:tabular-nums; }
+.live-value small { color:#919fb0; font-size:12px; }
+.live-footnote { margin:8px 0 0; color:#919fb0; font-size:12px; }
+.motor-status-body { display:grid; grid-template-columns:92px 1fr; align-items:center; gap:8px; }
+.motor-illustration { width:92px; height:85px; }
+.motor-readout { display:grid; gap:7px; }
+.motor-readout div { display:flex; justify-content:space-between; gap:8px; color:#9ea8b8; font-size:13px; }
+.motor-readout strong { color:#becde0; font-size:14px; font-variant-numeric:tabular-nums; }
+.state-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:6px;
+              color:#a5b0bf; background:#0f1a28; font-size:13px; }
+.state-chip:before { content:""; width:7px; height:7px; border-radius:50%; background:#303b48; }
+.state-chip.running { color:#60e6a3; background:#0e311d; }
+.state-chip.running:before { background:#20b767; }
+.state-chip.bad { color:#db6c74; background:#2a070a; }
+.state-chip.bad:before { background:#e54855; }
+/* RPM controls remain explicit operator actions; page load never enables output. */
+#rpmbar { display:grid; grid-template-columns:minmax(0,2fr) minmax(240px,1fr); align-items:start;
+          gap:10px; margin:0 0 10px; padding:11px 12px; order:4;
+          background:#1a0a0a; border:1px solid var(--line); border-radius:9px; box-shadow:0 2px 7px #23395308; }
+#rpmbar > .ota-panel,#rpmbar > #rpm_hint { grid-column:1 / -1; }
+#rpmbar > .loop-reserve { grid-column:1; }
+#rpmbar > .ota-panel { grid-column:2; margin:0; }
+#rpmbar .panel-heading { width:100%; }
+.tune-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:6px; margin:8px 0; }
+.tune-grid label { display:flex; flex-direction:column; gap:3px; font-size:13px; color:#a8b7c8; }
+.tune-grid input { width:100% !important; text-align:left !important; }
+[data-tune-modes][hidden] { display:none !important; }
+.control-feedback { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; padding:8px; background:#0b1624; margin:8px 0; }
+.control-feedback strong { display:block; font-variant-numeric:tabular-nums; }
+.tuning-panel { border-top:1px solid #273950; margin-top:8px; padding-top:8px; }
+@media(max-width:1100px) { #rpmbar { grid-template-columns:1fr; } #rpmbar > .loop-reserve,#rpmbar > .ota-panel { grid-column:1 / -1; } }
+#rpmbar b { font-size:15px; font-weight:700; }
+.rpm-control-row { display:flex; flex-wrap:wrap; align-items:center; gap:7px; }
+.control-specs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+.control-specs div { display:flex; flex-direction:column; gap:3px; padding:7px 8px; color:#9ba8b7;
+                     background:#0b1624; border-radius:6px; font-size:12px; }
+.control-specs strong { color:#b4c5d9; font-size:13px; }
+.loop-reserve { padding:0 8px; }
+.loop-reserve summary { padding:7px 0; }
+.loop-mode-grid,.loop-field-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:6px; }
+.loop-mode { display:flex; flex-direction:column; gap:2px; min-width:0; padding:7px 8px;
+             color:#a8b7c8; background:#0d1724; border:1px solid #273950; border-radius:6px; }
+.loop-mode.selected { color:#ffffff; background:#1677ff; border-color:#1677ff; }
+.loop-mode small { color:#d1c09f; font-size:12px; }
+.loop-mode.selected small { color:#dceaff; }
+.loop-field { display:grid; gap:3px; min-width:0; color:#9ba8b7; font-size:12px; }
+.loop-field input { width:100%; min-width:0; padding:5px 6px; color:#9ea7b7; background:#0e1624;
+                    border:1px solid #273951; border-radius:5px; }
+.loop-field[hidden] { display:none; }
+.loop-reserve-note { display:block; margin-top:7px; color:#92a0b1; font-size:12px; }
+/* 位置模式"当前位置 → 目标"实时读数: 是数据不是说明文字; 差值过大时标红 */
+.loop-readout-strong { display:block; margin-top:6px; color:#71a2d6; font-size:14px;
+                       font-variant-numeric:tabular-nums; }
+.loop-readout-strong.bad { color:#e16572; font-weight:700; }
+  border:1px solid #1677ff; border-radius:6px; font-weight:650; }
+  border:1px solid #7a5d19; border-radius:6px; font-size:12px; line-height:1.5; }
+.control-actions,.calib-row,.ota-row { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin-top:8px; }
+/* ★ 四按钮直接控制 (2026-09-28): 配置动作(读取/应用)与运行动作(启动/停止)左右分组;
+   启动是唯一强调色按钮, 停止是唯一的危险色按钮; 反馈行默认空白, 不留占位说明。 */
+.control-actions .action-spacer { flex:1 1 12px; min-width:12px; }
+.control-actions #btn_loop_run,.control-actions #btn_loop_stop { min-width:92px; }
+#loop_hint:empty { display:none; }
+.control-readout { display:flex; flex-wrap:wrap; gap:12px; margin-top:8px; color:#9ba8b7; font-size:13px; }
+.control-readout strong { color:#b4c5d9; }
+.calib-progress { width:min(260px,100%); height:8px; accent-color:#1677ff; }
+.ota-panel { padding:8px; border-top:1px solid #24344b; }
+.ota-panel pre { max-height:150px; overflow:auto; margin:7px 0 0; padding:8px; color:#dce8f8;
+                 background:#0a111c; border-radius:6px; font:12px/1.45 Consolas,monospace; white-space:pre-wrap; }
+#rpmbar input[type=number] { width:78px; min-height:34px; padding:6px 8px; font-size:16px; text-align:center; }
+#rpmbar input[type=number], input[type=number] { color:#bdccdf; background:#1a0a0a; border:1px solid #2c415c;
+       border-radius:6px; }
+#rpmbar button { min-height:34px; padding:6px 11px; color:#b7c7da; background:#0d1622;
+                 border:1px solid #283b53; border-radius:6px; font-weight:600; }
+#rpmbar button:hover { filter:brightness(.98); }
+#rpmbar button:disabled { opacity:.52; cursor:default; }
+#rpmbar #btn_rpm_run { color:#ffffff; background:#1677ff; border-color:#1677ff; }
+#rpmbar #btn_rpm_run.on { background:#168a55; border-color:#168a55; }
+#rpmbar #btn_rpm_stop { color:#afbecf; }
+#rpmbar #btn_rpm_recon { color:#71a2d6; }
+#rpmbar #rpm_hint { display:block; min-height:30px; padding:7px 8px; color:#9ea8b8;
+                    background:#0d1622; border-radius:5px; font-size:12px; }
+button, select { color:#b7c7da; }
+select { padding:5px 8px; background:#1a0a0a; border:1px solid #2a3f58; border-radius:6px; }
+input[type=number] { width:82px; padding:5px 7px; font:inherit; }
+input[type=number]:focus,select:focus { outline:2px solid #1677ff35; border-color:#0050bb; }
+
+details { min-width:0; background:#1a0a0a; border:1px solid var(--line); border-radius:8px; }
+summary { padding:8px 11px; color:#aab7c8; cursor:pointer; font-weight:650; font-size:14px; }
+.dwrap { padding:2px 11px 12px; color:#b0bfd0; }
+.bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
+.bar button:disabled { opacity:.45; cursor:default; }
+.chart-panel { width:100%; min-width:320px; min-height:275px; padding:7px 8px 7px;
+               display:grid; grid-template-rows:auto minmax(190px,1fr) auto; }
+#chart-panel { order:4; }
+#tracebar { display:flex; flex-wrap:wrap; gap:5px 9px; align-items:center; margin:0 0 5px;
+            padding:5px 7px; box-shadow:none; font-size:12px; }
+#tracebar label { display:inline-flex; align-items:center; gap:4px; color:#abb8c9; }
+#tracebar input { accent-color:#1677ff; }
+#curves { width:100%; height:100%; min-height:190px; display:block; background:#070b10; border:1px solid #1e2c3c;
+          border-radius:6px; }
+#ctl { display:flex; flex-wrap:wrap; gap:7px; align-items:center; margin:5px 0 0; padding:5px 7px;
+       box-shadow:none; font-size:13px; }
+#ctl .k { color:#9ea8b8; }
+#ctl button.on { color:#5ee9a5; background:#0e311d; border-color:#1f6a3c; }
+#tstate { color:#9ea8b8; }
+.summary-grid { display:flex; flex-wrap:wrap; align-items:stretch; gap:9px; margin-top:10px; order:5; }
+.summary-grid > :nth-child(1) { width:calc(43% - 6.75px); }
+.summary-grid > :nth-child(2) { width:calc(17.5% - 6.75px); }
+.summary-grid > :nth-child(3) { width:calc(17.5% - 6.75px); }
+.summary-grid > :nth-child(4) { width:calc(22% - 6.75px); }
+.summary-grid .panel { padding:10px 11px; }
+.summary-grid .panel-heading { margin-bottom:6px; }
+.event-table th,.event-table td { padding:5px 6px; font-size:12px; }
+.event-time { color:#9ba8b8; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.event-level { color:#4794ff; white-space:nowrap; }
+.event-level.warn { color:#f2b855; }
+.event-level.bad { color:#e85e6a; }
+.sys-list { display:grid; gap:7px; }
+.sys-row { display:flex; justify-content:space-between; gap:10px; color:#9ea8b8; font-size:13px; }
+.sys-row strong { color:#b8c8dd; font-weight:600; text-align:right; }
+.phase-body { display:grid; grid-template-columns:116px 1fr; align-items:center; gap:8px; }
+.phase-wheel { width:116px; height:116px; }
+.phase-list { display:grid; gap:9px; }
+.phase-list div { display:flex; align-items:center; justify-content:space-between; gap:6px;
+                  color:#a3afbe; font-size:13px; }
+.phase-label { display:flex; align-items:center; gap:7px; }
+.phase-dot { width:8px; height:8px; border-radius:50%; }
+.phase-list strong { color:#b8c8dd; font-size:14px; font-variant-numeric:tabular-nums; }
+.encoder-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-bottom:7px; }
+.encoder-metrics .live-value { padding:8px 6px; }
+.encoder-metrics .live-value strong { font-size:16px; }
+.encoder-readout { display:grid; grid-template-columns:minmax(110px,.85fr) minmax(0,1.4fr); gap:8px; }
+.encoder-angle { display:flex; flex-direction:column; justify-content:center; min-width:0; padding:10px 11px;
+  background:#071629; border:1px solid #0d3462; border-radius:7px; }
+.encoder-angle span,.encoder-angle small { color:#9ea8b8; font-size:12px; }
+.encoder-angle strong { margin-top:3px; color:#c1cfe1; font-size:24px; line-height:1.1;
+  font-variant-numeric:tabular-nums; white-space:nowrap; }
+.encoder-metrics { margin:0; }
+.encoder-metrics .live-value { display:flex; flex-direction:column; justify-content:center; min-width:0; }
+.encoder-meta { margin-top:7px; color:#9ea8b8; font-size:12px; }
+.encoder-meta strong { color:#b4c5d9; font-weight:650; }
+.encoder-state-valid { color:#60e6a3 !important; }
+.encoder-state-bad { color:#db6c74 !important; }
+.encoder-note { display:block; margin-top:6px; color:#919fb0; font-size:12px; line-height:1.45; }
+.details-grid { display:flex; flex-wrap:wrap; align-items:stretch; gap:10px; margin-top:10px; order:8; }
+.details-grid > details { width:calc(50% - 5px); }
+#adv_motor,#params_box { overflow:auto; }
+#adv_motor .dwrap,#params_box .dwrap { padding:4px 11px 12px; }
+table { width:100%; border-collapse:collapse; }
+th,td { text-align:left; padding:6px 7px; border-bottom:1px solid #22334b; }
+th { color:#9ea8b8; background:#0c1521; font-weight:600; font-size:12px; text-transform:uppercase; }
+td { color:#b5c5d9; }
+#v_errbox:empty { display:none; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+           clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+@media (max-width:1280px) {
+  .app-shell { grid-template-columns:112px minmax(0,1fr); }
+  .overview-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .status-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .summary-grid > :nth-child(1) { width:calc(58% - 4.5px); }
+  .summary-grid > :nth-child(2) { width:calc(42% - 4.5px); }
+  .summary-grid > :nth-child(n+3) { width:calc((100% - 9px)/2); }
+}
+@media (max-width:860px) {
+  .app-shell { display:block; }
+  #sidebar { position:static; width:100%; height:auto; padding:7px 10px; }
+  .side-brand,.side-foot { display:none; }
+  .side-nav { grid-template-columns:repeat(6,minmax(0,1fr)); gap:4px; }
+  .side-nav a { justify-content:center; gap:5px; min-height:38px; padding:3px; font-size:12px; }
+  .side-nav a.active { box-shadow:inset 0 -2px #5aa7ff; }
+  #bar { position:static; padding:8px 12px; }
+  .brand-title { font-size:16px; }
+  .brand-subtitle { display:none; }
+  main { padding:10px; }
+  .status-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .overview-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #rpmbar { grid-template-columns:minmax(0,1fr); }
+  #rpmbar > * { grid-column:1 / -1; }
+  .details-grid > details { width:100%; }
+  .summary-grid > :first-child { width:100%; }
+  .summary-grid > :nth-child(n+2) { width:calc((100% - 18px)/3); }
+}
+@media (max-width:560px) {
+  .side-nav { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .side-nav a { justify-content:flex-start; padding-left:10px; }
+  #bar { align-items:flex-start; }
+  .header-tools { gap:5px; }
+  .header-device { display:none; }
+  .resizable-module { min-width:0; }
+  .status-grid,.overview-grid { grid-template-columns:minmax(0,1fr); }
+  .page-heading { align-items:flex-start; }
+  .page-stamp { display:none; }
+  .motor-status-body { grid-template-columns:72px 1fr; }
+  .motor-illustration { width:72px; }
+  .encoder-readout { grid-template-columns:minmax(0,1fr); }
+  #chart-panel { min-width:0; }
+  #curves { min-height:180px; }
+}
+
+#rpmbar { grid-template-columns:minmax(0,1fr); }
+#rpmbar > .loop-reserve,#rpmbar > .ota-panel { grid-column:1 / -1; }
+.calibration-panel { background:#1a0a0a; border:1px solid var(--line); border-radius:9px; padding:10px 12px; margin:0 0 10px; order:3; }
+.calibration-panel .calib-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:7px; }
+.calibration-panel button { min-height:34px; padding:6px 12px; border:1px solid #2c415c; border-radius:6px; color:#b0c4d9; background:#0b1624; }
+.calibration-panel button:disabled { opacity:.5; }
+.calibration-panel #btn_calibrate { color:#ffffff; background:#1677ff; border-color:#1677ff; }
+.mode-picker { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.mode-picker select { min-height:36px; min-width:230px; padding:6px 10px; color:#bdccdf; background:#1a0a0a; border:1px solid #2f4968; border-radius:6px; font-size:16px; }
+.mode-picker span { font-size:14px; color:#9ea7b7; }
+.loop-field-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.loop-field input { width:100% !important; text-align:left !important; }
+.tune-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px 12px; }
+#mode_tuning[hidden],#mode_feedback[hidden],#btn_capture_position[hidden],#tune_advanced[hidden] { display:none !important; }
+#tune_advanced summary { cursor:pointer; font-size:14px; color:#a9bccf; padding:6px 0; }
+#btn_loop_run { color:#ffffff; background:#136f8a; border-color:#136f8a; }
+#btn_loop_stop { color:#e16572 !important; background:#28070a !important; border-color:#6d1b23 !important; }
+.ota-panel { border-top:1px solid #223650; padding-top:10px; }
+.ota-log summary { cursor:pointer; color:#9ca7b7; font-size:14px; margin-top:5px; }
+@media(max-width:900px){.tune-grid,.loop-field-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+/* ======================================================================
+ * ★运行模式选择器 (7 模式: 0 正弦开环 / 1 力矩 / 2 速度 / 3 位置 /
+ *   4 电压 / 5 电流 / 6 MIT) 全部并列成 7 个 chip, 外加一个【独立的校准卡片】。
+ *   规则:
+ *     ① 校准是一张独立卡片, 放在模式卡【上面】, 与运行模式互不绑定 ——
+ *        选模式不会启动校准, 校准也不会启动模式; 观察视图下它照样可见。
+ *     ② 选哪个模式就只显示哪个模式的目标字段, 其余模式的目标一律不渲染。
+ *     ③ 调参面板只显示"本模式真正会用到的"参数, 电流环 PI/电机 R·L/斜坡/滤波
+ *        这些通用项收进折叠的「高级」区, 不再一次性铺开。
+ * ====================================================================== */
+#rpmbar > #calibration_panel { grid-column:1 / -1; }
+#calibration_panel { width:100%; margin:0 0 12px; order:0; border-left:3px solid #2788ff; }
+#calibration_panel .calib-head { margin-top:2px; }
+#calibration_panel .calib-row { margin-top:7px; }
+.calib-head { display:flex; flex-wrap:wrap; align-items:center; gap:7px; }
+.calib-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:999px;
+  color:#aab8c8; background:#0f1b2a; font-size:13px; font-weight:650; }
+.calib-badge:before { content:""; width:7px; height:7px; border-radius:50%; background:#303b48; }
+.calib-badge.done { color:#60e6a3; background:#0e311d; }
+.calib-badge.done:before { background:#20b767; }
+.calib-badge.busy { color:#63a9e4; background:#081a30; }
+.calib-badge.busy:before { background:#2788ff; }
+.calib-badge.failed { color:#db6c74; background:#2a070a; }
+.calib-badge.failed:before { background:#e54855; }
+.calib-note { margin:7px 0 0; color:#909eb0; font-size:12px; line-height:1.5; }
+
+.mode-chips { display:grid; grid-template-columns:repeat(auto-fit,minmax(124px,1fr)); gap:7px; margin:0 0 10px; }
+.mode-chip { display:flex; flex-direction:column; align-items:flex-start; gap:2px; min-width:0;
+  padding:8px 10px; text-align:left; color:#a8b7c8; background:#0d1724;
+  border:1px solid #253b54; border-radius:7px; transition:.15s ease; }
+.mode-chip:hover:not(:disabled) { background:#08182f; border-color:#0f3f7c; }
+.mode-chip b { color:#b8c8dd; font-size:14px; font-weight:700; }
+.mode-chip small { color:#8d9cb0; font-size:12px; }
+.mode-chip.selected { color:#eaf3ff; background:#1677ff; border-color:#1677ff; }
+.mode-chip.selected b { color:#ffffff; }
+.mode-chip.selected small { color:#cfe4ff; }
+.mode-chip:disabled { opacity:.45; cursor:default; }
+/* #rpmbar button 的规则比 .mode-chip 更具体, 必须在这里显式压回来,
+   否则"已选中的那个模式卡片"会被刷成浅底白字(实测截图确认过)。 */
+#rpmbar .mode-chip { color:#a8b7c8; background:#0d1724; border:1px solid #253b54; min-height:0;
+  font-weight:600; }
+#rpmbar .mode-chip b { color:#b8c8dd; }
+#rpmbar .mode-chip small { color:#8d9cb0; }
+#rpmbar .mode-chip:hover:not(:disabled) { background:#08182f; border-color:#0f3f7c; }
+#rpmbar .mode-chip.selected,
+#rpmbar .mode-chip.selected:hover:not(:disabled) { color:#ffffff; background:#1677ff; border-color:#1677ff;
+  box-shadow:0 2px 7px #1677ff40; }
+#rpmbar .mode-chip.selected b { color:#ffffff; }
+#rpmbar .mode-chip.selected small { color:#d5e8ff; }
+#rpmbar .mode-chip:disabled { opacity:.45; }
+#rpmbar > .panel-heading { margin-bottom:11px; }
+#rpmbar .mode-picker { margin:0 0 7px; }
+#rpmbar .mode-picker b { color:#b7c7da; }
+#rpmbar .target-fields { margin-bottom:9px; }
+
+.target-fields { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px 12px;
+  padding:9px 10px; margin:0 0 8px; background:#0a1322; border:1px solid #1d3451; border-radius:7px; }
+.target-group[hidden] { display:none !important; }
+.target-group { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px 12px; }
+.target-group .loop-field { min-width:108px; }
+.target-group .loop-field input { width:108px; }
+/* Only fill the existing space beside the open-loop RPM input. */
+#rpmbar .target-group[data-target-mode="0"] { flex:1; min-width:0; flex-wrap:nowrap; }
+#rpmbar .target-group[data-target-mode="0"] > .loop-field { flex:0 0 auto; }
+#in_rpm_slider { appearance:none; -webkit-appearance:none; flex:1; min-width:0;
+  height:42px; margin:0 10px 0 6px; padding:0; border:0; background:transparent;
+  align-self:flex-end; cursor:pointer; touch-action:pan-y; }
+#in_rpm_slider::-webkit-slider-runnable-track {
+  height:20px; border-radius:999px; border:1px solid #99cfff55;
+  background:radial-gradient(circle,#e5f3ff 0 1px,transparent 1.8px) 7px 3px/47px 19px,
+    radial-gradient(circle,#cee7ffa8 0 .7px,transparent 1.5px) 22px 11px/73px 23px,
+    linear-gradient(100deg,#428ece,#527cc9 40%,#6a67bb 75%,#5559b3);
+  box-shadow:inset 0 1px 5px #c2e5ff26,0 0 12px #4b9ce51a;
+  animation:rpm-stars 18s linear infinite; }
+#in_rpm_slider::-moz-range-track {
+  height:20px; border-radius:999px; border:1px solid #99cfff55;
+  background:radial-gradient(circle,#e5f3ff 0 1px,transparent 1.8px) 7px 3px/47px 19px,
+    radial-gradient(circle,#cee7ffa8 0 .7px,transparent 1.5px) 22px 11px/73px 23px,
+    linear-gradient(100deg,#428ece,#527cc9 40%,#6a67bb 75%,#5559b3);
+  box-shadow:inset 0 1px 5px #c2e5ff26,0 0 12px #4b9ce51a;
+  animation:rpm-stars 18s linear infinite; }
+#in_rpm_slider::-webkit-slider-thumb { appearance:none; -webkit-appearance:none;
+  width:28px; height:28px; margin-top:-5px; border:1px solid #c6e7ff;
+  border-radius:50%; background:#f6fbff; box-shadow:0 0 10px #4ac8ff66; }
+#in_rpm_slider::-moz-range-thumb { width:26px; height:26px; border:1px solid #c6e7ff;
+  border-radius:50%; background:#f6fbff; box-shadow:0 0 10px #4ac8ff66; }
+#in_rpm_slider:focus-visible { outline:2px solid #69c9ff; outline-offset:3px; border-radius:999px; }
+@keyframes rpm-stars {
+  from { background-position:7px 3px,22px 11px,0 0; }
+  to { background-position:54px 3px,95px 11px,0 0; }
+}
+@media(prefers-reduced-motion:reduce) {
+  #in_rpm_slider::-webkit-slider-runnable-track { animation:none; }
+  #in_rpm_slider::-moz-range-track { animation:none; }
+}
+.calib-gate { display:block; margin:0 0 8px; padding:7px 9px; color:#deb868; background:#312609;
+  border:1px solid #7a5d19; border-radius:6px; font-size:12px; line-height:1.5; }
+
+
+/* Compact encoder FOC workspace; secondary information stays below controls. */
+main { gap:6px; }
+.page-heading { margin-bottom:4px; padding:0; }
+.page-heading h1 { font-size:18px; }
+.page-heading p { display:none; }
+.status-grid { gap:6px; margin-bottom:6px; }
+.status-card { min-height:66px; padding:8px; gap:7px; }
+.status-icon { width:30px; height:30px; }
+.status-value { font-size:16px; }
+.overview-grid { gap:6px; margin-bottom:6px; }
+.panel { padding:8px; }
+#rpmbar { gap:6px; padding:8px; margin-bottom:6px; }
+.calibration-panel { margin-bottom:6px; padding:7px 9px; }
+.mode-chip { padding:6px 8px; }
+.mode-chip small { font-size:12px; }
+#chart-panel { min-height:330px; grid-template-rows:auto minmax(200px,1fr) auto; align-self:stretch; }
+#curves { min-height:200px; }
+.workflow-help { order:1; margin:0 0 4px; }
+.workflow-help summary { padding:6px 9px; font-size:13px; }
+.workflow-help p { margin:6px 0; font-size:14px; line-height:1.6; }
+.workflow-help a { color:#4794ff; }
+.summary-grid { margin-top:5px; gap:6px; }
+#btn_rpm_stop { color:#e16574 !important; background:#2a070c !important; }
+
+
+@media(min-width:1100px){
+ main { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:start; gap:6px; }
+ .page-heading { display:none; }
+ #workflow_help { grid-column:1/-1; grid-row:1; }
+ #v_errbox { grid-column:1/-1; grid-row:2; margin:0; }
+ .status-grid { grid-column:1/-1; grid-row:3; margin:0; }
+ .overview-grid { grid-column:1/-1; grid-row:4; margin:0; }
+ #rpmbar { grid-column:1; grid-row:5; margin:0; }
+ #chart-panel { grid-column:2; grid-row:5; margin:0; min-width:0; align-self:stretch; grid-template-rows:auto minmax(200px,1fr) auto; }
+ .summary-grid { grid-column:1/-1; grid-row:6; }
+ #device-details { grid-column:1/-1; grid-row:7; }
+ .status-card { min-height:58px; }
+ .encoder-note,.live-footnote { font-size:12px; margin:4px 0; }
+ .encoder-angle { padding:6px; }
+ .encoder-angle strong { font-size:20px; }
+ .encoder-meta { margin-top:3px; }
+ .connection-row { margin:3px 0; }
+ .live-value { padding:6px; }
+ .profile-reference summary { padding:5px; font-size:12px; }
+ .loop-reserve-note,.calib-gate { font-size:12px; }
+ .mode-chips { gap:4px; }
+ .mode-chip { padding:4px; min-width:0; }
+ .mode-chip small { display:none; }
+ .target-group .loop-field { min-width:95px; }
+ #rpm_hint { display:none !important; }
+}
+
+
+/* 7010 lab instrument: restrained steel surface, explicit phase colors. */
+:root { --lab-paper:#11222c; --lab-ink:#c8d7e3; --lab-rule:#314d65; --lab-action:#136f8a; --lab-fault:#b52f40; --lab-wave:#101d27; }
+body { background:var(--lab-paper); font-family:"Microsoft YaHei UI","Microsoft YaHei",sans-serif; color:var(--lab-ink); }
+#sidebar { background:#121c23; width:94px; }
+.app-shell { grid-template-columns:94px minmax(0,1fr); }
+#bar { background:#121c23; min-height:54px; padding:9px 16px; }
+.brand-title { font-size:19px; font-weight:700; letter-spacing:.02em; }
+.brand-subtitle { font-size:13px; color:#c7d6df; }
+.brand-mark { background:#136f8a; border-radius:5px; }
+.panel,.status-card,#rpmbar,.calibration-panel { box-shadow:none; border-radius:5px; border-color:var(--lab-rule); }
+.status-grid { border-bottom:1px solid var(--lab-rule); padding-bottom:5px; }
+.status-card { background:transparent; border:0; border-right:1px solid var(--lab-rule); border-radius:0; min-height:52px; }
+.status-card:last-child { border-right:0; }
+.status-icon { display:none; }
+.status-label,.status-note { color:#abbcc7; }
+.status-value { font-size:16px; }
+.panel-heading { border-bottom:1px solid #2b475a; padding-bottom:5px; margin-bottom:7px; }
+.panel-heading:before { background:#136f8a; width:2px; }
+.panel-heading h2 { font-size:15px; color:#c4d7e3; }
+.panel-heading small { color:#a5b4c0; }
+.motor-status-body,.phase-body { grid-template-columns:1fr; }
+.motor-readout { gap:7px; }
+.live-value { background:#10212a; border-radius:3px; }
+.live-value strong,.encoder-angle strong,.control-feedback strong { font-family:Consolas,"Microsoft YaHei",monospace; font-variant-numeric:tabular-nums; }
+.live-values > :nth-child(1) strong { color:#d1757f; }
+.live-values > :nth-child(2) strong { color:#5ba3eb; }
+.live-values > :nth-child(3) strong { color:#63e3bb; }
+#bar #btn_header_stop { min-height:34px; padding:6px 16px; background:#b52f40; color:#ffffff; border:1px solid #a42736; border-radius:4px; font-weight:700; }
+#bar #btn_header_stop:disabled { opacity:.65; }
+#bar #btn_header_stop:hover { background:#962638; }
+#rpmbar #btn_loop_run,#calibration_panel #btn_calibrate,.connection-actions button { background:#136f8a; border-color:#136f8a; }
+#rpmbar #btn_loop_stop { color:#d96d7b; background:#28070c; border-color:#73323c; }
+#rpmbar .mode-chip { border-radius:3px; background:#0f2028; box-shadow:none; }
+#rpmbar .mode-chip.selected,#rpmbar .mode-chip.selected:hover:not(:disabled) { background:#136f8a; border-color:#136f8a; box-shadow:none; }
+#rpmbar .mode-chip.selected b { color:#ffffff; }
+.target-fields { padding:8px; border-color:#2e4a5f; border-radius:4px; background:#0f1d26; }
+.calibration-panel { border-left:3px solid #136f8a; }
+.calib-note { font-size:13px; color:#adbeca; line-height:1.5; margin:6px 0 0; }
+.calib-note details { display:inline-block; border:0; background:transparent; }
+.calib-note summary { padding:0 5px; color:#5ec9e9; font-size:13px; }
+.calib-note p { padding:5px; margin:2px; }
+.workflow-help { border:0; border-left:2px solid #4a789a; border-radius:0; background:#142835; }
+/* ★ 2026-09-28 用户要求"右边空白的地方让波形填充":
+   原来这张卡片的画布被写死 330px(≥1100px 时 355px), 卡片下方留一大片空白。
+   现在卡片 align-self:stretch 跟上左列同一行的高度, 画布 flex:1 1 auto 吃掉剩余高度。
+   画布的 backing store 由 resizeCanvas() + ResizeObserver 重算, 所以拉伸不会变形。 */
+#chart-panel { display:flex; flex-direction:column; gap:4px; align-self:stretch; }
+#chart-panel .panel-heading { margin:0; }
+#chart-panel #tracebar,#chart-panel .wave-note,#chart-panel #ctl { flex:0 0 auto; }
+#chart-panel #curves { flex:1 1 auto; height:auto; min-height:200px; border-radius:3px; }
+.wave-note { color:#a8b8c3; font-size:12px; line-height:1.5; }
+#tracebar { margin:0 !important; padding:2px 0; font-size:13px !important; gap:4px 7px !important; }
+#tracebar button,#ctl button { border:1px solid #35586e; background:#11222c; border-radius:3px; color:#bcd1df; padding:4px 6px; font-size:13px; }
+#ctl { padding:2px 0; gap:5px; }
+#tstate { font-size:12px; color:#acbdca; line-height:1.4; }
+button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible { outline:2px solid #087eaa; outline-offset:3px; }
+button { cursor:pointer; }
+button:disabled { cursor:default; }
+#calib_gate[hidden],#mode_feedback[hidden],#mode_tuning[hidden],#btn_capture_position[hidden] { display:none !important; }
+@media(min-width:1100px){
+ #rpmbar { padding:8px; }
+ #chart-panel #curves { min-height:240px; }
+ .overview-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+ .overview-grid .panel { padding:7px; }
+ .connection-actions { margin-top:5px; }
+ .connection-actions button { padding:5px; font-size:13px; }
+ .connection-row { font-size:13px; }
+ .calibration-panel .panel-heading small { max-width:50%; font-size:12px; }
+}
+@media(max-width:700px){
+ #sidebar { width:58px; }
+ .app-shell { grid-template-columns:58px minmax(0,1fr); }
+ #bar { padding:7px; gap:6px; flex-wrap:wrap; }
+ .brand-title { font-size:16px; }
+ .brand-subtitle { display:none; }
+ .header-tools { flex-wrap:wrap; }
+ #bar #btn_header_stop { padding:5px 10px; min-height:30px; }
+ #chart-panel #curves { min-height:260px; height:auto; }
+ .panel-heading small { font-size:12px; }
+}
+@media(prefers-reduced-motion:reduce){ html { scroll-behavior:auto; } *,*:before,*:after { animation:none !important; transition:none !important; } }
+
+
+.side-nav a { padding:8px 6px; gap:6px; }
+.side-nav a span { white-space:nowrap; }
+#bar #btn_header_stop { background:#b52f40; color:white; }
+#rpmbar #btn_loop_run { background:#136f8a; border-color:#136f8a; color:#ffffff; }
+
+@media(max-width:860px){
+ #sidebar { display:none; }
+ .app-shell { display:block; }
+ main { padding:8px; }
+ .status-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; }
+ .status-card { min-height:52px; padding:5px; }
+ .status-note { display:none; }
+ .overview-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px; }
+ .overview-grid #encoder_panel { grid-column:1/-1; }
+ .overview-grid .panel-heading small { display:none; }
+ .encoder-readout { grid-template-columns:minmax(100px,1fr) minmax(0,1.5fr); }
+ .connection-row { font-size:12px; }
+ #motor_info { font-size:12px; }
+ #bar { position:sticky; top:0; z-index:20; }
+ .brand-lockup { gap:5px; }
+ .brand-title { font-size:16px; }
+ .header-tools { gap:5px; }
+ .header-device,.header-separator { display:none; }
+ #bar button,#bar select { font-size:13px; }
+ .live-values { gap:3px; }
+ .live-value { padding:5px; }
+ .live-value strong { font-size:16px; }
+ .summary-grid > * { min-width:0; }
+}
+/* ---- 运行模式下拉 ---- */
+#rpmbar .mode-picker { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:0 0 10px; }
+.mode-select { position:relative; flex:0 0 auto; min-width:260px; }
+#rpmbar #mode_trigger { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%;
+  min-height:46px; padding:6px 12px; text-align:left; color:#ffffff; background:#1677ff; border:1px solid #1677ff;
+  border-radius:8px; box-shadow:0 2px 6px #1677ff33; }
+#rpmbar #mode_trigger:hover:not(:disabled) { filter:brightness(1.06); }
+#rpmbar #mode_trigger:disabled { opacity:.6; cursor:not-allowed; }
+.mode-trigger-text { display:flex; flex-direction:column; gap:1px; min-width:0; }
+#rpmbar #mode_trigger b { color:#ffffff; font-size:15px; }
+#mode_trigger small { color:#d5e8ff; font-size:13px; }
+.mode-caret { width:8px; height:8px; margin:-4px 2px 0; border:solid #3b1c1c; border-width:0 2px 2px 0;
+  transform:rotate(45deg); transition:transform .15s; }
+#mode_trigger[aria-expanded="true"] .mode-caret { transform:rotate(-135deg); margin-top:4px; }
+#rpmbar #mode_chips { position:absolute; z-index:20; top:calc(100% + 4px); left:0; min-width:100%; width:320px;
+  display:flex; flex-direction:column; gap:2px; margin:0; padding:5px; background:#1a0a0a;
+  border:1px solid #2b4059; border-radius:9px; box-shadow:0 10px 28px #1a2d4526; }
+#rpmbar #mode_chips[hidden] { display:none; }
+#rpmbar #mode_chips .mode-chip { flex-direction:row; align-items:baseline; justify-content:space-between; gap:12px;
+  width:100%; padding:8px 10px; background:transparent; border:1px solid transparent; border-radius:6px; }
+#rpmbar #mode_chips .mode-chip:hover:not(:disabled),#rpmbar #mode_chips .mode-chip:focus-visible {
+  background:#08162b; border-color:#12386c; outline:0; }
+#rpmbar #mode_chips .mode-chip.selected { background:#091b34; border-color:#073c85; }
+#rpmbar #mode_chips .mode-chip.selected b { color:#5696f1; }
+#rpmbar #mode_chips .mode-chip.selected small { color:#88a2c6; }
+#rpmbar #mode_chips .mode-chip b { font-size:15px; }
+#rpmbar #mode_chips .mode-chip small { font-size:13px; white-space:nowrap; }
+#selected_mode_note { flex:1 1 220px; color:#a5b2c2; font-size:14px; }
+/* ---- 启动 / 停止 ---- */
+.run-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px 10px; margin:10px 0 4px; }
+.run-actions #btn_loop_run,.run-actions #btn_loop_stop { min-width:112px; min-height:38px; font-size:15px; font-weight:700; }
+#btn_loop_run.running,#btn_loop_run.running:disabled { color:#ffffff; background:#168a55; border-color:#168a55; opacity:1; }
+.run-actions #loop_hint { flex:1 1 200px; }
+/* ---- 可折叠参数 ---- */
+#mode_tuning { margin-top:10px; padding:0; border:1px solid #273950; border-radius:8px; background:#081020; }
+#mode_tuning > summary { display:flex; align-items:baseline; flex-wrap:wrap; gap:4px 10px; padding:9px 12px;
+  cursor:pointer; list-style:none; color:#b7c7da; }
+#mode_tuning > summary::-webkit-details-marker { display:none; }
+#mode_tuning > summary::before { content:""; align-self:center; width:6px; height:6px; margin-right:2px;
+  border:solid #7b8da5; border-width:0 2px 2px 0; transform:rotate(-45deg); transition:transform .15s; }
+#mode_tuning[open] > summary::before { transform:rotate(45deg); }
+#mode_tuning > summary .tune-fold-note { margin-left:auto; color:#98a6b8; font-size:13px; }
+#mode_tuning[open] > summary { border-bottom:1px solid #21354d; }
+#mode_tuning > :not(summary) { margin-left:12px; margin-right:12px; }
+#mode_tuning .tune-actions { margin-bottom:10px; }
+#mode_tuning [data-tune-modes][hidden] { display:none !important; }
+#rpmbar #mode_chips .mode-chip small { display:inline; }
+/* ---- 消除留白: 同一行的卡片一样高, 内容区吃掉多余高度 ---- */
+.overview-grid { align-items:stretch; }
+.overview-grid > .panel { display:flex; flex-direction:column; }
+.overview-grid .live-values,.overview-grid .motor-status-body { flex:1 1 auto; }
+.overview-grid .live-values { align-items:stretch; }
+/* 输出与温度: 两个读数做成和相电流一样的大数字块, 填满卡片而不是居中留白 */
+.overview-grid .motor-status-body { display:flex; }
+.overview-grid .motor-readout { flex:1; grid-template-rows:auto 1fr 1fr; }
+.overview-grid .motor-readout div { flex-direction:column; justify-content:center; align-items:center;
+  padding:8px; border-radius:7px; background:#0b1624; }
+.overview-grid .motor-readout strong { font-size:17px; }
+.summary-grid > * { flex:1 1 0; width:auto !important; min-width:230px; }
+.summary-grid > :nth-child(1) { flex-grow:2.4; }
+@media(min-width:1100px){
+ /* 左栏 (校准/模式/OTA) 决定这一行的高度, 波形跟着拉伸, 不再各自留白 */
+ #rpmbar { align-self:stretch; display:flex; flex-direction:column; }
+ #rpmbar > * { align-self:stretch; width:auto; max-width:none; margin-left:0; margin-right:0; }
+ #rpmbar > .loop-reserve { flex:1 1 auto; }
+ #chart-panel { contain:size; min-height:600px; }
+ /* flex-basis 0: 画布高度只由卡片决定, 不能被上一次写入的 backing store 反向撑大 */
+ #chart-panel #curves { flex:1 1 0; min-height:200px; }
+}
+
+/* ==================== 深色科技感主题 2026-09-29 (只管外观) ==================== */
+:root { --neon:#22d3ee; --neon2:#818cf8; --neon-dim:rgba(34,211,238,.18);
+        --glass:rgba(10,20,38,.66); --glass2:rgba(6,14,28,.72); --hud-line:rgba(56,189,248,.20);
+        --ink:#dcecff; --ink-dim:#7f9bb8; }
+html { background:#030712; }
+body { background:transparent !important; color:var(--ink) !important; }
+body:before { content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(1100px 620px at 88% -8%, rgba(129,140,248,.20), transparent 62%),
+    radial-gradient(900px 520px at -8% 108%, rgba(34,211,238,.16), transparent 60%),
+    linear-gradient(rgba(56,189,248,.045) 1px, transparent 1px) 0 0/34px 34px,
+    linear-gradient(90deg, rgba(56,189,248,.045) 1px, transparent 1px) 0 0/34px 34px,
+    #030712; }
+.app-shell,.workspace,main { background:transparent !important; }
+::selection { background:rgba(34,211,238,.35); color:#fff; }
+* { scrollbar-width:thin; scrollbar-color:#1e3a5f transparent; }
+
+/* ---- 侧栏 ---- */
+#sidebar { background:linear-gradient(180deg,rgba(6,14,30,.92),rgba(3,8,20,.96)) !important;
+  border-right:1px solid var(--hud-line); box-shadow:4px 0 30px rgba(0,0,0,.45); }
+.side-nav a { color:#8fb0cf !important; border:1px solid transparent; transition:all .2s; }
+.side-nav a:hover { background:rgba(34,211,238,.08) !important; color:#e6fbff !important; }
+.side-nav a.active { color:#e6fbff !important; background:linear-gradient(90deg,rgba(34,211,238,.18),rgba(34,211,238,.02)) !important;
+  border-color:rgba(34,211,238,.25); box-shadow:inset 3px 0 0 var(--neon), 0 0 18px rgba(34,211,238,.12) !important; }
+.side-nav a.active svg { filter:drop-shadow(0 0 6px var(--neon)); }
+.side-foot { color:#4f6c8c !important; font-family:Consolas,monospace; letter-spacing:.08em; }
+.brand-mark { background:linear-gradient(135deg,#06b6d4,#6366f1) !important; color:#fff !important;
+  box-shadow:0 0 0 1px rgba(255,255,255,.12) inset, 0 0 22px rgba(34,211,238,.55) !important; }
+
+/* ---- 顶栏 + 扫描线 ---- */
+#bar { background:linear-gradient(90deg,rgba(4,10,24,.88),rgba(10,22,46,.88)) !important;
+  backdrop-filter:blur(12px); border-bottom:1px solid var(--hud-line);
+  box-shadow:0 10px 30px rgba(0,0,0,.35); overflow:hidden; }
+#bar:after { content:""; position:absolute; left:-30%; bottom:0; height:1px; width:30%;
+  background:linear-gradient(90deg,transparent,var(--neon),transparent); animation:hudScan 5s linear infinite; }
+@keyframes hudScan { to { left:100%; } }
+.brand-title { background:linear-gradient(90deg,#e0fbff,#67e8f9 45%,#a5b4fc); -webkit-background-clip:text; background-clip:text;
+  color:transparent !important; letter-spacing:.04em; filter:drop-shadow(0 0 10px rgba(34,211,238,.35)); }
+.brand-subtitle { color:#5f86ad !important; font-family:Consolas,monospace; letter-spacing:.12em; }
+#bar button { background:rgba(34,211,238,.06) !important; border:1px solid rgba(34,211,238,.28) !important; color:#bfefff !important; }
+#bar button:hover { background:rgba(34,211,238,.16) !important; box-shadow:0 0 14px rgba(34,211,238,.3); }
+#bar #btn_header_stop { background:linear-gradient(135deg,#e11d48,#9f1239) !important; border:1px solid #fb7185 !important; color:#fff !important;
+  letter-spacing:.1em; box-shadow:0 0 18px rgba(244,63,94,.45) !important; }
+#bar #btn_header_stop:hover { box-shadow:0 0 28px rgba(244,63,94,.7) !important; }
+.header-device { border-color:rgba(34,211,238,.25) !important; background:rgba(3,10,22,.6) !important; }
+.header-device:before { animation:hudPulse 1.8s ease-in-out infinite; }
+@keyframes hudPulse { 50% { box-shadow:0 0 0 5px transparent, 0 0 12px currentColor; opacity:.55; } }
+#motor_label { color:#bfefff !important; font-family:Consolas,"Microsoft YaHei UI",monospace; }
+
+/* ---- 玻璃卡片 + HUD 角标 ---- */
+.panel,.calibration-panel,#rpmbar,.summary-grid > *,.overview-grid > *,#chart-panel,.status-strip,.status-card {
+  color:var(--ink); }
+.panel,.calibration-panel,#chart-panel,#rpmbar {
+  background:
+    linear-gradient(var(--neon),var(--neon)) left top/16px 1px no-repeat,
+    linear-gradient(var(--neon),var(--neon)) left top/1px 16px no-repeat,
+    linear-gradient(var(--neon2),var(--neon2)) right bottom/16px 1px no-repeat,
+    linear-gradient(var(--neon2),var(--neon2)) right bottom/1px 16px no-repeat,
+    var(--glass) !important;
+  border:1px solid var(--hud-line) !important; border-radius:6px !important;
+  box-shadow:0 0 0 1px rgba(255,255,255,.015) inset, 0 12px 34px rgba(0,0,0,.38) !important;
+  backdrop-filter:blur(8px); }
+.panel .panel,#rpmbar .calibration-panel,#rpmbar .loop-reserve { background:transparent !important; box-shadow:none !important; backdrop-filter:none; }
+#rpmbar .calibration-panel { border:1px solid rgba(56,189,248,.14) !important; }
+.status-card { background:transparent !important; border-color:var(--hud-line) !important; }
+.status-card strong { color:#eafcff !important; text-shadow:0 0 12px rgba(34,211,238,.35); }
+.panel-heading { border-color:rgba(56,189,248,.14) !important; }
+.panel-heading h2 { color:#eafcff !important; letter-spacing:.08em; text-shadow:0 0 12px rgba(34,211,238,.28); }
+.panel-heading h2:before,.panel-heading:before { background:linear-gradient(180deg,var(--neon),var(--neon2)) !important;
+  box-shadow:0 0 10px var(--neon); width:3px !important; }
+.panel-heading small { color:#5f86ad !important; font-family:Consolas,"Microsoft YaHei UI",monospace; letter-spacing:.06em; }
+.page-heading h1 { color:#eafcff !important; }
+.page-heading p,.page-stamp { color:#6f90b3 !important; }
+
+/* ---- 读数块: 深色玻璃 + 发光等宽数字 ---- */
+.live-value,.overview-grid .motor-readout div,.encoder-angle,.encoder-metrics .live-value,.control-feedback,.control-feedback > *,.target-fields {
+  background:linear-gradient(180deg,rgba(14,30,56,.75),rgba(6,14,28,.75)) !important;
+  border:1px solid rgba(56,189,248,.14) !important; border-radius:5px !important; }
+.live-value strong,.encoder-angle strong,.control-feedback strong,.overview-grid .motor-readout strong,
+#encoder_raw,#encoder_speed,#phase_a,#phase_b,#phase_c,#v_ntc,#dash_step {
+  font-family:"Cascadia Mono",Consolas,monospace !important; color:#effdff !important;
+  text-shadow:0 0 10px rgba(34,211,238,.55), 0 0 22px rgba(34,211,238,.18); }
+.live-value span,.live-value small { color:#6f90b3 !important; }
+
+/* ---- 表单 ---- */
+input,select,textarea { background:rgba(2,8,20,.85) !important; color:#e6f7ff !important;
+  border:1px solid rgba(56,189,248,.26) !important; border-radius:4px !important; }
+input:focus,select:focus,textarea:focus { outline:0; border-color:var(--neon) !important;
+  box-shadow:0 0 0 3px rgba(34,211,238,.16), 0 0 16px rgba(34,211,238,.25) !important; }
+input[type=checkbox] { accent-color:var(--neon); }
+label,.loop-field span,.tune-field span { color:#8fb0cf; }
+
+/* ---- 按钮 ---- */
+button { transition:box-shadow .2s, filter .2s, background .2s; }
+#rpmbar button,.calibration-panel button,#tracebar button,#ctl button,.tune-actions button {
+  background:rgba(34,211,238,.06) !important; color:#bfefff !important; border:1px solid rgba(56,189,248,.28) !important; }
+#rpmbar button:hover:not(:disabled),#tracebar button:hover,#ctl button:hover { background:rgba(34,211,238,.14) !important;
+  box-shadow:0 0 14px rgba(34,211,238,.25); }
+#rpmbar #btn_loop_run,#calibration_panel #btn_calibrate,.connection-actions button {
+  background:linear-gradient(135deg,#06b6d4,#4f46e5) !important; color:#fff !important; border:1px solid rgba(165,243,252,.55) !important;
+  letter-spacing:.14em; font-weight:700; box-shadow:0 0 20px rgba(34,211,238,.38), 0 0 0 1px rgba(255,255,255,.08) inset !important; }
+#rpmbar #btn_loop_run:hover:not(:disabled),.connection-actions button:hover { box-shadow:0 0 30px rgba(34,211,238,.6) !important; filter:brightness(1.1); }
+#calibration_panel #btn_calibrate:disabled { filter:saturate(.35) brightness(.7); box-shadow:none !important; }
+#rpmbar #btn_loop_run.running,#rpmbar #btn_loop_run.running:disabled {
+  background:linear-gradient(135deg,#10b981,#0d9488) !important; border-color:#6ee7b7 !important;
+  animation:hudRun 1.4s ease-in-out infinite; opacity:1; }
+@keyframes hudRun { 50% { box-shadow:0 0 34px rgba(16,185,129,.75); } }
+#rpmbar #btn_loop_stop { background:rgba(244,63,94,.10) !important; color:#fda4af !important; border:1px solid rgba(244,63,94,.55) !important;
+  letter-spacing:.14em; font-weight:700; }
+#rpmbar #btn_loop_stop:hover:not(:disabled) { background:rgba(244,63,94,.2) !important; box-shadow:0 0 20px rgba(244,63,94,.45) !important; }
+#ctl button.on { color:#6ee7b7 !important; border-color:rgba(16,185,129,.6) !important; background:rgba(16,185,129,.12) !important; }
+
+/* ---- 模式下拉 ---- */
+#rpmbar #mode_trigger { background:linear-gradient(135deg,rgba(6,182,212,.9),rgba(79,70,229,.9)) !important;
+  border:1px solid rgba(165,243,252,.55) !important; box-shadow:0 0 22px rgba(34,211,238,.35) !important; }
+#rpmbar #mode_trigger small { color:#cffafe !important; }
+#rpmbar #mode_chips { background:rgba(4,12,28,.96) !important; border:1px solid rgba(56,189,248,.35) !important;
+  box-shadow:0 18px 50px rgba(0,0,0,.6), 0 0 24px rgba(34,211,238,.15) !important; backdrop-filter:blur(14px); }
+#rpmbar #mode_chips .mode-chip { color:#cfe8ff !important; }
+#rpmbar #mode_chips .mode-chip b { color:#eafcff !important; }
+#rpmbar #mode_chips .mode-chip small { color:#6f90b3 !important; }
+#rpmbar #mode_chips .mode-chip:hover,#rpmbar #mode_chips .mode-chip:focus { background:rgba(34,211,238,.1) !important; border-color:rgba(34,211,238,.35) !important; }
+#rpmbar #mode_chips .mode-chip.selected { background:rgba(34,211,238,.16) !important; border-color:var(--neon) !important;
+  box-shadow:inset 3px 0 0 var(--neon); }
+
+/* ---- 折叠区 / details ---- */
+details { background:rgba(6,14,28,.55) !important; border:1px solid rgba(56,189,248,.16) !important; }
+details > summary { color:#a8d8f0; }
+details[open] > summary { color:#e6fbff; }
+#mode_tuning { background:rgba(6,14,28,.6) !important; border-color:rgba(56,189,248,.2) !important; }
+#mode_tuning > summary b { color:#eafcff !important; }
+
+/* ---- 波形 ---- */
+#curves { background:#040a16 !important; border:1px solid rgba(56,189,248,.22) !important;
+  box-shadow:inset 0 0 50px rgba(34,211,238,.06), 0 0 24px rgba(34,211,238,.06) !important; }
+
+/* ---- 表格 / 事件 ---- */
+table { color:#cfe3f7; }
+th { background:rgba(34,211,238,.06) !important; color:#6fb8d8 !important; letter-spacing:.08em; }
+td,th { border-color:rgba(56,189,248,.1) !important; }
+tr:hover td { background:rgba(34,211,238,.04); }
+
+/* ---- 状态色保持可读 ---- */
+.bad,#v_conn.bad { color:#fb7185 !important; }
+.state-chip { background:rgba(148,163,184,.1) !important; color:#9fb6cf !important; }
+.state-chip.running,.calib-badge.done { background:rgba(16,185,129,.14) !important; color:#6ee7b7 !important; }
+.state-chip.bad,.calib-badge.failed { background:rgba(244,63,94,.14) !important; color:#fda4af !important; }
+.calib-badge.busy { background:rgba(34,211,238,.14) !important; color:#67e8f9 !important; }
+.calib-gate,#profile_note { background:rgba(245,158,11,.1) !important; color:#fcd34d !important; border-color:rgba(245,158,11,.35) !important; }
+.workflow-help { background:rgba(10,20,38,.6) !important; border-left:2px solid var(--neon) !important; }
+progress,.calib-progress { accent-color:var(--neon); filter:drop-shadow(0 0 6px rgba(34,211,238,.5)); }
+
+@media (prefers-reduced-motion:reduce) {
+  #bar:after,.header-device:before,#rpmbar #btn_loop_run.running { animation:none !important; } }
+
+/* 字号放大 + 隐藏装饰小字 (2026-09-29) */
+.panel-heading small { display:none !important; }
+.live-value strong,.overview-grid .motor-readout strong,.encoder-angle strong { font-size:28px !important; line-height:1.2; }
+.live-value span,.overview-grid .motor-readout span,.live-value small { font-size:14px !important; }
+/* 关键读数标签：增强相名、温度和步长的可读性，保持原布局。 */
+.overview-grid .live-values .live-value > span,
+.overview-grid .motor-readout > div > span {
+  font-size:20px !important; font-weight:700; line-height:1.5;
+  color:#d5e8f7 !important;
+}
+.overview-grid .live-values .live-value > small {
+  font-size:18px !important; color:#c6d9eb !important;
+}
+.status-card strong { font-size:20px !important; }
+.panel-heading h2 { font-size:17px !important; }
+#events th:nth-child(2),#events td:nth-child(2),#events th:nth-child(3),#events td:nth-child(3),
+.event-table th:nth-child(-n+3),.event-table td:nth-child(-n+3) { white-space:nowrap; }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+<aside id="sidebar" aria-label="主导航">
+  <div class="side-brand"><span class="brand-mark" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M5 15.8 8.2 6h3l-1.1 4h5.1l-4.3 8H8.1l1.5-5.1H5Z" fill="currentColor"/></svg>
+  </span></div>
+  <nav class="side-nav">
+    <a class="active" href="#overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 10 9-7 9 7v10H5V10M9 20v-6h6v6"/></svg><span>总览</span></a>
+    <a href="#params_box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="#203b59"/><circle cx="15" cy="12" r="2" fill="#203b59"/><circle cx="8" cy="18" r="2" fill="#203b59"/></svg><span>参数</span></a>
+    <a href="#chart-panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 13h3l3-8 4 14 3-8h5"/></svg><span>波形</span></a>
+    <a href="#rpmbar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg><span>控制</span></a>
+    <a href="#event-logs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/></svg><span>日志</span></a>
+  </nav>
+</aside>
+
+<div class="workspace">
+<header id="bar">
+  <div class="brand-lockup">
+    <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 15.8 8.2 6h3l-1.1 4h5.1l-4.3 8H8.1l1.5-5.1H5Z" fill="currentColor"/></svg></span>
+    <div><span class="brand-title">MotorTune Pro</span><span class="brand-subtitle">RM-7010　<span id="brand_version">—</span></span></div>
+  </div>
+  <div class="header-tools"><button id="btn_header_stop" type="button">停止输出</button>
+    <span class="header-device" id="header_link"><span id="v_conn" class="bad">正在连接</span></span>
+    <span class="header-separator"></span>
+    <span id="motor_label" title="本工程只支持 7010 电机；固件侧档案在 foc/foc_config.h">7010 电机</span>
+    <button id="btn_shutdown" type="button" title="停止输出并关闭后台网页服务">关闭服务</button>
+    <button id="btn_reconnect_top" title="重新打开 USB-CAN 适配器；服务端也会自动重连。">重连</button>
+  </div>
+</header>
+
+<main>
+  <section class="page-heading">
+    <div><h1>设备控制总览</h1><p>实时连接、遥测与电机运行状态</p></div>
+    <span class="page-stamp">N32G455REL7 · CAN 控制台</span>
+  </section>
+  <details id="workflow_help" class="workflow-help"><summary>实机工作流与验收 · 每个环开始前停机，等待你确认</summary>
+    <div class="dwrap"><p>① 开环 30 rpm / 1.5 V / 6 A / 5 s，检查原始编码器连续运动；起动不足先停机分析，再短测 3 V。② 停机检查 raw 抖动与错误，再做约 50 s 开环校准。③ 电压 → 电流 → 力矩 → 速度 → 位置 → MIT，逐阶段批准。</p>
+    <p>运行时长默认不限（参数里可设 1–120 s）；关掉页面立即停机，页面卡死 6 s、CAN 断 1 s 自动停机；故障或数据失效立即停机。目标默认 0 不会主动转动。编码器电角度需校准成功；三相电流和角度来自不同遥测流，不能拿网页曲线当同步采样验证。</p>
+    <p><a href="/guide?name=project" target="_blank">统一工程说明、进度与版本流程</a></p></div>
+  </details>
+  <div id="v_errbox" class="bad" role="status" aria-live="polite"></div>
+
+  <section class="status-grid" id="overview" aria-label="设备摘要">
+    <article class="status-card"><span class="status-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12 4 4L19 6"/></svg></span><div class="status-copy"><span class="status-label">在线状态</span><strong class="status-value" id="dash_online">等待设备</strong><span class="status-note" id="dash_reason">CAN 链路状态</span></div></article>
+    <article class="status-card"><span class="status-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></svg></span><div class="status-copy"><span class="status-label">设备模式</span><strong class="status-value" id="dash_control_mode">等待反馈</strong><span class="status-note">设备实际运行的模式</span></div></article>
+    <article class="status-card"><span class="status-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3m6-3v3M9 19v3m6-3v3M2 9h3m14 0h3M2 15h3m14 0h3"/></svg></span><div class="status-copy"><span class="status-label">固件版本</span><strong class="status-value" id="v_ver">-</strong><span class="status-note">活动槽 <span id="v_slot">-</span></span></div></article>
+    <article class="status-card"><span class="status-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12h4l3-8 5 16 3-8h5"/></svg></span><div class="status-copy"><span class="status-label">遥测采样率</span><strong class="status-value"><span id="dash_rate">-</span></strong><span class="status-note" id="dash_telem_state">等待遥测</span></div></article>
+    <article class="status-card"><span class="status-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5m0 3h.01"/></svg></span><div class="status-copy"><span class="status-label">保护状态</span><strong class="status-value" id="dash_fault">等待读取</strong><span class="status-note" id="dash_loops_note">FOC 循环 <span id="v_loops">-</span></span></div></article>
+  </section>
+
+  <section class="overview-grid" aria-label="设备运行面板">
+    <article class="panel">
+      <div class="panel-heading"><h2>设备连接</h2></div>
+      <div class="connection-rows">
+        <div class="connection-row"><span>适配器</span><strong id="adapter_open">读取中</strong></div>
+        <div class="connection-row"><span>通信通道</span><strong id="adapter_channel">-</strong></div>
+        <div class="connection-row"><span>波特率</span><strong id="adapter_bitrate">-</strong></div>
+        <div class="connection-row"><span>节点状态</span><strong id="device_reason">-</strong></div>
+      </div>
+      <details class="profile-reference"><summary>电机档案与参数说明</summary><span id="motor_info" class="k">电机档案读取中</span>
+      <span id="profile_note">电机档案参数需在上电前核实。</span></details>
+      <div class="connection-actions"><button id="btn_reconnect_inline" type="button">重新连接设备</button></div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-heading"><h2>实时相电流</h2></div>
+      <div class="live-values">
+        <div class="live-value"><span>A 相</span><strong id="dash_ia">—</strong><small>A</small></div>
+        <div class="live-value"><span>B 相</span><strong id="dash_ib">—</strong><small>A</small></div>
+        <div class="live-value"><span>C 相</span><strong id="dash_ic">—</strong><small>A</small></div>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-heading"><h2>输出与温度</h2></div>
+      <div class="motor-status-body">
+        <div class="motor-readout">
+          <span class="state-chip" id="dash_motor_state">状态读取中</span>
+          <div><span>换向步长</span><strong id="dash_step">— ms</strong></div>
+          <div><span>绕组温度</span><strong id="v_ntc">--.-</strong></div>
+        </div>
+      </div>
+    </article>
+    <article class="panel" id="encoder_panel">
+      <div class="panel-heading"><h2>磁编码器</h2><small>AS5048A · CAN 0xA4</small></div>
+      <div class="encoder-readout">
+        <div class="encoder-angle"><span>电角度</span><strong id="encoder_electrical_angle">—</strong><small>° · <span id="encoder_electrical_state">等待校准参数</span></small></div>
+        <div class="encoder-metrics">
+          <div class="live-value"><span>原始计数</span><strong id="encoder_raw">—</strong><small>/ 16384</small></div>
+          <div class="live-value"><span>估算转速</span><strong id="encoder_speed">—</strong><small>rpm</small></div>
+        </div>
+      </div>
+      <div class="encoder-meta">机械单圈角 <strong id="encoder_angle">—</strong> °</div>
+      <div class="encoder-meta">传感器状态 <strong id="encoder_state">等待角度帧</strong></div>
+      <div class="encoder-meta">最近帧 <strong id="encoder_age">—</strong>　累计错误 <strong id="encoder_errors">—</strong></div>
+    </article>
+  </section>
+
+    <div id="rpmbar">
+      <section id="calibration_panel" class="panel calibration-panel">
+        <div class="panel-heading"><h2>编码器开环校准</h2></div>
+        <div class="calib-head">
+          <span id="calib_badge" class="calib-badge">等待校准</span>
+          <button id="btn_calibrate" type="button" disabled>开始自校准</button>
+          <button id="btn_calibrate_abort" type="button" disabled>中止</button>
+        </div>
+        <div class="calib-row">
+          <progress id="calib_progress" class="calib-progress" max="100" value="0"></progress>
+          <strong id="calib_status">等待校准</strong>
+        </div>
+        <div class="calib-note">约 50 秒，完成后自动停止并保存。<details><summary>电流限制与重新校准条件</summary><p>开环电压从零缓升，目标不超过 6.0 A，控制限流最高 15 A，过流保护 30 A。先对齐，再正反扫角计算方向和圆周平均零点。首次使用本版、更换电机或调整磁铁安装后需要重新校准；成功保存后重启仍有效。</p></details></div>
+      </section>
+
+      <section class="loop-reserve" >
+        <div class="panel-heading"><h2>控制模式</h2></div>
+        <div class="mode-picker">
+          <div class="mode-select">
+            <button id="mode_trigger" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="mode_chips">
+              <span class="mode-trigger-text"><b id="mode_trigger_name">正弦开环</b><small id="mode_trigger_sub">无需编码器 · 转速</small></span>
+              <span class="mode-caret" aria-hidden="true"></span>
+            </button>
+            <div id="mode_chips" class="mode-chips" role="listbox" aria-label="运行模式选择" hidden>
+          <button class="mode-chip selected" type="button" data-control-mode="0"><b>正弦开环</b><small>无需编码器 · 转速</small></button>
+          <button class="mode-chip" type="button" data-control-mode="4"><b>电压模式</b><small>编码器定向 · Ud / Uq</small></button>
+          <button class="mode-chip" type="button" data-control-mode="5"><b>电流环</b><small>编码器定向 · Iq</small></button>
+          <button class="mode-chip" type="button" data-control-mode="2"><b>速度环</b><small>编码器测速 · rpm</small></button>
+          <button class="mode-chip" type="button" data-control-mode="3"><b>位置环</b><small>编码器位置 · 多圈角</small></button>
+          <button class="mode-chip" type="button" data-control-mode="1"><b>力矩模式</b><small>Kt 换算 · N·m</small></button>
+          <button class="mode-chip" type="button" data-control-mode="6"><b>MIT 力矩</b><small>位置+速度 · 阻抗</small></button>
+            </div>
+          </div>
+          <input id="control_mode_select" type="hidden" value="0" aria-hidden="true">
+          <span id="selected_mode_note">正弦开环：旋转电压驱动，不需要编码器，也不需要先校准。</span>
+        </div>
+        <div class="dwrap">
+          <div class="target-fields">
+            <div class="target-group" data-target-mode="0">
+              <label class="loop-field">开环目标转速 (rpm)<input id="in_rpm" type="number" min="3" max="200" step="1" value="30"></label>
+              <input id="in_rpm_slider" type="range" min="3" max="200" step="1" value="30" aria-label="开环目标转速滑条（rpm）">
+            </div>
+            <div class="target-group" data-target-mode="1" hidden>
+              <label class="loop-field">目标力矩 (N·m)<input id="target_torque_nm" type="number" min="-0.5" max="0.5" step="0.01" value="0"></label>
+            </div>
+            <div class="target-group" data-target-mode="2" hidden>
+              <label class="loop-field">速度目标 (rpm)<input id="target_speed_rpm" type="number" min="-300" max="300" step="1" value="0"></label>
+            </div>
+            <div class="target-group" data-target-mode="3" hidden>
+              <label class="loop-field">位置目标（绝对多圈角 °）<input id="target_position_deg" type="number" min="-360000" max="360000" step="0.5" value="0"></label>
+              <label class="loop-field">相对移动 (°)<input id="position_rel_deg" type="number" min="-360" max="360" step="1" value="5"></label>
+              <button id="btn_position_rel" type="button">目标 = 当前位置 + 相对角</button>
+              <span id="position_readout" class="loop-readout-strong"></span>
+            </div>
+            <div class="target-group" data-target-mode="4" hidden>
+              <label class="loop-field">Ud 目标 (V)<input id="target_voltage_d_v" type="number" min="-5" max="5" step="0.1" value="0"></label>
+              <label class="loop-field">Uq 目标 (V)<input id="target_voltage_v" type="number" min="-5" max="5" step="0.1" value="0"></label>
+            </div>
+            <div class="target-group" data-target-mode="5" hidden>
+              <label class="loop-field">Iq 目标 (A 峰值)<input id="target_current_a" type="number" min="-15" max="15" step="0.1" value="0"></label>
+            </div>
+            <div class="target-group" data-target-mode="6" hidden>
+              <label class="loop-field">MIT 位置 (rad)<input id="target_mit_position_rad" type="number" min="-6283.185" max="6283.185" step="0.01" value="0"></label>
+              <label class="loop-field">MIT 速度 (rad/s)<input id="target_mit_speed_rad_s" type="number" min="-31.416" max="31.416" step="0.1" value="0"></label>
+              <label class="loop-field">MIT Kp (N·m/rad)<input id="target_mit_kp" type="number" min="0" max="10" step="0.01" value="0.5"></label>
+              <label class="loop-field">MIT Kd (N·m·s/rad)<input id="target_mit_kd" type="number" min="0" max="5" step="0.02" value="0.02"></label>
+              <label class="loop-field">MIT 前馈力矩 (N·m)<input id="target_mit_torque_nm" type="number" min="-0.5" max="0.5" step="0.01" value="0"></label>
+            </div>
+          </div>
+          <small id="calib_gate" class="calib-gate" hidden></small>
+          <div id="mode_feedback" class="control-feedback" hidden>
+            <span>Id 实测 (A)<strong id="loop_id">—</strong></span>
+            <span>Iq 实测 (A)<strong id="loop_iq">—</strong></span>
+            <span>转速 (rpm)<strong id="loop_speed">—</strong></span>
+            <span>多圈位置 (°)<strong id="loop_position">—</strong></span>
+          </div>
+          <button id="btn_capture_position" type="button" hidden>以当前位置为目标</button>
+          <div class="control-actions run-actions" role="group" aria-label="启动与停止">
+            <button id="btn_loop_run" type="button" disabled>启动</button>
+            <button id="btn_loop_stop" type="button">停止</button>
+            <span id="loop_hint" class="loop-reserve-note" aria-live="polite"></span>
+          </div>
+          <details id="mode_tuning" class="tuning-panel">
+            <summary><b id="tune_title">调参</b><span id="tune_summary" class="loop-reserve-note"></span></summary>
+            <div class="tune-grid tune-common">
+              <label>运行时长 (s，0 = 不限时)<input id="mode_seconds" type="number" min="0" max="120" step="1" value="0"></label>
+              <label data-tune-modes="0">电压幅值上限 (V)<input id="open_voltage" type="number" min="0.1" max="5" step="0.1" value="3"></label>
+              <label data-tune-modes="0">相电流峰值上限 (A)<input id="open_current" type="number" min="0.1" max="15" step="0.1" value="6"></label>
+            </div>
+            <div id="tune_fields" class="tune-grid"></div><details id="tune_advanced"><summary>滤波、斜坡与电机参数</summary><div id="tune_advanced_fields" class="tune-grid"></div></details>
+            <div class="control-actions tune-actions" data-tune-modes="1,2,3,4,5,6">
+              <button id="btn_tune_read" type="button">读取设备参数</button>
+              <button id="btn_tune_apply" type="button">应用并保存到设备</button>
+              <span class="loop-reserve-note">改过的参数在点「启动」时也会自动写入。</span>
+            </div>
+          </details>
+          <div class="control-readout">
+            <span>固件模式：<strong id="control_mode_status">—</strong></span>
+            <span>Iq 目标：<strong id="control_iq_status">— A</strong></span>
+            <span>启动阶段：<strong id="control_assist_stage">—</strong></span>
+            <span>饱和：<strong id="control_assist_flags">—</strong></span>
+            <span><span hidden>标定状态：<strong id="control_calib_status">—</strong></span></span>
+          </div>
+        </div>
+      </section>
+
+      <details class="ota-panel"><summary>固件更新（使用你现有 CAN-OTA 流程）</summary>
+        <div class="panel-heading"><h2>FOC_7010 CAN-OTA</h2><small>编译当前工程并升级设备</small></div>
+        <div class="ota-row">
+          <button id="btn_ota_onekey" type="button">一键编译并 CAN-OTA</button>
+          <strong id="ota_status">待命 · 目标工程 FOC_7010</strong>
+        </div>
+        <small class="loop-reserve-note">执行前会先发送停机命令并释放网页的 CAN 适配器；Makefile 会递增固件版本、编译 A/B 槽并更新设备。</small>
+        <details class="ota-log"><summary>查看升级日志</summary><pre id="ota_output" aria-live="polite">尚未运行</pre></details>
+      </details>
+      <span id="rpm_hint" class="k"></span>
+    </div>
+
+  <section class="summary-grid" aria-label="事件与设备信息">
+    <article class="panel" id="event-logs">
+      <div class="panel-heading"><h2>设备事件</h2></div>
+      <table class="event-table">
+        <thead><tr><th>时间</th><th>级别</th><th>模块</th><th>事件</th></tr></thead>
+        <tbody id="event_rows"><tr><td colspan="4" class="k">等待设备状态</td></tr></tbody>
+      </table>
+    </article>
+    <article class="panel">
+      <div class="panel-heading"><h2>系统信息</h2></div>
+      <div class="sys-list">
+        <div class="sys-row"><span>电机档案</span><strong id="sys_model">-</strong></div>
+        <div class="sys-row"><span>控制器</span><strong>N32G455REL7</strong></div>
+        <div class="sys-row"><span>固件 / 槽位</span><strong id="sys_version">-</strong></div>
+        <div class="sys-row"><span>CAN 节点</span><strong id="sys_nodes">-</strong></div>
+        <div class="sys-row"><span>收 / 发帧</span><strong id="sys_traffic">-</strong></div>
+      </div>
+    </article>
+    <article class="panel">
+      <div class="panel-heading"><h2>三相电流</h2></div>
+      <div class="phase-body">
+        <div class="phase-list">
+          <div><span class="phase-label"><i class="phase-dot" style="background:#ef4e5b"></i>A 相</span><strong id="phase_a">— A</strong></div>
+          <div><span class="phase-label"><i class="phase-dot" style="background:#1e8fff"></i>B 相</span><strong id="phase_b">— A</strong></div>
+          <div><span class="phase-label"><i class="phase-dot" style="background:#20b767"></i>C 相</span><strong id="phase_c">— A</strong></div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section class="panel chart-panel" id="chart-panel"><div class="panel-heading"><h2>实时波形</h2></div>
+  <div id="tracebar"
+       style="display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center;margin:8px 0 6px;font-size:14px">
+    <span class="k">显示曲线：</span>
+    <label><input type="checkbox" class="tchk" data-trace="ia" checked> A 相</label>
+    <label><input type="checkbox" class="tchk" data-trace="ib" checked> B 相</label>
+    <label><input type="checkbox" class="tchk" data-trace="ic" checked> C 相</label>
+    <label><input type="checkbox" class="tchk" data-trace="theta" checked> 编码器电角度</label>
+    <button id="btn_chk_all" style="font-size:14px">全选</button>
+    <button id="btn_chk_none" style="font-size:14px">全不选</button>
+    <button id="btn_chk_cur" style="font-size:14px">只看电流</button>
+  </div>
+  <canvas id="curves"></canvas>
+
+  <div id="ctl">
+    <button id="btn_telem">遥测：关闭</button>
+
+    <label class="k">采样周期
+      <select id="sel_period">
+        <option value="5">5 ms</option>
+        <option value="10" selected>10 ms</option>
+        <option value="20">20 ms</option>
+        <option value="50">50 ms</option>
+        <option value="100">100 ms</option>
+      </select>
+    </label>
+    <button id="btn_pause">暂停</button>
+    <button id="btn_clear">清空曲线</button>
+    <button id="btn_export_waves">导出四路数据</button>
+    <button id="btn_export_status">导出状态与参数</button>
+    <button id="btn_reconnect">重连 CAN</button>
+    <span id="tstate">正在等待遥测…</span>
+  </div>
+  </section>
+
+  <section id="device-details" class="details-grid">
+  <details id="adv_motor" >
+    <summary>高级：手动设置（一般不用。上面填转速就够了）</summary>
+    <div class="dwrap">
+      <div class="bar" style="flex-wrap:wrap">
+        <label class="k">模式
+          <select id="sel_mode" title="只保留正弦开环（六步模式已删除）">
+            <option value="0" selected>正弦开环</option>
+          </select>
+        </label>
+        <label class="k">电流上限
+          <input id="in_cur" type="number" step="100" min="0" max="5000" value="3000" style="width:6em"
+                 title="相电流上限 mA。默认 3000; 正弦下若不转可往上试到 5000, 但会明显发热">
+          mA
+        </label>
+        <button id="btn_motor"
+ disabled>输出: 状态读取中</button>
+        <label class="k">目标电压
+          <input id="in_volt" type="number" step="0.05" min="0.1" max="5" value="5.0"
+                 style="width:5em" title="电流环的占空比天花板(V)。5V 是实测能转的值; 给太低会原地不转">
+          V
+        </label>
+        <label class="k">母线
+          <input id="in_vbus" type="number" step="0.5" min="1" max="60" value="48"
+                 style="width:4.5em" title="用来把电压换算成占空比; 按当前接入的48V电源填写">
+          V
+        </label>
+        <label class="k">换向步长
+          <input id="in_stepms" type="number" step="1" min="5" max="5000" value="10"
+                 style="width:5em" title="10极对: 1000/step_ms = rpm, 10ms=100rpm, 5ms=200rpm">
+          ms
+        </label>
+      </div>
+      <div class="k">高级开环参数只用于有限时长诊断。<b>电压是幅值上限，电流是相电流峰值限制</b>；
+        真正决定发热的是<b>电流上限</b>（铜损 ≈ 2·I²·R_相，7010 每相 0.275Ω，与转速无关）。
+        常规操作使用上面的模式面板；高级设置不代替闭环目标。
+        模式只保留<b>正弦开环</b>（六步模式已删除）；默认预设 正弦开环 / 3000mA / 5V。</div>
+    </div>
+  </details>
+
+  <details id="params_box">
+    <summary>设备参数</summary>
+    <div class="dwrap">
+      <div class="bar">
+        <button id="btn_refresh">读取参数</button>
+        <button id="btn_save">保存到设备</button>
+        <span id="pmsg" class="warn"></span>
+      </div>
+      <table>
+        <thead><tr><th>编号</th><th>参数</th><th>当前值</th><th>单位</th>
+        <th>范围</th><th>默认值</th><th>状态</th><th>写入</th></tr></thead>
+        <tbody id="ptable"></tbody>
+      </table>
+    </div>
+  </details>
+  </section>
+</main>
+</div>
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ * Live curves: one plain canvas, no chart library, no CDN, fully
+ * offline.
+ *
+ * The phase-current traces (ia, ib, ic in A) share one rolling ~10 s
+ * window.  The device streams at 50..100 Hz, so the curves are fed from
+ * /api/telem/batch (polled every 100 ms): that endpoint hands back EVERY
+ * sample the server received since the page's cursor, oldest first, and
+ * all of them are appended to a bounded ring buffer (~4000 entries).
+ * Nothing is decimated any more -- /api/status only ever carried the
+ * NEWEST frame, which is why the old page plotted 2 points per second and
+ * showed aliased garbage instead of the real waveform.
+ *
+ * Samples carry no device timestamp, so their X positions are assigned
+ * here: each batch is spaced evenly using the effective interval derived
+ * from its measured rate_hz (falling back to the selected period), and the
+ * newest sample of the batch ends at "now", which keeps the window sliding
+ * smoothly.  When the client has fallen behind (dropped:true) the trace is
+ * BROKEN instead of being joined across the missing stretch.
+ *
+ * /api/status stays on its own 200 ms timer for the status bar, the
+ * parameter table and the connection state.
+ *
+ * Every current trace is auto-scaled with a MINIMUM span (0.2 A), so the
+ * ~13 mA quantisation noise of an idle board cannot be amplified into a
+ * full-screen fake waveform.  Above that minimum the scale still follows
+ * the data and the zero line plus the live numeric label stay.
+ *
+ * The board has no bus-voltage sense channel, so vbus is never drawn as
+ * "0.0 V": while it stays 0 the trace is hidden and one short note says
+ * why.  If a future board reports a non-zero value it reappears.
+ * ------------------------------------------------------------------ */
+var WINDOW_S = 10;        /* visible time span, seconds */
+var RING_MAX = 4000;      /* bounded browser-side history (== server keep) */
+var POLL_MS  = 200;       /* /api/status poll (status bar, params, link) */
+var BATCH_MS = 100;       /* /api/telem/batch poll (the curves) */
+var RATE_MIN = 10;        /* a rate outside this range is not trusted */
+var RATE_MAX = 500;       /* ...and the period selector is used instead */
+
+/* CSS colors must mirror the :root palette (canvas cannot use var()). */
+var C_BG = "#040a16", C_PANEL_LINE = "#12304a", C_GRID = "#0c2236",
+    C_GRID_T = "#0a1a2b", C_ZERO = "#1f5577", C_DIM = "#6f9cc0";
+
+/* minSpan: the autoscale never zooms in tighter than this, so sensor
+   quantisation noise stays a small wiggle instead of a full-screen wave. */
+var BASE_TRACES = [
+  { key:"ia", label:"A 相电流", unit:"A", div:1000, dec:2, color:"#f0646e",
+    minSpan:0.2 },
+  { key:"ib", label:"B 相电流", unit:"A", div:1000, dec:2, color:"#61a8ff",
+    minSpan:0.2 },
+  { key:"ic", label:"C 相电流", unit:"A", div:1000, dec:2, color:"#4fd0a0",
+    minSpan:0.2 }
+];
+var encoderRing = [], encoderCursor=null, encoderCalibrationKey=null;
+var ring = [];            /* [{t, ia, ib, ic, vbus, brk}] oldest first */
+var batchCursor = null;   /* last telemetry seq the page has absorbed */
+var lastTelem = null;     /* newest sample seen (raw units) for the labels */
+var telemOn = false;
+var telemRequestPending = false;
+var telemManuallyDisabled = false;
+var telemRetryAfter = 0;
+var encoderReadable = false;
+var telemRate = null;     /* measured rate, from /api/telem/batch */
+var telemStale = false;
+var lastDataT = null;     /* wall clock of the last absorbed batch */
+var lastStatusAge = null; /* fallback age from /api/status */
+var periodSynced = false; /* server period mirror adopted yet? */
+var paused = false;
+var vbusFitted = false;   /* flips true only if the device reports != 0 */
+var firstStatus = true;   /* the load-time status enables telemetry once */
+var encoderParamsRequested = false;
+var dashboardLogState = null;
+
+function $(id) { return document.getElementById(id); }
+
+/* Identical text/class values do not need another DOM/style invalidation. */
+function setNodeText(el, value) {
+  var text = value === null || value === undefined ? "" : String(value);
+  if (el && el.textContent !== text) { el.textContent = text; }
+}
+function setNodeClass(el, value) {
+  if (el && el.className !== value) { el.className = value; }
+}
+
+/* Keep polling cadence, but never queue another copy of an unfinished read. */
+var pendingPolls = Object.create(null);
+function pollOnce(key, read) {
+  if (pendingPolls[key]) { return pendingPolls[key]; }
+  pendingPolls[key] = Promise.resolve().then(read).finally(function () {
+    delete pendingPolls[key];
+  });
+  return pendingPolls[key];
+}
+
+var controlToken = "__CONTROL_TOKEN__";
+var commandEpoch = Number("__COMMAND_EPOCH__");
+document.getElementById("btn_shutdown").onclick = async function () {
+  var button=this; button.disabled=true; button.textContent="正在关闭…";
+  try {
+    var result=await fetchJSON('/api/shutdown');
+    if(!result.ok){throw Error(result.error || "关闭失败");}
+    document.querySelectorAll('button,input,select').forEach(function(el){el.disabled=true;});
+    var notice=document.createElement('div');
+    notice.style.cssText='position:fixed;inset:0;z-index:99999;background:#081120;display:grid;place-items:center;color:#e8f5ff;font-size:24px;text-align:center';
+    notice.textContent="网页服务已关闭，可关闭此标签页。重新使用请双击启动网页。";
+    document.body.appendChild(notice);
+  } catch(error){button.disabled=false;button.textContent="关闭服务";alert(error.message);}
+};
+var commandGeneration = 0;
+var stoppingOutputs = false;
+var mutatingRoutes = new Set(JSON.parse('__MUTATING_ROUTES__'));
+function checkCommandGeneration(g) {
+ if(g !== commandGeneration || stoppingOutputs){throw Error("操作已被停止取消，请确认状态后重新启动。");}
+}
+
+async function stopOutputs(){
+ commandGeneration++;
+ stoppingOutputs=true;
+ try {
+ var began=Date.now()/1000;
+ var reply=await fetchJSON("/api/motor?enable=0");
+ if(!reply||!reply.ok){throw Error((reply&&reply.error)||"停止指令未确认；检查连接或现场断电。");}
+ var deadline=Date.now()+3500;
+ while(Date.now()<deadline){
+  var status=await fetchJSON("/api/status"),m=status.motor||{};
+  if(m.available&&m.updated_at>=began&&m.state===0&&m.output_on===false){renderStatus(status);return status;}
+  await new Promise(function(resolve){setTimeout(resolve,250);});
+ }
+ throw Error("已发送停止指令，但没有取得新鲜停机反馈；检查连接，必要时现场断电。");
+ } finally { stoppingOutputs=false; }
+}
+$("btn_header_stop").onclick=function(){var button=this;button.disabled=true;button.textContent="正在停止…";stopOutputs().then(function(){button.textContent="已确认停止";}).catch(function(e){button.textContent="停机未确认";setErr(e.message);}).finally(function(){button.disabled=false;});};
+
+function fmt(v) { return (v === null || v === undefined) ? "-" : String(v); }
+
+function fetchJSON(url) {
+  var u=new URL(url,window.location.origin), options={cache:"no-store"};
+  var generation=commandGeneration;
+  var write=mutatingRoutes.has(u.pathname);
+  var stop=(u.pathname==="/api/motor" && u.searchParams.get("enable")==="0") ||
+           (u.pathname==="/api/control/calibrate" && u.searchParams.get("op")==="abort");
+  if(write){
+    if(stop){commandGeneration++;generation=commandGeneration;}
+    else if(stoppingOutputs){return Promise.reject(Error("正在停止，操作未发送。"));}
+    options.method="POST";
+    options.headers={"X-Control-Token":controlToken,"X-Command-Epoch":String(commandEpoch)};
+    options.body="";
+  }
+  return fetch(url,options).then(function (r) {
+    var epoch=r.headers.get("X-Command-Epoch");
+    if(epoch!==null){commandEpoch=Math.max(commandEpoch,Number(epoch));}
+    return r.text().then(function (t) {
+      var o;
+      try { o = JSON.parse(t); }
+      catch (e) {
+        throw new Error("bad JSON from " + url + " (HTTP " + r.status + ")");
+      }
+      if(write&&!stop&&generation!==commandGeneration){throw Error("操作已被停止取消。");}
+      return o;
+    });
+  });
+}
+
+function setMsg(el, text, cls) {
+  if (!el) { return; }
+  setNodeText(el, text || "");
+  setNodeClass(el, cls || "");
+}
+
+function setErr(text) {
+  var box = $("v_errbox");
+  setNodeText(box, text ? ("设备提示：" + text) : "");
+  setNodeClass(box, text ? "bad" : "");
+}
+
+function addDashboardEvent(level, module, message) {
+  var body = $("event_rows");
+  if (!body) { return; }
+  if (!dashboardLogState || !dashboardLogState.started) {
+    body.innerHTML = "";
+    dashboardLogState = dashboardLogState || {};
+    dashboardLogState.started = true;
+  }
+  var row = document.createElement("tr");
+  var time = document.createElement("td");
+  time.className = "event-time";
+  time.textContent = new Date().toLocaleTimeString([], { hour12:false });
+  var status = document.createElement("td");
+  status.className = "event-level" + (level === "警告" ? " warn" : (level === "故障" ? " bad" : ""));
+  status.textContent = level;
+  var source = document.createElement("td");
+  source.textContent = module;
+  var detail = document.createElement("td");
+  detail.textContent = message;
+  row.appendChild(time); row.appendChild(status); row.appendChild(source); row.appendChild(detail);
+  body.insertBefore(row, body.firstChild);
+  while (body.rows.length > 5) { body.deleteRow(body.rows.length - 1); }
+}
+
+function logDashboardStatus(s) {
+  var motor = s.motor || {};
+  var modeLabel=$("dash_control_mode");
+  if(modeLabel){setNodeText(modeLabel, motor.available ? (["正弦开环","力矩模式","速度环","位置环","电压模式","电流环","MIT 力矩"][motor.mode] || "未知模式") : "等待反馈");}
+  var next = {
+    connected:!!s.connected,
+    version:s.version || null,
+    slot:s.active_slot || null,
+    output:motor.available ? !!motor.output_on : null,
+    fault:motor.available ? !!motor.fault : null,
+    telem:!!s.telem_enable
+  };
+  if (!dashboardLogState || !dashboardLogState.started) {
+    addDashboardEvent("信息", "系统", "已读取当前设备状态");
+    addDashboardEvent(next.connected ? "信息" : "警告", "连接", next.connected ? "设备已连接" : (s.reason || "设备未连接"));
+  } else {
+    var prev = dashboardLogState;
+    if (next.connected !== prev.connected) {
+      addDashboardEvent(next.connected ? "信息" : "警告", "连接", next.connected ? "设备已恢复连接" : "设备连接中断");
+    }
+    if (next.version && (next.version !== prev.version || next.slot !== prev.slot)) {
+      addDashboardEvent("信息", "固件", "版本 " + next.version + " · 活动槽 " + (next.slot || "-"));
+    }
+    if (next.output !== null && next.output !== prev.output) {
+      addDashboardEvent("信息", "电机控制", next.output ? "功率输出已开启" : "功率输出已关闭");
+    }
+    if (next.fault !== null && next.fault !== prev.fault) {
+      addDashboardEvent(next.fault ? "故障" : "信息", "保护", next.fault ? "设备报告保护故障" : "设备保护状态已恢复");
+    }
+    if (next.telem !== prev.telem) {
+      addDashboardEvent("信息", "遥测", next.telem ? "遥测采集已开启" : "遥测采集已关闭");
+    }
+  }
+  next.started = true;
+  dashboardLogState = next;
+}
+
+/* ---------------------------- ring buffer --------------------------- */
+function pushSample(t, ia, ib, ic, vbus, brk) {
+  ring.push({ t:t, ia:ia, ib:ib, ic:ic, vbus:vbus, brk:!!brk });
+  if (ring.length > RING_MAX) { ring.splice(0, ring.length - RING_MAX); }
+}
+
+/* Effective sample interval of a batch, in seconds: prefer the rate the
+   server actually measured; fall back to the period the operator chose
+   when the rate is missing or implausible.  There is no per-sample
+   timestamp on the wire, so this is what turns a batch into X positions. */
+function effInterval(b) {
+  var rate = (b && typeof b.rate_hz === "number") ? b.rate_hz : null;
+  if (rate !== null && rate >= RATE_MIN && rate <= RATE_MAX) { return 1 / rate; }
+  var ms = Number($("sel_period").value);
+  if (!ms || !isFinite(ms) || ms <= 0) { ms = 10; }
+  return ms / 1000;
+}
+
+/* /api/telem/batch carries EVERY sample the server has seen since our
+   cursor, oldest first -- no filtering, no decimation.  X positions are
+   assigned here: the batch is laid out evenly and its newest sample ends
+   at "now", so the window slides smoothly.  dropped:true means the server
+   had already discarded frames we never saw: the first point of this batch
+   is flagged as a break so the trace is not drawn straight across a gap. */
+function absorbBatch(b) {
+  var rows = (b && b.samples && b.samples.length) ? b.samples : [];
+  if (!rows.length) { return; }
+  var n = rows.length;
+  if (!paused) {
+    var nowT = Date.now() / 1000;
+    var dt = effInterval(b);
+    var t0 = nowT - (n - 1) * dt;
+    if (ring.length) {
+      /* never step backwards, even if a batch is longer than the interval
+         the server reported (e.g. a backlog right after connecting) */
+      var prevT = ring[ring.length - 1].t;
+      if (t0 <= prevT) { t0 = prevT + dt; }
+    }
+    var brk = !!b.dropped;
+    for (var i = 0; i < n; i++) {
+      var r = rows[i];
+      pushSample(t0+i*dt,r[0],r[1],r[2],r[3],brk && i===0);
+    }
+    lastDataT = Date.now() / 1000;
+  }
+  var last = rows[n - 1];
+  lastTelem = { ia_mA:last[0], ib_mA:last[1], ic_mA:last[2],
+                vbus_dV:last[3], vbus:last[3] };
+  if (last[3] && b.vbus_not_fitted !== true) { vbusFitted = true; }
+  if (typeof b.rate_hz === "number") { telemRate = b.rate_hz; }
+  if (typeof b.stale === "boolean") { telemStale = b.stale; }
+}
+
+/* age of the newest sample we hold, in seconds (null = nothing yet) */
+function telemAge() {
+  if (lastDataT !== null) {
+    var a = Date.now() / 1000 - lastDataT;
+    return a > 0 ? a : 0;
+  }
+  return lastStatusAge;
+}
+
+/* The curve poll: its own 100 ms timer, independent of /api/status. */
+function absorbEncoderBatch(b){
+ var key=JSON.stringify(b.encoder_calibration_key||[]);
+ if(key!==encoderCalibrationKey){encoderRing=[];encoderCalibrationKey=key;}
+ if(typeof b.encoder_seq==="number"){encoderCursor=b.encoder_seq;}
+ if(paused){return;}
+ (b.encoder_samples||[]).forEach(function(p,i){
+  var prev=encoderRing.length?encoderRing[encoderRing.length-1]:null;
+  var th=typeof p[2]==="number"?p[2]:NaN;
+  /* brk = "这一帧要新起一段"。只在【真的断了】时置位:
+       角度无效/非有限、帧间隔 > 0.25 s、主机丢段。
+     ★ 2026-09-28: 原来还把 |Δ角度|>180 也算断线 —— 于是每越过一次 0/360 边界就断一次,
+       画出来是一根根互不相连的竖线 (用户反馈"0->360° 时候没有连续")。
+       过零是【真实运动】不是丢帧, 现在让它连线, 画成正常锯齿; 丢帧/失效仍然断线,
+       不伪造连续线。 */
+  encoderRing.push({t:p[1],theta:th,raw:p[3],valid:p[4],errors:p[5],
+    brk:(!prev || !isFinite(th) || !isFinite(prev.theta) || p[1]-prev.t>0.25 || (b.encoder_dropped && i===0))});
+ });
+ if(encoderRing.length>RING_MAX){encoderRing.splice(0,encoderRing.length-RING_MAX);}
+}
+
+function pollBatch() {
+  return pollOnce("batch", function () {
+  var url = "/api/telem/batch";
+  if (batchCursor !== null) { url += "?since=" + batchCursor; }
+  if(encoderCursor!==null){url+=(url.indexOf("?")>=0?"&":"?")+"encoder_since="+encoderCursor;}
+  return fetchJSON(url).then(function (b) {
+    if (!b || b.ok === false) { return; }
+    if (typeof b.seq === "number") { batchCursor = b.seq; }
+    absorbEncoderBatch(b);
+    absorbBatch(b);
+  }).catch(function () {
+    /* a broken link is reported once, by the /api/status poll */
+  });
+  });
+}
+
+/* ---------------------------- status bar ---------------------------- */
+function pollStatus() {
+  return pollOnce("status", function () {
+  return fetchJSON("/api/status").then(function (s) {
+    renderStatus(s);
+    var tm = s.telem;
+    if (tm) {
+      /* /api/status is the newest sample only: good for the numeric label
+         and as an age fallback, but the CURVES come from the batch poll. */
+      lastTelem = { ia_mA:tm.ia_mA, ib_mA:tm.ib_mA, ic_mA:tm.ic_mA,
+                    vbus_dV:tm.vbus_dV, vbus:tm.vbus_dV };
+      if (tm.vbus_not_fitted === true) { vbusFitted = false; }
+      else if (tm.vbus_dV) { vbusFitted = true; }
+      if (typeof tm.stale === "boolean" && lastDataT === null) {
+        telemStale = tm.stale;
+      }
+      lastStatusAge = (typeof tm.age_s === "number") ? tm.age_s : null;
+      if (telemRate === null && typeof tm.rate_hz === "number") {
+        telemRate = tm.rate_hz;   /* only until the batch poll reports one */
+      }
+    }
+  }).catch(function (e) {
+    var c = $("v_conn");
+    c.textContent = "服务未响应";
+    c.className = "bad";
+    var online = $("dash_online");
+    if (online) { online.textContent = "离线"; }
+    var header = $("header_link");
+    if (header) { header.className = "header-device disconnected"; }
+    setErr("页面服务未响应（" + e.message + "）");
+  });
+  });
+}
+function renderStatus(s) {
+  var c = $("v_conn");
+  setNodeText(c, s.connected ? "设备已连接" : "未连接");
+  setNodeClass(c, s.connected ? "ok" : "bad");
+  var header = $("header_link");
+  if (header) { setNodeClass(header, "header-device" + (s.connected ? "" : " disconnected")); }
+  var online = $("dash_online");
+  if (online) { setNodeText(online, s.connected ? "在线" : "离线"); }
+  var reason = $("dash_reason");
+  if (reason) { setNodeText(reason, s.connected ? "设备正常应答" : (s.reason || "等待设备连接")); }
+  renderEncoder(s.encoder);
+  var adapter = s.adapter || {};
+  var adapterOpen = $("adapter_open");
+  if (adapterOpen) { setNodeText(adapterOpen, adapter.open ? "适配器已打开" : "适配器未打开"); }
+  var channel = $("adapter_channel");
+  if (channel) { setNodeText(channel, fmt(adapter.channel || "未识别")); }
+  var bitrate = $("adapter_bitrate");
+  if (bitrate) {
+    var rate = Number(adapter.bitrate);
+    setNodeText(bitrate, isFinite(rate) && rate > 0 ? (rate >= 1000 ? (rate / 1000) + " kbit/s" : rate + " bit/s") : "-");
+  }
+  var deviceReason = $("device_reason");
+  if (deviceReason) {
+    setNodeText(deviceReason, s.connected ? "设备已响应" : (adapter.open ? "等待设备应答" : "等待适配器"));
+    deviceReason.title = s.reason || "";
+  }
+  setNodeText($("v_ver"), fmt(s.version));
+  /* 标题栏里的固件版本: 原来是写死的 0x0912, 板上早就不是这个版本了 -> 改成跟着设备读 */
+  if ($("brand_version")) { setNodeText($("brand_version"), fmt(s.version)); }
+  var slot = fmt(s.active_slot);
+  if (s.state) { slot += " (" + s.state + ")"; }
+  setNodeText($("v_slot"), slot);
+  setNodeText($("v_loops"), fmt(s.foc_loops));
+  var motor = s.motor || {};
+  var modeLabel=$("dash_control_mode");
+  if(modeLabel){setNodeText(modeLabel, motor.available ? (["正弦开环","力矩模式","速度环","位置环","电压模式","电流环","MIT 力矩"][motor.mode] || "未知模式") : "等待反馈");}
+  var fault = $("dash_fault");
+  if (fault) {
+    setNodeText(fault, motor.available ? (motor.fault ? "保护已触发" : "未检测到保护") : "尚无状态帧");
+    setNodeClass(fault, "status-value" + (motor.fault ? " bad" : ""));
+  }
+  var motorState = $("dash_motor_state");
+  if (motorState) {
+    setNodeText(motorState, !motor.available ? "状态未知" : (motor.fault ? "保护触发" : (motor.output_on ? "运行中" : "已停止")));
+    setNodeClass(motorState, "state-chip" + (motor.available && motor.output_on && !motor.fault ? " running" : ""));
+  }
+  var step = $("dash_step");
+  if (step) { setNodeText(step, motor.available && motor.step_ms ? (motor.step_ms + " ms") : "— ms"); }
+  var telem = s.telem || null;
+  var mp = s.motor_profile || {};
+  var profileData = mp.data || {};
+  var sysModel = $("sys_model");
+  if (sysModel) { setNodeText(sysModel, profileData.label || mp.sel || "-"); }
+  var sysVersion = $("sys_version");
+  if (sysVersion) { setNodeText(sysVersion, fmt(s.version) + " / " + fmt(s.active_slot)); }
+  var sysNodes = $("sys_nodes");
+  if (sysNodes) { setNodeText(sysNodes, fmt(s.host_id) + " → " + fmt(s.device_id)); }
+  var traffic = s.traffic || {};
+  var sysTraffic = $("sys_traffic");
+  if (sysTraffic) { setNodeText(sysTraffic, fmt(traffic.rx) + " / " + fmt(traffic.tx)); }
+  function showCurrent(id, value) {
+    var el = $(id);
+    if (el) { setNodeText(el, (typeof value === "number") ? (value / 1000).toFixed(2) : "—"); }
+    var phase = id === "dash_ia" ? "phase_a" : (id === "dash_ib" ? "phase_b" : "phase_c");
+    var phaseEl = $(phase);
+    if (phaseEl) { setNodeText(phaseEl, (typeof value === "number") ? ((value / 1000).toFixed(2) + " A") : "— A"); }
+  }
+  showCurrent("dash_ia", telem && telem.ia_mA);
+  showCurrent("dash_ib", telem && telem.ib_mA);
+  showCurrent("dash_ic", telem && telem.ic_mA);
+  renderNtc(s.ntc);
+  renderMotorProfile(s.motor_profile);
+  setErr(s.error || null);
+  var motorBtn = $("btn_motor");
+  if (motorBtn) { motorBtn.disabled = !(s.adapter && s.adapter.open); }
+  if (window.syncMotorStatus) { window.syncMotorStatus(s.motor); }
+  renderParams(s.params || []);
+  updateTelemControls(s);
+  if (s.connected && !encoderParamsRequested) {
+    encoderParamsRequested = true;
+    fetchJSON("/api/getall").then(function (r) {
+      if (r && r.ok) { renderStatus(r); }
+    }).catch(function () { /* encoder panel reports unavailable calibration data */ });
+  }
+  if (s.connected && !telemOn && !telemManuallyDisabled &&
+      !telemRequestPending && Date.now() >= telemRetryAfter) {
+    telemRequest(true);
+  }
+  logDashboardStatus(s);
+  /* ★把最新状态挂到 window 上, 给"模式运行"那个 IIFE 做启动前检查用
+     (它需要 encoder/ntc/motor 才能说清"为什么不允许启动")。 */
+  window.dashboardStatus = s;
+}
+
+function renderEncoder(e) {
+  var angle = $("encoder_angle");
+  var electrical = $("encoder_electrical_angle");
+  var electricalState = $("encoder_electrical_state");
+  var raw = $("encoder_raw");
+  var speed = $("encoder_speed");
+  var state = $("encoder_state");
+  var age = $("encoder_age");
+  var errors = $("encoder_errors");
+  encoderReadable = !!(e && e.valid && !e.stale);
+  if (window.syncCalibrationButton) { window.syncCalibrationButton(); }
+  if (!e) {
+    if (angle) { setNodeText(angle, "—"); }
+    if (electrical) { setNodeText(electrical, "—"); }
+    if (electricalState) { setNodeText(electricalState, "未收到角度帧"); }
+    if (raw) { setNodeText(raw, "—"); }
+    if (speed) { setNodeText(speed, "—"); }
+    if (state) { setNodeText(state, "未收到角度帧"); setNodeClass(state, "encoder-state-bad"); }
+    if (age) { setNodeText(age, "—"); }
+    if (errors) { setNodeText(errors, "—"); }
+    return;
+  }
+  if (angle) { setNodeText(angle, typeof e.angle_deg === "number" ? e.angle_deg.toFixed(2) : "—"); }
+  if (electrical) {
+    setNodeText(electrical, e.electrical_angle_valid && typeof e.electrical_angle_deg === "number"
+      ? e.electrical_angle_deg.toFixed(2) : "—");
+  }
+  if (electricalState) {
+    setNodeText(electricalState, e.electrical_angle_valid ? "已校准" :
+      (e.electrical_angle_note || "未校准或未读取参数"));
+  }
+  if (raw) { setNodeText(raw, typeof e.raw === "number" ? String(e.raw) : "—"); }
+  if (speed) { setNodeText(speed, typeof e.speed_rpm === "number" ? e.speed_rpm.toFixed(1) : "—"); }
+  if (state) {
+    setNodeText(state, e.stale ? "角度帧超时" : (e.status_text || "编码器数据无效"));
+    setNodeClass(state, e.valid && !e.stale ? "encoder-state-valid" : "encoder-state-bad");
+  }
+  if (age) { setNodeText(age, typeof e.age_s === "number" ? e.age_s.toFixed(2) + " s" : "—"); }
+  if (errors) { setNodeText(errors, typeof e.error_count === "number" ? String(e.error_count) : "—"); }
+}
+
+/* ★NTC 温度 (0xA2): 状态栏上一个数字 —— 跟着遥测流自动到, 不新开轮询接口.
+   ntc == null  = 还没收到过温度帧 -> 灰色 "--.-" (不编造 0.0).
+   温度只显示, 绝不参与任何控制 (页面加载/刷新照样不开功率输出). */
+function renderNtc(n) {
+  var el = $("v_ntc");
+  if (!el) { return; }
+  if (!n) {
+    setNodeText(el, "--.-");
+    setNodeClass(el, "k");
+    el.title = "还没收到温度帧 (0xA2): 打开遥测, 或固件未上报 NTC";
+    return;
+  }
+  /* title 里给 raw ADC 和阈值: 用手指捏 NTC 看 raw 往哪边走即可确认分压拓扑 */
+  var tip = "NTC raw ADC " + fmt(n.raw) + " / 触发保护阈值 " + fmt(n.limit_c) + " °C";
+  if (n.age_s !== null && n.age_s !== undefined) { tip += " / 数据 " + n.age_s + " s 前"; }
+  if (n.tripped) { tip += " / 本次上电已过温触发保护"; }
+  if (n.fault) { tip += " / 传感器异常(开路/短路/超范围)"; }
+  el.title = tip;
+
+  if (n.fault) {
+    setNodeText(el, "NTC 异常");
+    setNodeClass(el, "bad");
+    return;
+  }
+  if (!n.valid || typeof n.temp_c !== "number") {
+    setNodeText(el, "--.-");
+    setNodeClass(el, "k");
+    return;
+  }
+  /* 固件用 flags bit1 表示 >=45C; 这里再按数值兜底一次, 两者取或 */
+  var over = !!n.over || (n.temp_c >= 45);
+  var txt = n.temp_c.toFixed(1) + " °C / 上限 " + fmt(n.limit_c);
+  if (over) {
+    setNodeText(el, txt + " 过温, 已禁止启动");
+    setNodeClass(el, "bad");
+  } else {
+    setNodeText(el, txt);
+    setNodeClass(el, "ok");
+  }
+  if (n.tripped) { el.textContent += " 已过温触发保护"; }
+}
+
+var lastParams = [];
+function setText(id,text){var el=$(id);if(el){setNodeText(el, text);}}
+
+/* One short line about the stream state - never a log.  The rate shown here
+   is the one the BATCH endpoint measured, i.e. the real stream rate. */
+function updateTelemControls(s) {
+  telemOn = !!s.telem_enable;
+  var btn = $("btn_telem");
+  setNodeText(btn, "遥测：" + (telemOn ? "开启" : "关闭"));
+  setNodeClass(btn, telemOn ? "on" : "");
+  var rateEl = $("dash_rate");
+  if (rateEl) { setNodeText(rateEl, telemOn && telemRate !== null && telemRate !== undefined ? (telemRate.toFixed(1) + " Hz") : "—"); }
+  var telemState = $("dash_telem_state");
+  if (telemState) { setNodeText(telemState, telemOn ? (telemStale ? "数据已过期" : "正在采集") : "采集已关闭"); }
+  var sel = $("sel_period");
+  if (s.telem_period_ms) {
+    var sv = String(s.telem_period_ms);
+    if (sel.value === sv) {
+      periodSynced = true;      /* the device is running what the page asked */
+    } else if (periodSynced) {
+      sel.value = sv;           /* another client changed it: follow */
+    }
+  }
+  var txt;
+  if (paused) {
+    txt = "已暂停（曲线冻结）";
+  } else if (telemOn) {
+    txt = "正在采集";
+    if (telemRate !== null && telemRate !== undefined) {
+      txt += " · " + telemRate.toFixed(1) + " Hz";
+    } else {
+      txt += "（测量速率中）";
+    }
+    var age = telemAge();
+    if (age !== null) {
+      txt += " · 最近数据 " + age.toFixed(1) + " s 前";
+      if (telemStale) { txt += "（数据过期）"; }
+    }
+  } else {
+    txt = "遥测已关闭";
+  }
+  if (!vbusFitted) { txt += " · 本板未安装母线电压采样"; }
+  if (s.telem_error) { txt += " · " + s.telem_error; }
+  setNodeText($("tstate"), txt);
+}
+
+/* ★电机档案: 只有 7010 (页头是固定标签, 不再有下拉)。
+   服务端 /api/status 的 motor_profile = {sel, default, options:[{key,label}], data:{...}}。
+   固件里的档案在 foc/foc_config.h 的【电机档案】块。 */
+var motorSelInit = false;
+function renderMotorProfile(mp) {
+  if (!mp) { return; }
+  var sel = $("motor_sel");
+  if (sel && !motorSelInit && mp.options) {
+    sel.innerHTML = "";
+    for (var i = 0; i < mp.options.length; i++) {
+      var o = document.createElement("option");
+      o.value = mp.options[i].key;
+      setNodeText(o, mp.options[i].label);
+      sel.appendChild(o);
+    }
+    sel.onchange = function () {
+      sel.disabled = true;
+      fetchJSON("/api/motor_profile?sel=" + encodeURIComponent(sel.value))
+        .then(function (r) {
+          sel.disabled = false;
+          if (r && r.data) { renderMotorProfile({ sel: r.sel, options: mp.options, data: r.data }); }
+          if (!r || !r.ok) { setMsg($("tstate"), "切换电机档案失败: " + ((r && r.error) || "?"), "bad"); }
+        })
+        .catch(function () { sel.disabled = false; });
+    };
+    motorSelInit = true;
+  }
+  if (sel && mp.sel && sel.value !== mp.sel) { sel.value = mp.sel; }
+  var d = mp.data || {};
+  var np = d.nameplate || {};
+  var note = $("profile_note");
+  if (note) {
+    setNodeText(note, mp.sel === "7010"
+      ? "7010 的相电感 600 µH 仍是占位值；上功率前请核对实物铭牌与限流/过流设定，并完成阶跃法测量。"
+      : "网页档案只影响铭牌对照与转速换算；固件侧参数需在对应工程内单独核实。");
+  }
+  var txt = (d.label || mp.sel || "?")
+          + "  " + fmt(np.pole_pairs) + " 极对"
+          + " · Rs " + fmt(np.rs_mohm) + " mΩ/相"
+          + " · Ls " + fmt(np.ls_uh) + " µH/相"
+          + " · Kt " + fmt(np.kt_nm_a_rms) + " N·m/Arms"
+          + " · Ke " + fmt(np.ke_vrms_per_krpm_line) + " Vrms/krpm(线)"
+          + " · 额定 " + fmt(np.rated_current_arms) + " Arms / 峰值 " + fmt(np.peak_current_a) + " A"
+          + " · 默认限流 " + fmt(d.safe_cur_ma_default) + " mA / 电压天花板 " + fmt(d.safe_volt) + " V";
+  setText("motor_info", txt);
+}
+
+/* ------------------------------ canvas ------------------------------ */
+var cvs = $("curves");
+var ctx = cvs.getContext("2d");
+var CW = 0, CH = 0;
+var canvasInView = true;
+
+/* ★波形勾选: traceHidden[key]=true 表示这一路不画。
+   每路一行, 行高由可见路数自动重算(见 draw()), 所以勾掉几路后剩下的会变高、更好看。 */
+var traceHidden = {};
+
+function activeTraces() {
+  var base = BASE_TRACES.concat([{key:"theta",label:"编码器电角度",unit:"°",div:1,dec:1,color:"#f0c86b",minSpan:360}]);  
+  var out = [];
+  for (var i = 0; i < base.length; i++) {
+    if (!traceHidden[base[i].key]) { out.push(base[i]); }
+  }
+  return out;   /* 全勾掉时返回空数组: draw() 会留空画面, 不会崩 */
+}
+
+/* 把页面上每个 checkbox[data-trace=key] 接到 traceHidden 上 */
+function initTraceChecks() {
+  var boxes = document.querySelectorAll("input.tchk");
+  for (var i = 0; i < boxes.length; i++) {
+    (function (b) {
+      var key = b.getAttribute("data-trace");
+      traceHidden[key] = !b.checked;
+      b.onchange = function () {
+        traceHidden[key] = !b.checked;
+        if (typeof draw === "function") { draw(); }   /* 立刻重画, 不等下一帧 */
+      };
+    })(boxes[i]);
+  }
+}
+
+/* ★ 2026-09-28: 波形卡片现在被拉伸填满右列(见 #chart-panel 的 CSS), 画布高度不再写死。
+   这里两个要点:
+     1) 盒子没变就不重设 backing store —— ResizeObserver 会反复回调, 而每写一次
+        canvas.width/height 都会清空画布并触发重绘。
+     2) 高度下限降到 200, 免得窗口很矮时画布把布局撑破。 */
+var lastCW = 0, lastCH = 0;
+function resizeCanvas() {
+  var dpr = window.devicePixelRatio ? window.devicePixelRatio : 1;
+  var r = cvs.getBoundingClientRect();
+  var w = Math.max(320, Math.round(r.width));
+  var h = Math.max(200, Math.round(r.height));
+  var bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+  if (w === lastCW && h === lastCH && cvs.width === bw && cvs.height === bh) { return; }
+  lastCW = w; lastCH = h;
+  CW = w; CH = h;
+  cvs.width = bw;
+  cvs.height = bh;
+  /* setTransform, not scale(): repeated resizes must not multiply. */
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+
+function rawValue(rec, tr) { return rec[tr.key] / tr.div; }
+
+function currentValue(tr) {
+  if(tr.key==="theta"){var e=encoderRing.length ? encoderRing[encoderRing.length-1] : null;return e && (paused || Date.now()/1000-e.t<=0.25) ? e.theta : NaN;}
+  if (!lastTelem || (!paused && telemAge()!==null && telemAge()>1)) { return NaN; }
+  var raw = lastTelem[tr.key + "_mA"];
+  if (raw === undefined || raw === null) { raw = lastTelem[tr.key]; }
+  if (raw === undefined || raw === null) { return 0; }
+  return raw / tr.div;
+}
+
+function traceRange(recs, tr, start, cutoff) {
+  if(tr.key==="theta"){return {lo:0,hi:360};}
+  var lo = 0, hi = 0, seen = false;
+  for (var i = start || 0; i < recs.length; i++) {
+    if (recs[i].t < cutoff) { continue; }
+    var v = rawValue(recs[i], tr);
+    if (!isFinite(v)) { continue; }
+    if (!seen) { lo = v; hi = v; seen = true; }
+    else {
+      if (v < lo) { lo = v; }
+      if (v > hi) { hi = v; }
+    }
+  }
+  /* always include zero, so "is it really 0?" stays readable */
+  if (lo > 0) { lo = 0; }
+  if (hi < 0) { hi = 0; }
+  var span = hi - lo;
+  /* Never zoom in tighter than the trace's minimum span: +-13 mA of
+     quantisation noise on an idle board would otherwise be stretched over
+     the whole panel and look like a real waveform. */
+  var minSpan = tr.minSpan || 0;
+  if (span < minSpan) {
+    var mid = (lo + hi) / 2;
+    lo = mid - minSpan / 2;
+    hi = mid + minSpan / 2;
+    span = minSpan;
+  }
+  if (span < 1e-9) { lo -= 1; hi += 1; span = 2; }
+  var pad = span * 0.10;
+  return { lo: lo - pad, hi: hi + pad };
+}
+
+function drawTrace(y0, h, nowT, recs, tr, start, cutoff) {
+  var x0 = 74, x1 = CW - 62;
+  var plotW = x1 - x0;
+  if (plotW < 40 || h < 24) { return; }
+
+  ctx.fillStyle = C_BG;
+  ctx.fillRect(0, y0, CW, h);
+  ctx.strokeStyle = C_PANEL_LINE;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, y0 + 0.5);
+  ctx.lineTo(CW, y0 + 0.5);
+  ctx.stroke();
+
+  var rg = traceRange(recs, tr, start, cutoff);
+  var lo = rg.lo, hi = rg.hi;
+  var span = hi - lo;
+  if (span < 1e-9) { span = 1; }
+
+  function vy(v) { return y0 + h - 10 - ((v - lo) / span) * Math.max(10,h-30); }
+  function vx(t) {
+    var x = x1 - ((nowT - t) / WINDOW_S) * plotW;
+    if (x < x0) { x = x0; }
+    if (x > x1) { x = x1; }
+    return x;
+  }
+
+  /* horizontal grid + value labels at top and bottom */
+  ctx.font = "13px Consolas, monospace";
+  ctx.textBaseline = "middle";
+  var d, gv, gy;
+  for (d = 0; d <= 4; d++) {
+    gv = lo + (span * d) / 4;
+    gy = Math.round(vy(gv)) + 0.5;
+    ctx.strokeStyle = C_GRID;
+    ctx.beginPath();
+    ctx.moveTo(x0, gy);
+    ctx.lineTo(x1, gy);
+    ctx.stroke();
+    if (d === 0 || d === 4) {
+      ctx.fillStyle = C_DIM;
+      ctx.textAlign = "right";
+      ctx.fillText(gv.toFixed(tr.dec), x0 - 6, gy);
+    }
+  }
+
+  /* vertical grid: one line per second of the window */
+  for (d = 0; d <= WINDOW_S; d++) {
+    var gx = Math.round(vx(nowT - WINDOW_S + d)) + 0.5;
+    if (gx < x0 || gx > x1) { continue; }
+    ctx.strokeStyle = (d === WINDOW_S) ? "#2b3340" : C_GRID_T;
+    ctx.beginPath();
+    ctx.moveTo(gx, y0 + 1);
+    ctx.lineTo(gx, y0 + h - 1);
+    ctx.stroke();
+  }
+
+  /* zero line */
+  var zy = Math.round(vy(0)) + 0.5;
+  ctx.strokeStyle = C_ZERO;
+  ctx.beginPath();
+  ctx.moveTo(x0, zy);
+  ctx.lineTo(x1, zy);
+  ctx.stroke();
+
+  /* the trace itself; a record flagged brk starts a NEW segment, so a gap
+     the client missed (dropped batch) shows as a break, not as a line
+     drawn straight across the missing stretch */
+  ctx.strokeStyle = tr.color;
+  ctx.lineWidth = 1.4;
+  ctx.lineJoin = "round";
+  var started = false;
+  ctx.beginPath();
+  var i, v, px, py;
+  for (i = start || 0; i < recs.length; i++) {
+    if (recs[i].t < cutoff) { continue; }
+    v = rawValue(recs[i], tr);
+    if (!isFinite(v)) { started=false; continue; }
+    px = vx(recs[i].t);
+    py = vy(v);
+    if (!started || recs[i].brk) { ctx.moveTo(px, py); started = true; }
+    else { ctx.lineTo(px, py); }
+  }
+  if (started) {
+    ctx.stroke();
+  }
+
+  /* label + current numeric value */
+  ctx.font = "14px Consolas, monospace";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = tr.color;
+  ctx.fillText(tr.label + "  " + (isFinite(currentValue(tr)) ? currentValue(tr).toFixed(tr.dec) : "—") + " " + tr.unit,
+               x0 + 8, y0 + 6);
+
+  if (paused) {
+    ctx.fillStyle = C_DIM;
+    ctx.textAlign = "right";
+    ctx.fillText("paused", x1 - 8, y0 + 6);
+  }
+}
+
+/* Right edge of the window.  Live: the wall clock, so the newest sample
+   (which was placed at "now" when its batch arrived) slides left smoothly
+   at full frame rate instead of stepping once per 100 ms poll.  Paused: the
+   newest sample itself, so a frozen curve stays on screen. */
+function rightEdge() {
+  var wall = Date.now() / 1000;
+  if (paused) {
+    return Math.max(ring.length ? ring[ring.length - 1].t : 0,encoderRing.length?encoderRing[encoderRing.length-1].t:0)||wall;
+  }
+  var newest = Math.max(ring.length ? ring[ring.length - 1].t : 0,encoderRing.length?encoderRing[encoderRing.length-1].t:0);
+  return newest > wall ? newest : wall;
+}
+
+function draw() {
+  if (!ctx || CW <= 0 || CH <= 0) { return; }
+  ctx.fillStyle = C_BG;
+  ctx.fillRect(0, 0, CW, CH);
+
+  var nowT = rightEdge();
+  var cutoff = nowT - WINDOW_S;
+  /* Current timestamps are monotonic (absorbBatch enforces that). Search the
+     visible suffix without allocating a new array every animation frame. */
+  var lo = 0, hi = ring.length;
+  while (lo < hi) {
+    var mid = (lo + hi) >>> 1;
+    if (ring[mid].t < cutoff) { lo = mid + 1; } else { hi = mid; }
+  }
+  var currentStart = lo, encoderStart = 0;
+  /* Encoder wall-clock timestamps can jump; retain the original time filter. */
+  while (encoderStart < encoderRing.length && encoderRing[encoderStart].t < cutoff) { encoderStart++; }
+  var traces = activeTraces();
+  var n = traces.length;
+  var pad = 4;
+  var h = (CH - pad * (n + 1)) / n;
+  for (var k = 0; k < n; k++) {
+    var encoderTrace = traces[k].key === "theta";
+    drawTrace(pad + k * (h + pad), h, nowT, encoderTrace ? encoderRing : ring, traces[k],
+              encoderTrace ? encoderStart : currentStart, cutoff);
+  }
+  if (!lastTelem) {
+    ctx.fillStyle = C_DIM;
+    ctx.font = "14px Consolas, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText("等待有效电流遥测；电角度需先完成开环校准", CW / 2, CH - 6);
+  }
+
+}
+
+function frame() {
+  if (!document.hidden && canvasInView) { draw(); }
+  window.requestAnimationFrame(frame);
+}
+
+/* --------------------------- param table ---------------------------- */
+function renderParams(params) {
+  /* Update the table IN PLACE.  Rebuilding it would destroy the focused
+     input (and the cursor position) while the operator is typing. */
+  lastParams = params || [];
+  var tb = $("ptable");
+  if (!tb) { return; }
+  if (tb.childNodes.length !== params.length) {
+    tb.innerHTML = "";
+    params.forEach(function (p) { tb.appendChild(buildRow(p)); });
+  }
+  params.forEach(function (p) {
+    var tr = $("r" + p.id);
+    if (!tr) { return; }
+    setNodeText(tr.cells[1], p.name);
+    setNodeClass(tr.cells[1], (p.known === false) ? "warn" : "");
+    var inp = $("v" + p.id);
+    if (inp && !inp.dataset.editing && document.activeElement !== inp) {
+      inp.value = (p.value === null ? p.default : p.value);
+    }
+    setNodeText(tr.cells[5], stateText(p));
+    setNodeClass(tr.cells[5], stateClass(p));
+  });
+}
+
+function stateText(p) {
+  if (p.known === false) { return "尚未读取（显示默认值）"; }
+  if (p.saved) { return "已保存"; }
+  if (p.is_default) { return "默认值"; }
+  return "仅在 RAM";
+}
+
+function stateClass(p) {
+  if (p.known === false) { return "warn"; }
+  if (p.saved) { return "ok"; }
+  if (p.is_default) { return ""; }
+  return "warn";
+}
+
+function buildRow(p) {
+  var tr = document.createElement("tr");
+  tr.id = "r" + p.id;
+  var td;
+
+  td = document.createElement("td"); td.textContent = p.id; tr.appendChild(td);
+  td = document.createElement("td"); td.textContent = p.name; tr.appendChild(td);
+
+  td = document.createElement("td");
+  var inp = document.createElement("input");
+  inp.type = "number"; inp.id = "v" + p.id; inp.min = p.min; inp.max = p.max;
+  inp.value = (p.value === null ? p.default : p.value);
+  inp.addEventListener("focus", function () { inp.dataset.editing = "1"; });
+  inp.addEventListener("blur", function () { delete inp.dataset.editing; });
+  inp.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { writeOne(p); }
+  });
+  td.appendChild(inp);
+  tr.appendChild(td);
+
+  td = document.createElement("td"); td.textContent = fmt(p.unit); tr.appendChild(td);
+  td = document.createElement("td"); td.textContent = p.min + ".." + p.max; tr.appendChild(td);
+  td = document.createElement("td"); td.textContent = stateText(p);
+  td.className = stateClass(p); tr.appendChild(td);
+
+  td = document.createElement("td");
+  var btn = document.createElement("button");
+  btn.textContent = "Write";
+  btn.onclick = function () { writeOne(p); };
+  td.appendChild(btn);
+  tr.appendChild(td);
+  return tr;
+}
+
+function writeOne(p) {
+  var inp = $("v" + p.id);
+  var raw = inp.value.trim();
+  if (raw === "" || isNaN(Number(raw))) {
+    setMsg($("pmsg"), "parameter " + p.name + ": enter a number", "bad");
+    return;
+  }
+  var val = Math.trunc(Number(raw));
+  if (val < p.min || val > p.max) {
+    setMsg($("pmsg"), p.name + " must be " + p.min + ".." + p.max, "bad");
+    return;
+  }
+  setMsg($("pmsg"), "writing " + p.name + " = " + val + " ...", "warn");
+  fetchJSON("/api/set?id=" + encodeURIComponent(p.id) + "&value=" + encodeURIComponent(val))
+    .then(function (r) {
+      if (r && r.ok) {
+        setMsg($("pmsg"), p.name + " written (device value " + r.value +
+               ") - press Save to flash to keep it", "ok");
+      } else {
+        var why = (r && r.error) || "unknown error";
+        setMsg($("pmsg"), "write failed: " + why, "bad");
+        setErr(why);
+      }
+    })
+    .catch(function (e) {
+      setMsg($("pmsg"), "write failed: " + e.message, "bad");
+      setErr("write failed: " + e.message);
+    });
+}
+
+/* ------------------------- telemetry control ------------------------ */
+function telemRequest(enable) {
+  if (telemRequestPending) { return; }
+  telemRequestPending = true;
+  var period = Number($("sel_period").value) || 10;
+  var btn = $("btn_telem");
+  btn.disabled = true;
+  setMsg($("tstate"), enable ? "正在开启遥测…" : "正在关闭遥测…", "warn");
+  fetchJSON("/api/telem?enable=" + (enable ? "1" : "0") + "&period_ms=" + period)
+    .then(function (r) {
+      if (r && r.ok) {
+        telemOn = !!r.enable;
+        if (!telemOn) { telemRate = null; lastTelem = null; }
+        setMsg($("tstate"), "遥测" + (telemOn ? "已开启" : "已关闭"),
+               telemOn ? "ok" : "");
+      } else {
+        telemOn = false;
+        var why = (r && r.error) || "未知错误";
+        setMsg($("tstate"), "遥测请求失败：" + why, "bad");
+        setErr(why);
+      }
+      var b = $("btn_telem");
+      b.textContent = "遥测：" + (telemOn ? "开启" : "关闭");
+      b.className = telemOn ? "on" : "";
+    })
+    .catch(function (e) {
+      setMsg($("tstate"), "遥测请求失败：" + e.message, "bad");
+    })
+    .then(function () {
+      telemRequestPending = false;
+      telemRetryAfter = telemOn ? 0 : Date.now() + 3000;
+      btn.disabled = false;
+    });
+}
+
+$("btn_telem").onclick = function () {
+  var enable = !telemOn;
+  telemManuallyDisabled = !enable;
+  telemRequest(enable);
+};
+
+$("sel_period").onchange = function () {
+  /* A period change while streaming is applied immediately. */
+  if (telemOn) { telemRequest(true); }
+};
+
+$("btn_pause").onclick = function () {
+  paused = !paused;
+  var b = $("btn_pause");
+  b.textContent = paused ? "继续" : "暂停";
+  b.className = paused ? "on" : "";
+  if (!paused) {
+    /* restart the window: do not splice the frozen history into live data */
+    ring = [];
+    lastTelem = null;
+  }
+  draw();
+};
+
+$("btn_clear").onclick = function () {
+  encoderRing=[];
+  ring = [];
+  draw();
+};
+
+$("btn_reconnect").onclick = function () {
+  var b = $("btn_reconnect");
+  b.disabled = true;
+  setMsg($("tstate"), "正在重新打开 CAN 适配器…", "warn");
+  fetchJSON("/api/reconnect").then(function (r) {
+    if (r && r.ok) {
+      setMsg($("tstate"), "适配器已打开：" + (r.channel || "?") + "，正在重新读取…", "ok");
+    } else {
+      /* 适配器不在 USB 上: 插回来即可, 服务端每 3 秒自动重连一次 */
+      setMsg($("tstate"), "未找到 CAN 适配器：" + ((r && r.error) || "未识别")
+             + "。插好 USB-CAN 后会自动重连。", "bad");
+    }
+  }).catch(function () {
+    setMsg($("tstate"), "重连请求失败（页面服务未响应）", "bad");
+  }).then(function () {
+    return pollStatus();
+  }).then(function () { b.disabled = false; });
+};
+
+/* ------------------------ parameter buttons ------------------------- */
+$("btn_refresh").onclick = function () {
+  var b = $("btn_refresh");
+  b.disabled = true;
+  setMsg($("pmsg"), "reading all parameters ...", "warn");
+  fetchJSON("/api/getall").then(function (r) {
+    if (r && r.params) {
+      renderStatus(r);
+      setMsg($("pmsg"), "parameters refreshed", "ok");
+    } else {
+      var why = (r && r.error) || "unknown error";
+      setMsg($("pmsg"), "refresh failed: " + why, "bad");
+      setErr(why);
+    }
+  }).catch(function (e) {
+    setMsg($("pmsg"), "refresh failed: " + e.message, "bad");
+  }).then(function () { b.disabled = false; });
+};
+
+$("btn_save").onclick = function () {
+  var b = $("btn_save");
+  b.disabled = true;
+  setMsg($("pmsg"), "saving to flash ...", "warn");
+  fetchJSON("/api/save").then(function (r) {
+    if (r && r.ok) {
+      setMsg($("pmsg"), "saved to flash", "ok");
+    } else {
+      var why = (r && r.error) || "unknown error";
+      setMsg($("pmsg"), "save failed: " + why, "bad");
+      setErr(why);
+    }
+  }).catch(function (e) {
+    setMsg($("pmsg"), "save failed: " + e.message, "bad");
+  }).then(function () { b.disabled = false; });
+};
+
+/* The table is read only when the operator opens the section. */
+$("params_box").addEventListener("toggle", function () {
+  if ($("params_box").open) { $("btn_refresh").onclick(); }
+});
+
+
+function downloadText(name,text,type){var url=URL.createObjectURL(new Blob([text],{type:type}));var a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);}
+$("btn_export_waves").onclick=function(){
+ var rows=ring.map(function(p){return {t:p.t,s:[p.t,p.ia/1000,p.ib/1000,p.ic/1000,"","current",p.brk?1:0,"","",""]};}).concat(encoderRing.map(function(p){return {t:p.t,s:[p.t,"","","",isFinite(p.theta)?p.theta:"","encoder",p.brk?1:0,p.raw===null?"":p.raw,p.valid,p.errors]};}));
+ rows.sort(function(a,b){return a.t-b.t;});
+ downloadText("7010_wave_"+Date.now()+".csv","host_time_s,ia_A,ib_A,ic_A,encoder_electrical_deg,source,break,encoder_raw,encoder_valid,encoder_errors\n"+rows.map(function(p){return p.s.join(",");}).join("\n"),"text/csv;charset=utf-8");
+};
+$("btn_export_status").onclick=function(){fetchJSON("/api/status").then(function(s){downloadText("7010_status_"+Date.now()+".json",JSON.stringify(s,null,2),"application/json");}).catch(function(e){setErr(e.message);});};
+
+/* ------------------------------- startup ---------------------------- */
+resizeCanvas();
+window.addEventListener("resize", resizeCanvas);
+/* ★波形卡片的盒子会因左列内容变化(切换模式、展开/收起调参面板、校准卡片长高)而改变,
+   这时窗口尺寸并没变 —— 只监听 window resize 会让画布被拉伸变形。所以再跟一个
+   ResizeObserver 盯住画布自己的盒子。resizeCanvas 内部有"尺寸未变即返回"的短路, 不会打转。 */
+if (typeof ResizeObserver === "function") {
+  try { new ResizeObserver(function () { resizeCanvas(); }).observe(cvs); } catch (e) { /* 老浏览器忽略 */ }
+}
+window.requestAnimationFrame(frame);
+
+if (typeof IntersectionObserver === "function") {
+  new IntersectionObserver(function (entries) {
+    canvasInView = entries[0].isIntersecting;
+  }).observe(cvs);
+}
+
+/* The page enables the stream on load (10 ms = 100 Hz by default, as
+   selected in the period box).  If the device does not answer, the UI still
+   renders and says so in the single status / error line. */
+function tick() {
+  pollStatus().then(function () {
+    if (firstStatus) {
+      firstStatus = false;
+      if (!telemOn) { telemRequest(true); }
+    }
+  });
+}
+tick();
+setInterval(tick, POLL_MS);
+
+/* Curves: their own faster timer, pulling every sample the server holds. */
+pollBatch();
+setInterval(pollBatch, BATCH_MS);
+/* ======================================================================
+ * ★ 输出控制: 正弦开环 开/关 + 目标电压(键盘直接输入, 自动换算成占空比)
+ *   占空比 = 目标电压 / 母线电压 * 1000, 固件硬上限 30%
+ * ====================================================================== */
+(function () {
+  var btn = document.getElementById("btn_motor");
+  if (!btn) { return; }
+  var motorOn = false;
+  var motorKnown = false;
+  var motorPending = false;
+  var motorFault = false;
+  var motorCommandAt = 0;
+
+  function num(id, def) {
+    var e = document.getElementById(id);
+    var v = e ? parseFloat(e.value) : NaN;
+    return isFinite(v) ? v : def;
+  }
+
+  function label() {
+    if (motorFault) {
+      btn.textContent = "输出: FAULT (点此停机复位)";
+      btn.className = "bad";
+    } else if (!motorKnown) {
+      btn.textContent = "输出: 状态未知 (点此发送停机)";
+      btn.className = "warn";
+    } else if (motorPending) {
+      btn.textContent = motorOn ? "输出: ON? (点此停机)" : "输出: OFF?";
+      btn.className = "warn";
+    } else {
+      btn.textContent = "输出: " + (motorOn ? "ON" : "OFF");
+      btn.className = motorOn ? "on" : "";
+    }
+  }
+
+  window.syncMotorStatus = function (status) {
+    if (!status || !status.available || !status.updated_at ||
+        (status.updated_at * 1000) < motorCommandAt) { return; }
+    motorKnown = true;
+    motorPending = false;
+    motorOn = !!status.output_on;
+    motorFault = !!status.fault;
+    label();
+    btn.title = "电机状态: " + (status.state_name || "unknown") +
+                ", step " + status.step + ", duty " + status.duty_permille + "‰";
+  };
+
+  btn.onclick = function () {
+    /* Unknown/fault/pending-on always sends STOP first; never guess-start. */
+    var enable = (motorFault || !motorKnown || (motorPending && motorOn)) ? 0 : (motorOn ? 0 : 1);
+    var v = num("in_volt", 1.0);
+    var vb = num("in_vbus", 48);
+    var sm = num("in_stepms", 500);
+    if (enable && (!isFinite(v) || v < 0.1 || v > 5)) {
+      setErr("目标电压须在 0.1..5 V；未发送启动命令。");
+      $("in_volt").focus();
+      return;
+    }
+    if (enable && (!isFinite(vb) || vb < 1 || vb > 60)) {
+      setErr("母线电压须在 1..60 V；未发送启动命令。");
+      $("in_vbus").focus();
+      return;
+    }
+    if (enable && (!isFinite(sm) || sm < 20 || sm > 5000)) {
+      setErr("换向步长须在 20..5000 ms；未发送启动命令。");
+      $("in_stepms").focus();
+      return;
+    }
+    var previousOn = motorOn;
+    var previousKnown = motorKnown;
+    motorOn = !!enable;
+    motorKnown = true;
+    motorPending = true;
+    motorFault = false;
+    motorCommandAt = Date.now();
+    label();
+    var url = "/api/motor?enable=" + (enable ? 1 : 0) +
+              "&volt=" + encodeURIComponent(v) +
+              "&vbus=" + encodeURIComponent(vb) +
+              "&step_ms=" + encodeURIComponent(sm);
+    fetchJSON(url).then(function (r) {
+      if (r && r.ok) {
+        motorOn = !!r.enable;
+        motorKnown = true;
+        motorPending = false;
+        motorFault = false;
+        setErr("");
+      } else {
+        setErr((r && r.error) || "motor command failed");
+        var why = (r && r.error) || "";
+        if (why.indexOf("no reply") >= 0) {
+          motorOn = enable ? true : previousOn;
+          motorKnown = enable ? true : previousKnown;
+          motorPending = true;
+        } else {
+          motorOn = previousOn;
+          motorKnown = previousKnown || !enable;
+          motorPending = false;
+        }
+      }
+      label();
+    }).catch(function () {
+      setErr("motor request failed");
+      motorOn = enable ? true : previousOn;
+      motorKnown = enable ? true : previousKnown;
+      motorPending = true;
+      label();
+    });
+  };
+
+  label();
+})();
+
+/* MOTOR_UI_FIX: ??????????
+   ??????? motorKnown/motorPending ??????????(???? enable=0),
+   ??????(??????)?????: ????? /api/status ??? output_on,
+   ???????; ?????? ??/??/????? */
+(function () {
+  var old = document.getElementById("btn_motor");
+  if (!old || !old.parentNode) { return; }
+  var fresh = old.cloneNode(true);          /* cloneNode ????? */
+  old.parentNode.replaceChild(fresh, old);
+
+  var PREFIX = "\u8f93\u51fa: ";            /* ??:  */
+  var TRIP   = PREFIX + "\u8fc7\u6d41\u8df3\u95f8";   /* ???? */
+  var WAIT   = PREFIX + "\u8bfb\u53d6\u4e2d";         /* ??? */
+
+  var on = false, fault = false, known = false;
+
+  function num(id, def) {
+    var e = document.getElementById(id);
+    var v = e ? parseFloat(e.value) : NaN;
+    return isFinite(v) ? v : def;
+  }
+  function label() {
+    fresh.textContent = fault ? TRIP : (PREFIX + (on ? "ON" : "OFF"));
+    fresh.className = (on && !fault) ? "on" : "";
+    fresh.disabled = false;
+  }
+  function sync(s) {
+    var m = (s && s.motor) || {};
+    on = !!m.output_on;
+    fault = !!m.fault;
+    known = true;
+    label();
+  }
+  function refresh() {
+    if (typeof fetchJSON !== "function") { return; }
+    fetchJSON("/api/status").then(sync).catch(function () {});
+  }
+
+  fresh.disabled = false;
+  fresh.textContent = WAIT;
+
+  fresh.onclick = function () {
+    var generation=commandGeneration;
+    fresh.disabled = true;
+    fetchJSON("/api/status").then(function (s) {
+      checkCommandGeneration(generation);
+      var m = (s && s.motor) || {};
+      var enable = m.output_on ? 0 : 1;                 /* ??? = ?? */
+      var v  = num("in_volt", 1.0);
+      var vb = num("in_vbus", 48);
+      var sm = num("in_stepms", 500);
+      if (!(vb > 0)) { vb = 48; }
+      var md = 0;
+      var sm = document.getElementById("sel_mode");
+      if (sm) {
+        md = parseInt(sm.value, 10);
+        if (!isFinite(md)) { md = 0; }
+      } else {
+        var sd = document.getElementById("sel_dir");
+        if (sd) { md = parseInt(sd.value, 10) || 0; }
+      }
+      /* Legacy button uses the same finite test duration as the main panel. */
+      var cur = num("in_cur", 0);
+      var url = "/api/motor?enable=" + enable + "&mode=" + md + "&seconds=5" +
+                "&cur_ma=" + encodeURIComponent(cur) +
+                "&volt=" + encodeURIComponent(v) +
+                "&vbus=" + encodeURIComponent(vb) +
+                "&step_ms=" + encodeURIComponent(sm);
+      return fetchJSON(url).then(function (r) {
+        if (typeof setErr === "function") {
+          setErr((r && r.ok) ? "" : ((r && r.error) || "motor cmd failed"));
+        }
+      });
+    }).catch(function () {
+      if (typeof setErr === "function") { setErr("motor request failed"); }
+    }).then(function () {
+      fresh.disabled = false;
+      refresh();
+    });
+  };
+
+  refresh();
+  setInterval(refresh, 700);
+})();
+
+/* RECON_UI: ★ 显眼的"重连 CAN"按钮 (顶部状态栏 + 转速面板各一个)。
+   适配器拔插/掉线后点一下就恢复。服务端本身也每 3 秒自动重连一次,
+   所以就算不点、只要 USB 插好, 链路也会自己回来。 */
+(function () {
+  var btns = [];
+  ["btn_reconnect_top", "btn_reconnect_inline", "btn_rpm_recon"].forEach(function (id) {
+    var b = document.getElementById(id);
+    if (b) { btns.push(b); }
+  });
+  if (!btns.length || typeof fetchJSON !== "function") { return; }
+
+  function say(text, cls) {
+    var t = document.getElementById("tstate");
+    if (t && typeof setMsg === "function") { setMsg(t, text, cls); }
+  }
+  function hint(text, bad) {
+    var h = document.getElementById("rpm_hint");
+    if (h) { h.textContent = text; h.className = bad ? "bad" : "k"; }
+  }
+
+  function go() {
+    btns.forEach(function (b) { b.disabled = true; });
+    say("正在重连 USB-CAN ...", "warn");
+    hint("正在重连 USB-CAN ...", false);
+    fetchJSON("/api/reconnect").then(function (r) {
+      if (r && r.ok) {
+        say("适配器已打开: " + (r.channel || "?") + "，正在读取设备 ...", "ok");
+        hint("适配器已连上 " + (r.channel || "?") + "，可以点启动了", false);
+      } else {
+        var why = (r && r.error) || "未找到适配器";
+        say("没有 CAN 适配器: " + why, "bad");
+        hint("没找到 USB-CAN 适配器，请插好（插好后约 3 秒自动连上）", true);
+      }
+    }).catch(function () {
+      say("重连请求失败（网页服务端没响应）", "bad");
+      hint("重连请求失败", true);
+    }).then(function () {
+      btns.forEach(function (b) { b.disabled = false; });
+    });
+  }
+
+  btns.forEach(function (b) { b.onclick = go; });
+})();
+
+/* ★波形勾选: 初始化勾选框 + 几个常用预设按钮 */
+(function () {
+  if (typeof initTraceChecks !== "function") { return; }
+  initTraceChecks();
+
+  function setAll(keys) {
+    var boxes = document.querySelectorAll("input.tchk");
+    for (var i = 0; i < boxes.length; i++) {
+      var k = boxes[i].getAttribute("data-trace");
+      boxes[i].checked = (keys === null) ? true : (keys.indexOf(k) >= 0);
+      traceHidden[k] = !boxes[i].checked;
+    }
+    if (typeof draw === "function") { draw(); }
+  }
+  function on(id, keys) {
+    var b = document.getElementById(id);
+    if (b) { b.onclick = function () { setAll(keys); }; }
+  }
+  on("btn_chk_all", null);                                  /* 全选 */
+  on("btn_chk_none", []);                                   /* 全不选 */
+  on("btn_chk_cur", ["ia", "ib", "ic"]);                    /* 只看电流 */
+})();
+
+(function () {
+  var links = document.querySelectorAll(".side-nav a");
+  for (var i = 0; i < links.length; i++) {
+    links[i].addEventListener("click", function () {
+      for (var j = 0; j < links.length; j++) { links[j].classList.remove("active"); }
+      this.classList.add("active");
+    });
+  }
+})();
+
+/* Encoder FOC modes, calibration, and explicit one-key CAN-OTA controls. */
+(function () {
+  var mode = null;
+  var modeNames = {0:"正弦开环", 1:"力矩", 2:"速度环", 3:"位置环", 4:"电压模式", 5:"电流环", 6:"MIT 力矩"};
+  var fields = {
+    1:["torque_nm"], 2:["speed_rpm"], 3:["position_deg"],
+    4:["voltage_d_v", "voltage_v"], 5:["current_a"],
+    6:["mit_position_rad", "mit_speed_rad_s", "mit_kp", "mit_kd", "mit_torque_nm"]
+  };
+  var inputs = {
+    torque_nm:"target_torque_nm", speed_rpm:"target_speed_rpm",
+    position_deg:"target_position_deg", voltage_v:"target_voltage_v", voltage_d_v:"target_voltage_d_v",
+    current_a:"target_current_a", mit_position_rad:"target_mit_position_rad",
+    mit_speed_rad_s:"target_mit_speed_rad_s", mit_kp:"target_mit_kp",
+    mit_kd:"target_mit_kd", mit_torque_nm:"target_mit_torque_nm"
+  };
+  /* ★阶段编号与 foc/foc_mode.h 的 FOC_CALIB_* 一一对应
+     (5..8 是按参考工程 LiFoc 重写校准后新增的中间阶段) */
+  var stageNames = {0:"空闲", 1:"转子对齐", 2:"慢速扫角(旧)", 3:"已完成", 4:"失败",
+                    5:"测方向/极对数", 6:"正向扫角采样", 7:"反向扫角采样", 8:"计算并保存"};
+  var calibRunning = function (s) { return s === 1 || s === 2 || s === 5 || s === 6 || s === 7 || s === 8; };
+  var calibrationErrors = {
+    1:"校准电流超过 30 A 峰值保护限值", 2:"转子未跟随校准磁场，编码器位移不足",
+    3:"转子跟随量与设定极对数不符", 4:"校准参数写入失败", 5:"校准已中止", 6:"编码器读取中断",
+    7:"校准期间没有电流 —— 检查母线是否上电、三相功率线是否接好、驱动器是否使能",
+    8:"转子跟随量过小（只走了一小段）—— 校准转矩不足 / 机械卡住 / 联轴器打滑",
+    9:"转子跟随量过大（走过了一整圈）—— 实际极对数可能比铭牌小",
+    10:"全圈扫角未稳定跟随，零点样本分散；检查机械负载和校准电流",
+    11:"启动助跑超时：强制换相 6 秒内转子没有跟动（检查 |Uq|≥1.4 V、机械是否卡住）"
+  };
+  var runBusy = false;
+  var calibrationDone = false;
+  var calibrationActive = false;
+  /* ★校准卡片自己的显示状态 (由 /api/control/status 驱动, 与运行模式无关) */
+  var calibStage = 0;
+  var calibError = 0;
+  var calibProgress = 0;
+
+  function note(id, message, bad) {
+    var e = $(id);
+    if (!e) { return; }
+    e.textContent = message || "";
+    e.className = bad ? "bad" : "loop-reserve-note";
+  }
+  function request(url) {
+    return fetchJSON(url).then(function (r) {
+      if (!r || !r.ok) { throw new Error((r && r.error) || "设备拒绝请求"); }
+      return r;
+    });
+  }
+  var tuneDefs = [
+    [7,"电流上限 (A，固件最高 15 A)",1000,"1,2,3,4,5,6"],
+    [12,"电压上限 (V)",1000,"1,2,3,4,5,6"],
+    [16,"电流带宽 (rad/s，0=手动)",1,"1,2,3,5,6"],
+    [3,"手动电流 Kp (V/A)",100,"1,2,3,5,6"],
+    [4,"手动电流 Ki (V/A/s)",100,"1,2,3,5,6"],
+    [17,"等效每相 R (mΩ)",1,"1,2,3,5,6"],
+    [18,"每相 L (µH，待测)",1,"1,2,3,5,6"],
+    [13,"电流斜坡 (A/s)",1000,"1,2,3,5,6"],
+    [22,"电流滤波时间 (µs)",1,"1,2,3,5,6"],
+    [5,"速度 Kp (A/(rev/s))",100,"2,3"],
+    [6,"速度 Ki (A/rev)",100,"2,3"],
+    [19,"速度 Kd (A·s²/rev)",1000,"2,3"],
+    [11,"速度上限 (rpm)",1,"2,3"],
+    [14,"速度斜坡 (rpm/s)",1,"2,3"],
+    [15,"速度滤波时间 (ms)",1,"2,3,6"],
+    [8,"位置 Kp (1/s)",100,"3"],
+    [9,"位置 Ki (1/s²)",100,"3"],
+    [10,"位置 Kd",1000,"3"],
+    [20,"电压斜坡 (V/s)",1000,"4"],
+    [21,"力矩上限 (N·m)",1000,"1,6"]
+  ];
+  var tuneCatalog = [{"id": 0, "default": 10, "min": 1, "max": 64}, {"id": 1, "default": 0, "min": 0, "max": 16383}, {"id": 2, "default": 0, "min": 0, "max": 2}, {"id": 3, "default": 150, "min": 0, "max": 10000}, {"id": 4, "default": 100, "min": 0, "max": 1000000}, {"id": 5, "default": 500, "min": 0, "max": 10000}, {"id": 6, "default": 20, "min": 0, "max": 10000}, {"id": 7, "default": 15000, "min": 100, "max": 15000}, {"id": 8, "default": 300, "min": 0, "max": 10000}, {"id": 9, "default": 0, "min": 0, "max": 10000}, {"id": 10, "default": 0, "min": 0, "max": 1000}, {"id": 11, "default": 300, "min": 1, "max": 300}, {"id": 12, "default": 5000, "min": 100, "max": 8000}, {"id": 13, "default": 1000, "min": 100, "max": 30000}, {"id": 14, "default": 60, "min": 1, "max": 3000}, {"id": 15, "default": 20, "min": 0, "max": 1000}, {"id": 16, "default": 200, "min": 0, "max": 2000}, {"id": 17, "default": 275, "min": 1, "max": 10000}, {"id": 18, "default": 600, "min": 1, "max": 10000}, {"id": 19, "default": 0, "min": 0, "max": 10000}, {"id": 20, "default": 1000, "min": 100, "max": 100000}, {"id": 21, "default": 330, "min": 1, "max": 500}, {"id": 22, "default": 1000, "min": 0, "max": 10000}];
+  var feedback = {};
+  function relevant(def) { return def[3].split(",").indexOf(String(mode)) >= 0; }
+  var noteEl = $("selected_mode_note");
+  var firstView = true;
+  var modeDesc = {
+    0:"正弦开环：旋转电压驱动，不需要编码器，也不需要先校准。",
+    1:"力矩模式：目标 N·m 经 Kt 换算成 Iq，再进电流环；需要已完成的编码器校准。",
+    2:"速度环：编码器测速 -> Iq，外层 100 Hz；需要已完成的编码器校准。",
+    3:"位置环：位置 P + 速度 PI -> Iq，坐标依赖已校准的零位与方向。",
+    4:"电压模式：编码器定向的 Ud/Uq 电压输出（不是电压反馈环）。",
+    5:"电流环：编码器定向的 Iq 电流 PI，10 kHz 内环。",
+    6:"MIT 力矩：位置/速度误差 + Kp/Kd + 前馈力矩合成 Iq。"
+  };
+  /* Firmware stage DONE and corrected persistent calibration must both be valid. */
+  function calibrationUsable() {
+    var e = (window.dashboardStatus || {}).encoder || {};
+    return e.electrical_calibrated === true;
+  }
+  function syncCalibHint() {
+    var gate = $("calib_gate");
+    if (!gate) { return; }
+    var needCalib = mode !== null && mode !== 0;
+    if (needCalib && !calibrationUsable()) {
+      gate.hidden = false;
+      gate.textContent = "提示：该模式使用编码器角度，但当前没有有效的校准结果。"
+        + "可以先去做上面的「① 编码器校准」；也可以直接点启动 —— 由固件按自己的状态决定是否接受（会返回具体原因）。";
+    } else {
+      gate.hidden = true;
+      gate.textContent = "";
+    }
+  }
+  function setCalibBadge() {
+    var badge = $("calib_badge");
+    if (!badge) { return; }
+    var cls = "calib-badge", txt = "等待校准";
+    if (calibrationActive) {
+      cls += " busy"; txt = "校准中";
+    } else if (calibrationDone) {
+      cls += " done"; txt = "校准有效";
+    } else if (calibStage === 4) {
+      cls += " failed";
+      txt = calibrationUsable() ? "本次失败 · 沿用上次校准"
+                                : (calibrationErrors[calibError] || ("校准失败 " + calibError));
+    } else if (!encoderReadable) {
+      txt = "等待磁编数据";
+    } else {
+      txt = "未校准";
+    }
+    badge.className = cls;
+    badge.textContent = txt;
+    badge.title = "固件标定阶段：" + (stageNames[calibStage] || "未知") + "，进度 " + calibProgress + "%";
+  }
+  function updateTuning(values) {
+    (values || []).forEach(function (p) {
+      var el = $("tune_"+p.id);
+      var d = tuneDefs.find(function(x) { return x[0] === p.id; });
+      if (el && d && p.known && !el.dataset.dirty && document.activeElement !== el) {
+        el.value = p.value / d[2];   /* ★ 2026-09-28: 原来这里把 id=7 夹到 min(value,3000),
+                                        于是设备即使存着 8000, 页面也只显示 3 —— "应用参数"
+                                        再把这个 3 写回去, OCP 就掉回 3000。夹子已去掉。 */
+      }
+    });
+    var bwEl = $("tune_16");
+    if (!bwEl) { return; }
+    var bw = Number(bwEl.value);
+    if (bw > 0) {
+      var kp = Number($("tune_18").value)*1e-6*bw;
+      var ki = Number($("tune_17").value)*1e-3*bw;
+      $("tune_summary").textContent = " 自动电流 PI：Kp="+kp.toFixed(4)+"，Ki="+ki.toFixed(3)+"（约 "+(bw/(2*Math.PI)).toFixed(1)+" Hz）";
+    } else { $("tune_summary").textContent = " 手动电流 PI"; }
+    $("tune_3").disabled = bw > 0; $("tune_4").disabled = bw > 0;
+    [3,4].forEach(function(id){var d=tuneDefs.find(function(x){return x[0]===id;});$("tune_"+id).parentElement.hidden=bw>0||!relevant(d);});
+    if(bw===0 && relevant(tuneDefs.find(function(x){return x[0]===3;})||[null,null,null,""])){$("tune_advanced").open=true;}
+    $("tune_advanced").hidden=!tuneDefs.some(function(d){return relevant(d)&&[3,4,13,14,15,16,17,18,22].indexOf(d[0])>=0;});
+  }
+  tuneDefs.forEach(function(d) {
+    var p = tuneCatalog.find(function(p) { return p.id === d[0]; });
+    var label = document.createElement("label"); label.dataset.tuneModes = d[3];
+    label.textContent = d[1];
+    var input = document.createElement("input"); input.type="number"; input.id="tune_"+d[0];
+    input.min=p.min/d[2]; input.max=p.max/d[2]; input.step=1/d[2]; input.value=p.default/d[2];   /* id=7 不再特判 3000 */
+    input.addEventListener("input", function() { input.dataset.dirty="1"; updateTuning([]); });
+    /* ★分两区: "通用项"(电流环 PI/带宽、电机 R·L、斜坡、滤波) 收进折叠的「高级」区;
+       主区只留"本模式真正会用到的"参数 —— 例如位置环只给限幅 + 速度增益 + 位置增益。
+       [19]速度 Kd 和 [20]电压斜坡 是模式自己的旋钮, 留在主区。 */
+    label.appendChild(input); var advanced=[3,4,13,14,15,16,17,18,22].indexOf(d[0])>=0; $(advanced ? "tune_advanced_fields" : "tune_fields").appendChild(label);
+  });
+  window.updateModeTuning = updateTuning;
+  /* 给视图切换用的最小接口 (只改显示, 不发 CAN) */
+  window.selectControlMode = function (id) { chooseMode(id); };
+  window.dashboardMode = null;
+  function applyTuning(onlyDirty) {
+    var writes = tuneDefs.filter(relevant).filter(function(d) {
+      return !onlyDirty || !!$("tune_"+d[0]).dataset.dirty;
+    }).filter(function(d) {
+      return !((d[0]===3 || d[0]===4) && Number($("tune_16").value)>0);
+    }).map(function(d) {
+      var el=$("tune_"+d[0]), raw=Math.round(Number(el.value)*d[2]);
+      var p=tuneCatalog.find(function(p){return p.id===d[0];});
+      if (el.value==="" || !isFinite(raw) || raw<p.min || raw>p.max) { throw new Error(d[1]+"超出范围"); }
+      return [d[0],raw];
+    });
+    return writes.reduce(function(chain,w) {
+      return chain.then(function() { return request("/api/set?id="+w[0]+"&value="+w[1]); })
+        .then(function(){ delete $("tune_"+w[0]).dataset.dirty; });
+    }, Promise.resolve());
+  }
+  /* ★四按钮直接控制 (2026-09-28): 读取参数 / 应用参数 / 启动 / 停止。
+     "应用参数" = 写参数 + 立即保存到设备 (原来拆成"应用调参"和"保存到设备"两个按钮, 容易漏掉保存)。
+     "启动" 内部已经把调参与目标一起下发, 所以不再需要单独的"下发当前目标"。 */
+  $("btn_tune_read").addEventListener("click",function() {
+    request("/api/getall").then(function(r){
+      tuneDefs.forEach(function(d){delete $("tune_"+d[0]).dataset.dirty;});
+      updateTuning(r.params); note("loop_hint","已读取设备参数。",false);
+    }).catch(function(e){note("loop_hint",e.message,true);});
+  });
+  $("btn_tune_apply").addEventListener("click",function() {
+    if (runBusy) { return; }
+    runBusy = true;
+    Promise.resolve().then(function(){return applyTuning(false);}).then(function(){return request("/api/save");})
+      .then(function(){note("loop_hint","参数已应用并保存到设备。",false);})
+      .catch(function(e){note("loop_hint",e.message,true);})
+      .then(function(){ runBusy = false; });
+  });
+  $("btn_capture_position").addEventListener("click",function() {
+    if (feedback.stale || feedback.position_stale || typeof feedback.position_deg !== "number") { note("loop_hint","等待新鲜位置反馈",true); return; }
+    $("target_position_deg").value=feedback.position_deg.toFixed(3);
+    $("target_mit_position_rad").value=(feedback.position_deg*Math.PI/180).toFixed(3);
+    updatePositionReadout();
+  });
+  /* ★ 2026-09-28 审查第 5 条: 位置目标是【绝对多圈角】, 而且 AS5048A 是单圈绝对 ->
+     掉电后多圈位置从当前圈重算。原来的框只写"位置目标 (°)"、默认 0,
+     用户不改它直接点启动, 目标就是 0° —— 与当前位置差多少就跑多少(实测出过整圈级跑飞)。
+     现在:
+       1) 标签写明"绝对多圈角";
+       2) 进位置模式时若用户没改过, 自动把目标设成当前位置 (= 先保持, 不会自己跑);
+       3) 加"目标 = 当前位置 + 相对角"按钮, 支持相对移动的直觉;
+       4) 实时读数显示 当前位置 -> 目标 以及差值;
+       5) 启动前若差值 > 30° 必须确认。 */
+  function updatePositionReadout() {
+    var el = $("position_readout");
+    if (!el) { return; }
+    var cur = (typeof feedback.position_deg === "number" && !feedback.position_stale) ? feedback.position_deg : null;
+    var tgt = Number($("target_position_deg").value);
+    if (cur === null || !isFinite(tgt)) { el.textContent = "当前位置 —（等待新鲜反馈）"; el.className = "loop-readout-strong bad"; return; }
+    var d = tgt - cur;
+    el.textContent = "当前位置 " + cur.toFixed(2) + "° → 目标 " + tgt.toFixed(2) +
+                     "°（差 " + (d >= 0 ? "+" : "") + d.toFixed(2) + "°）";
+    el.className = "loop-readout-strong" + (Math.abs(d) > 30 ? " bad" : "");
+  }
+  /* ★ 2026-09-28 审查要求: 把"启动助跑阶段 / 控制电角度 / 饱和"显示出来,
+     不要再让操作者从"累计 820 counts"猜交接时刻。
+     走轻量端点 /api/diag/assist (只拉 bank19/20, 2 次 CAN 请求), 运行中约 2Hz。 */
+  var lastAssistPoll = 0;
+  function pollAssistDiag() {
+    var t = Date.now();
+    if (t - lastAssistPoll < 450) { return; }
+    lastAssistPoll = t;
+    return pollOnce("assist", function () { return fetchJSON("/api/diag/assist").then(function (a) {
+      if (!a || !a.ok) { return; }
+      var st = $("control_assist_stage");
+      if (st) { st.textContent = a.stage_name + "（行程 " + a.travel_counts + " cnt · θ " + a.theta_deg.toFixed(1) + "°）"; }
+      var fl = $("control_assist_flags");
+      if (fl) {
+        var s = [];
+        if (a.voltage_saturated) { s.push("电压"); }
+        if (a.iq_limited) { s.push("Iq限幅"); }
+        if (a.speed_loop_saturated) { s.push("速度环"); }
+        if (a.position_loop_saturated) { s.push("位置环"); }
+        fl.textContent = s.length ? s.join(" + ") : "无";
+        fl.className = s.length ? "bad" : "";
+      }
+    }).catch(function () { /* 旧固件没有 bank19/20 -> 静默忽略 */ }); });
+  }
+  $("btn_position_rel").addEventListener("click",function() {    if (feedback.stale || feedback.position_stale || typeof feedback.position_deg !== "number") { note("loop_hint","等待新鲜位置反馈",true); return; }
+    var rel = Number($("position_rel_deg").value);
+    if (!isFinite(rel)) { note("loop_hint","相对角度无效",true); return; }
+    $("target_position_deg").value = (feedback.position_deg + rel).toFixed(3);
+    $("target_position_deg").dataset.dirty = "1";
+    updatePositionReadout();
+    note("loop_hint","目标已设为 当前位置 + " + rel + "°",false);
+  });
+  /* ★模式与校准彻底解绑:
+       - 选模式只改显示 (目标字段 / 调参 / 反馈 / 提示), 不发任何 CAN。
+       - 校准是上面那个独立卡片里的独立动作, 不再作为运行模式的前置条件。
+       - 需要编码器角度的模式若还没校准, 只给一条提示, 启动按钮照常可点,
+         由固件按自己的状态决定是否接受 (会回具体原因)。 */
+  function chooseMode(id) {
+    mode = id;
+    window.dashboardMode = id;
+    $("control_mode_select").value = String(id);
+    if ($("tune_title")) { $("tune_title").textContent = (modeNames[id] || "模式") + " · 参数"; }
+    if (noteEl) { noteEl.textContent = modeDesc[id] || ""; }
+    $("mode_feedback").hidden = id === 0;
+    document.querySelectorAll("[data-tune-modes]").forEach(function(el) {
+      el.hidden = el.dataset.tuneModes.split(",").indexOf(String(id)) < 0;
+    });
+    $("btn_capture_position").hidden = id !== 3 && id !== 6;
+    updateTuning(lastParams);
+    document.querySelectorAll("#mode_chips .mode-chip").forEach(function (b) {
+      b.classList.toggle("selected", parseInt(b.getAttribute("data-control-mode"), 10) === id);
+    });
+    document.querySelectorAll(".target-group[data-target-mode]").forEach(function (g) {
+      g.hidden = parseInt(g.getAttribute("data-target-mode"), 10) !== id;
+    });
+    /* ★位置模式: 用户没改过目标就以【当前位置】为目标(等价于"先保持"),
+       避免默认 0° 与当前位置差很远时一启动就整圈跑飞。 */
+    if (id === 3) {
+      var el3 = $("target_position_deg");
+      if (el3 && !el3.dataset.dirty &&
+          typeof feedback.position_deg === "number" && !feedback.position_stale) {
+        el3.value = feedback.position_deg.toFixed(3);
+      }
+      updatePositionReadout();
+    }
+    /* 开环(mode 0)只有电压/电流上限两项 (随启动命令下发), 没有设备参数可读写 */
+    $("btn_tune_read").disabled = (id === 0);
+    $("btn_tune_apply").disabled = (id === 0);
+    if (id === 0) { $("tune_summary").textContent = ""; }
+    syncModeTrigger();
+    syncCalibHint();
+    note("loop_hint", "", false);
+  }
+  /* 模式下拉: 按钮显示当前模式, 点开是七个模式的列表, 选完自动收起。
+     选中即生效: 之后点「启动」就是这个模式, 不再二次确认。 */
+  function syncModeTrigger() {
+    var sel = document.querySelector("#mode_chips .mode-chip.selected");
+    if (!sel) { return; }
+    $("mode_trigger_name").textContent = sel.querySelector("b").textContent;
+    $("mode_trigger_sub").textContent = sel.querySelector("small").textContent;
+    document.querySelectorAll("#mode_chips .mode-chip").forEach(function (b) {
+      b.setAttribute("role", "option");
+      b.setAttribute("aria-selected", b === sel ? "true" : "false");
+    });
+  }
+  function setModeList(open) {
+    var list = $("mode_chips");
+    list.hidden = !open;
+    $("mode_trigger").setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      var sel = list.querySelector(".mode-chip.selected") || list.querySelector(".mode-chip");
+      if (sel) { sel.focus(); }
+    }
+  }
+  $("mode_trigger").addEventListener("click", function (ev) {
+    ev.stopPropagation();
+    setModeList($("mode_chips").hidden);
+  });
+  document.querySelectorAll("#mode_chips .mode-chip").forEach(function (b) {
+    b.addEventListener("click", function () { setModeList(false); $("mode_trigger").focus(); });
+  });
+  $("mode_chips").addEventListener("keydown", function (ev) {
+    var items = Array.prototype.slice.call(document.querySelectorAll("#mode_chips .mode-chip"));
+    var i = items.indexOf(document.activeElement);
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault();
+      i = (i + (ev.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+      items[i].focus();
+    } else if (ev.key === "Tab" || ev.key === "Escape") {
+      setModeList(false);
+    }
+  });
+  document.addEventListener("click", function (ev) {
+    if (!$("mode_chips").hidden && !ev.target.closest(".mode-select")) { setModeList(false); }
+  });
+  /* ★运行态: 启动后按钮显示"运行中"、模式锁定 (固件运行中不接受换模式, 回 -9);
+     目标框改完 (回车/失焦) 直接下发, 开环滑条拖动时合并发送, 不用停机重启。 */
+  var running = false;
+  var openRpmTimer = null, openRpmQueued = null, openRpmPending = false;
+  function cancelOpenRpm() {
+    if (openRpmTimer !== null) { clearTimeout(openRpmTimer); openRpmTimer = null; }
+    openRpmQueued = null;
+  }
+  function flushOpenRpm() {
+    openRpmTimer = null;
+    if (openRpmPending) { return; }
+    var target = openRpmQueued;
+    openRpmQueued = null;
+    if (!target || !running || mode !== 0 || runBusy || otaBusy || target.generation !== commandGeneration) { return; }
+    openRpmPending = true;
+    request("/api/control/set?field=open_speed_rpm&value=" + encodeURIComponent(target.value))
+      .then(function () {
+        if (running && target.generation === commandGeneration) { note("loop_hint", "开环转速目标已更新。", false); }
+      }).catch(function (e) {
+        if (target.generation === commandGeneration) { note("loop_hint", e.message, true); }
+      }).finally(function () {
+        openRpmPending = false;
+        if (openRpmQueued && openRpmTimer === null) { openRpmTimer = setTimeout(flushOpenRpm, 150); }
+      });
+  }
+  function queueOpenRpm(immediate) {
+    if (!running || mode !== 0 || runBusy || otaBusy) { cancelOpenRpm(); return; }
+    var value = Number($("in_rpm").value);
+    if ($("in_rpm").value === "" || !isFinite(value) || value < 3 || value > 200) {
+      cancelOpenRpm(); note("loop_hint", "开环目标须为 3～200 rpm。", true); return;
+    }
+    openRpmQueued = {value:value, generation:commandGeneration};
+    if (immediate && !openRpmPending) {
+      if (openRpmTimer !== null) { clearTimeout(openRpmTimer); }
+      flushOpenRpm();
+    } else if (openRpmTimer === null && !openRpmPending) {
+      openRpmTimer = setTimeout(flushOpenRpm, 150);
+    }
+  }
+  function syncRunUi() {
+    var m = (window.dashboardStatus || {}).motor || {};
+    var on = !!(m.available && m.output_on);
+    var run = $("btn_loop_run");
+    run.textContent = on ? "运行中" : "启动";
+    run.classList.toggle("running", on);
+    run.disabled = on || otaBusy || mode === null || runBusy;
+    $("mode_trigger").disabled = on || otaBusy;
+    if (on) { setModeList(false); }
+    $("mode_trigger").title = on ? "停止后才能切换模式" : "";
+    if (on !== running) {
+      running = on;
+      if (!on) { cancelOpenRpm(); }
+      if (!on && !runBusy) { note("loop_hint", m.fault ? "设备已停止（保护触发，详见上方保护状态）。" : "", !!m.fault); }
+    }
+  }
+  function liveTarget(ev) {
+    if (!running || runBusy || mode === null || mode === 0) { return; }
+    if (ev.type === "keydown" && ev.key !== "Enter") { return; }
+    var generation = commandGeneration;
+    setTargets(generation).then(function () {
+      note("loop_hint", "新目标已下发。", false);
+    }).catch(function (e) { note("loop_hint", e.message, true); });
+  }
+  document.querySelectorAll(".target-group[data-target-mode] input").forEach(function (el) {
+    if (el.id === "in_rpm" || el.id === "in_rpm_slider" || el.id === "position_rel_deg") { return; }
+    el.addEventListener("change", liveTarget);
+    el.addEventListener("keydown", liveTarget);
+  });
+  $("in_rpm").addEventListener("change", function () {
+    queueOpenRpm(true);
+  });
+  $("in_rpm").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") { queueOpenRpm(true); }
+  });
+  (function () {
+    var input = $("in_rpm"), slider = $("in_rpm_slider");
+    function syncSlider() {
+      var value = Number(input.value);
+      if (input.value !== "" && isFinite(value) && value >= Number(slider.min) && value <= Number(slider.max)) {
+        slider.value = String(value);
+      }
+      slider.title = slider.value + " rpm";
+    }
+    input.addEventListener("input", syncSlider);
+    input.addEventListener("change", syncSlider);
+    slider.addEventListener("input", function () {
+      input.value = slider.value;
+      input.dispatchEvent(new Event("input", {bubbles:true}));
+      queueOpenRpm(false);
+    });
+    slider.addEventListener("change", function () {
+      input.dispatchEvent(new Event("change", {bubbles:true}));
+    });
+    syncSlider();
+  })();
+  function setTargets(generation) {
+    if (mode === 0) { return Promise.resolve(); }
+    if (mode === null || !fields[mode]) { return Promise.reject(new Error("请先选择运行模式")); }
+    return fields[mode].reduce(function (chain, field) {
+      return chain.then(function () {
+        checkCommandGeneration(generation);
+        var input = $(inputs[field]);
+        var value = input ? parseFloat(input.value) : NaN;
+        if (!isFinite(value)) { throw new Error("请输入有效的目标值"); }
+        return request("/api/control/set?field=" + encodeURIComponent(field) +
+                       "&value=" + encodeURIComponent(value));
+      });
+    }, Promise.resolve());
+  }
+  document.querySelectorAll("#mode_chips .mode-chip").forEach(function (b) {
+    b.addEventListener("click", function () {
+      if (mode === Number(b.getAttribute("data-control-mode"))) { return; }
+      chooseMode(parseInt(b.getAttribute("data-control-mode"), 10));
+    });
+  });
+  /* ======================================================================
+   * ★启动前准入条件检查 (2026-09-27)
+   * 固件对模式 1..6 有一串互锁, 但旧固件把所有拒绝都回成同一个 "out of range",
+   * 页面上只能看到"参数非法" —— 分不清是没校准、没编码器帧, 还是采样没和 PWM
+   * 同步(-10)。所以在上位机侧先把已知条件查一遍, 直接说出"哪一条没过"。
+   *
+   * 检查项与固件 foc_motor_ctrl() 的返回码一一对应:
+   *   -7 未校准      <- control.calibration_stage != 3
+   *   -8 无新鲜编码器 <- encoder.valid && !stale
+   *   -9 非 IDLE      <- motor.state_name
+   *   -10 采样未同步  <- /api/diag/stat 的 sync_locked (诊断帧 bit2)
+   *   -6 过温        <- ntc.over / tripped / tripped_latched
+   * 只在"确定不过"时才拦: 拿不到诊断帧(未知)就不拦, 交给固件裁决。
+   * ====================================================================== */
+  var diagStat = null;
+  /* ★ 故障原因: 只报"当前 fault"没用, 得说清【哪一个】故障, 否则现场只能猜。
+     码表来自 foc/foc_mode.c 与 ota/ota_params.c。 */
+  var motorFault = null;
+  var FAULT_NAMES = {1: "ADC 采样陈旧", 2: "通用过流 (OCP 触发保护)", 3: "NTC 过温",
+                     4: "闭环过流", 5: "启动失败", 6: "编码器失效", 7: "校准过流",
+                     8: "行程过小", 9: "行程过大", 10: "相干性不足", 11: "启动助跑超时",
+                     12: "相电流采样饱和"};
+  function fetchDiagStat() {
+    // /api/diag/stat 是"请求固件回一帧 0x90"再返回缓存快照 -> 第一次可能还没到, 取第二次
+    return request("/api/diag/stat").then(function () {
+      return new Promise(function (res) { setTimeout(res, 250); });
+    }).then(function () {
+      return request("/api/diag/stat");
+    }).then(function (r) {
+      diagStat = (r && r.stat) || null;
+      /* 故障码/峰值/OCP 只在 /api/diag/raw 里; 只在真的要启动前拉一次 */
+      return request("/api/diag/raw").then(function (raw) {
+        motorFault = raw || null;
+      }).catch(function () { motorFault = null; });
+    }).then(function () {
+      return diagStat;
+    }).catch(function () { return null; });
+  }
+  function faultText() {
+    if (!motorFault || !motorFault.motor_fault_reason) { return ""; }
+    var c = motorFault.motor_fault_reason;
+    return "  最近一次故障码 " + c + "（" + (FAULT_NAMES[c] || "未知") + "），峰值 "
+           + motorFault.motor_fault_peak_ma + " mA，当前 OCP 上限 " + motorFault.motor_ocp_ma + " mA。";
+  }
+  function startGateReason(diagOverride) {
+    if (mode === null || mode === 0) { return null; }
+    var s = window.dashboardStatus || {};
+    if (!calibrationUsable()) {
+      return "没有可用的编码器校准 (零位/方向) —— 先做上面的「① 编码器校准」(固件会以 -7 拒绝)。";
+    }
+    var e = s.encoder || {};
+    if (!e.valid || e.stale) {
+      return "没有新鲜有效的 AS5048A 角度帧 —— 检查磁铁/SPI2 接线 (固件会以 -8 拒绝)。";
+    }
+    var m = s.motor || {};
+    if (m.state_name && m.state_name !== "idle") {
+      return "电机不在 IDLE (当前 " + m.state_name + ") —— 先点「停止」清掉状态再启动（固件会以 -9 拒绝）。"
+             + faultText();
+    }
+    var n = s.ntc || {};
+    if (n.over || n.fault || n.valid === false) {
+      /* ★2026-09-28: 阈值改用设备上报的 limit_c(不再硬编码 50/45 —— 用户已把触发保护提到 60) */
+      return "过温 (≥" + fmt(s.ntc.limit_c) + " °C 或未复归) —— 需降到滞回点以下才能再启动 (固件会以 -6 拒绝)。";
+    }
+    var ds = diagOverride || diagStat;
+    if (ds && ds.sync_locked === false) {
+      return "采样未与 PWM 同步 —— 电流环会被拒绝 (固件 -10); sync_code=" + ds.sync_code +
+             (ds.sync_fallback ? " (已回退自由跑)" : "") + "，详见诊断页。";
+    }
+    return null;
+  }
+  /* 暴露给控制台/自动化测试 (只读纯函数, 不发电机命令) */
+  window.startGateReason = startGateReason;
+  $("btn_loop_run").addEventListener("click", function () {
+    if (runBusy || mode === null) { return; }
+    runBusy = true;
+    var generation=commandGeneration;
+    $("btn_loop_run").disabled = true;
+    /* ★模式 1..6 先拉一次诊断帧(拿 ADC 同步状态), 再把"过不了的准入条件"直接说清楚;
+       开环(mode 0)不需要编码器/同步采样, 不查。 */
+    var pre = (mode === 0) ? Promise.resolve() : fetchDiagStat();
+    pre.then(function () {
+      checkCommandGeneration(generation);
+      var why = startGateReason();
+      if (why) { throw new Error(why); }
+      /* ★ 2026-09-28 两个会让人白跑一趟的坑, 启动前明确确认 (不是常驻小字, 只在真踩到时弹):
+         ① 电压模式里的 Ud: d 轴电压只产生径向电流, 【完全不产生转矩】。用户实测把 Ud 填成 5 V,
+            结果 Id=3.09 A / Iq≈0 / 转速 0, 而且 5V/0.275Ω≈18A 直接顶到静止电流上限 -> fault。
+            转矩全部来自 Uq; 正常情况下 Ud 必须保持 0。
+         ② 电流上限 < 4.5 A: 见工程说明.txt的历史电流限制与当前机械状态 —— 本机静起动门槛约 0.44 N·m,
+            3 A 档已被证明让电机完全起不来。 */
+      if (mode === 4) {
+        var ud = Number($("target_voltage_d_v").value);
+        if (isFinite(ud) && Math.abs(ud) > 0.1) {
+          if (!window.confirm("电压模式的 Ud 现在是 " + ud + " V。Ud 是 d 轴电压, 只产生径向电流, "
+              + "【不产生任何转矩】; 转矩全部来自 Uq。若只是想让电机转, 请把 Ud 改回 0。\n\n仍要用 Ud=" + ud + " V 启动吗?")) {
+            throw new Error("已取消: 请先把 Ud 改回 0（除非确实要做弱磁）。");
+          }
+        }
+      }
+      /* ★ 2026-09-28 审查第 5 条: 位置目标是【绝对多圈角】, 不是相对移动。
+         与当前位置差多少就会真实走多少 —— 差值大时必须让操作者确认, 否则"默认 0°"
+         这类误设会直接变成整圈级跑飞(实测出现过 +5° 命令跑 244°/375°)。 */
+      if (mode === 3) {
+        var tgt3 = Number($("target_position_deg").value);
+        var cur3 = (typeof feedback.position_deg === "number" && !feedback.position_stale)
+                   ? feedback.position_deg : null;
+        if (cur3 !== null && isFinite(tgt3) && Math.abs(tgt3 - cur3) > 30) {
+          if (!window.confirm("位置目标是【绝对多圈角】, 不是相对移动。\n\n"
+              + "当前位置 " + cur3.toFixed(2) + "° → 目标 " + tgt3.toFixed(2) + "°\n"
+              + "启动后电机会真实走 " + (tgt3 - cur3).toFixed(1) + "°（约 "
+              + (Math.abs(tgt3 - cur3) / 360).toFixed(2) + " 机械圈）。\n\n"
+              + "确认要移动这么多吗?（想小幅移动请用「目标 = 当前位置 + 相对角」）")) {
+            throw new Error("已取消: 位置目标与当前位置相差 "
+              + Math.abs(tgt3 - cur3).toFixed(1) + "°, 请确认目标值。");
+          }
+        }
+      }
+      /* ★ 2026-09-28 用户要求: 启动前【回读设备实际 i_limit】, 以设备为准, 不信页面上的框。
+         页面框可能是几分钟前的旧值(甚至被硬编码过 3 A), 而真正决定 OCP 的是设备里存的值。
+         顺便 updateTuning 把框刷新成设备的真值, 免得显示和实际长期不一致。 */
+      return request("/api/getall").then(function (r) {
+        updateTuning(r.params);   /* 改过 (dirty) 的框不会被覆盖, 下面随启动写入 */
+        var p7 = (r.params || []).filter(function (x) { return x.id === 7; })[0];
+        var dev_a = (p7 && isFinite(p7.value)) ? (p7.value / 1000) : null;
+        window.deviceILimitA = dev_a;
+        if (dev_a !== null && dev_a < 4.5) {
+          if (!window.confirm("【已回读设备】设备当前电流上限 = " + dev_a + " A（" + p7.value + " mA）。\n\n"
+              + "本机静起动门槛约 0.44 N·m（≈4 A 峰值），额定 4.35 Arms（6.15 A 峰值）；"
+              + "低于约 4.5 A 已被证明完全起不来（见 工程说明.txt中的历史电流限制与机械状态）。\n\n"
+              + "要先把「电流上限」改成 8 A 并点「应用参数」吗? 点「取消」将中止本次启动。")) {
+            throw new Error("已取消: 设备电流上限只有 " + dev_a + " A, 请先改成 ≥4.5 A（建议 8 A）并点「应用参数」。");
+          }
+        }
+      });
+    }).then(function(){checkCommandGeneration(generation);return mode===0?null:applyTuning(true);})
+      .then(function(){checkCommandGeneration(generation);return setTargets(generation);}).then(function () {
+      checkCommandGeneration(generation);
+      /* ★ "启动" 只下发【目标】, 不再写调参!
+         原因: 页面里的调参框可能是几小时前的旧值 (例如设备已改成 8 A, 而框里还留着 3),
+         原来在启动链里调 applyTuning 会把这个陈旧值【写回设备】, 把 OCP 从 8 A 打回 3 A ——
+         2026-09-28 实测踩到: 电压环突然"间歇卡住", 查下来是 i_limit 被写回 3000。
+         所以启动只写【用户改过的】参数框 (dataset.dirty), 其余以设备为准。 */
+      var seconds=Number($("mode_seconds").value);
+      if(!Number.isInteger(seconds)||seconds<0||seconds>120){throw new Error("运行时长须为 0～120 秒（0 = 不限时）");}
+      var url="/api/motor?enable=1&mode="+mode+"&seconds="+seconds;
+      if(mode===0){
+        var rpm=Number($("in_rpm").value),v=Number($("open_voltage").value),i=Number($("open_current").value);
+        if(!isFinite(rpm)||rpm<3||rpm>200||!isFinite(v)||v<.1||v>5||!isFinite(i)||i<.1||i>6){throw new Error("开环目标超出范围");}
+        url+="&rpm="+encodeURIComponent(rpm)+"&volt="+encodeURIComponent(v)+"&vbus=48&cur_ma="+Math.round(i*1000);
+      }
+      return request(url);
+    }).then(function () {
+      var sec = Number($("mode_seconds").value);
+      note("loop_hint", modeNames[mode] + (sec > 0 ? "运行中，" + sec + " 秒后自动停止。" : "运行中（不限时，点「停止」结束）。")
+           + (mode === 0 ? "" : " 改目标后回车即下发。"), false);
+      pollControl();
+    }).catch(function (e) {
+      var msg = e.message || String(e);
+      /* ★固件把模式 1..6 的所有拒绝都回成同一个 "out of range"(见
+         ota/ota_params.c 的 MOTOR_CTRL 分支), 所以这里补一句可能性清单,
+         免得只看到"参数非法"却不知道往哪查。 */
+      if (mode !== 0 && /out of range|OTA_PERR_RANGE/i.test(msg)) {
+        msg += " —— 固件没细分原因, 可能依次是: 未校准(-7) / 无新鲜编码器帧(-8) /"
+             + " 非 IDLE(-9) / 采样未与 PWM 同步(-10) / 过温(-6)。"
+             + (diagStat ? (" 当前 sync_locked=" + diagStat.sync_locked + " sync_code=" + diagStat.sync_code + "。") : "");
+      }
+      note("loop_hint", msg, true);
+    }).then(function () {
+      runBusy = false;
+      syncRunUi();
+    });
+  });
+  $("btn_loop_stop").addEventListener("click", function () {
+    stopOutputs().then(function () {
+      note("loop_hint", "已确认设备停止输出。", false);
+      pollControl();
+    }).catch(function (e) { note("loop_hint", e.message, true); });
+  });
+
+  function pollControl() {
+    if (document.hidden) { return; }
+    return pollOnce("control", function () { return fetchJSON("/api/control/status").then(function (r) {
+      if (!r || !r.ok || !r.control) { return; }
+      feedback = r.feedback || {};
+      if (typeof updatePositionReadout === "function") { updatePositionReadout(); }
+      /* 只在真有输出时拉诊断, 免得空转时白占 CAN 带宽 */
+      if ((window.dashboardStatus && window.dashboardStatus.motor &&
+           window.dashboardStatus.motor.output_on) || !feedback.stale) {
+        if (typeof pollAssistDiag === "function") { pollAssistDiag(); }
+      }
+      [["loop_id","id_a",3],["loop_iq","iq_a",3],["loop_speed","speed_rpm",1],["loop_position","position_deg",3]].forEach(function(d) {
+        $(d[0]).textContent = !feedback.stale && typeof feedback[d[1]] === "number" ? feedback[d[1]].toFixed(d[2]) : "—";
+      });
+      var c = r.control;
+      var stage = c.calibration_stage;
+      calibrationDone = stage === 3;
+      calibrationActive = calibRunning(stage);
+      calibStage = stage;
+      calibError = c.calibration_error || 0;
+      calibProgress = c.calibration_progress || 0;
+      var progress = $("calib_progress");
+      progress.value = calibProgress;
+      /* ★ 只要本次尝试留下过错误码就一直显示; 并且当 stage===3 时明确说明
+       *   "沿用已保存标定" —— AS5048A 是绝对编码器, 零点只跟机械装配有关,
+       *   一次失败/被中止的尝试不该让人以为必须重新校准 (2026-09-28 修)。 */
+      var calibErrText = calibError
+        ? (calibrationErrors[calibError] || ("错误 " + calibError)) : "";
+      setNodeText($("calib_status"), (stageNames[stage] || "未知") +
+        (calibErrText ? " · " + calibErrText : "") +
+        ((stage === 3 && calibErrText) ? " · 沿用已保存的标定" : "") +
+        " · " + calibProgress + "%");
+      $("btn_calibrate_abort").disabled = !calibRunning(stage);
+      if (window.syncCalibrationButton) { window.syncCalibrationButton(); }
+      setCalibBadge();
+      syncCalibHint();
+      setNodeText($("control_mode_status"), modeNames[c.mode] ||
+        (c.mode === 0 ? "正弦开环" : "—"));
+      setNodeText($("control_iq_status"), (c.iq_target_ma / 1000).toFixed(3) + " A");
+      setNodeText($("control_calib_status"), stageNames[stage] || "未知");
+      syncRunUi();
+    }).catch(function () {}); });
+  }
+  $("btn_calibrate").addEventListener("click", function () {
+    if (!encoderReadable) {
+      note("loop_hint", "尚未收到有效且实时的磁编码器角度帧；读取状态正常后才能开始校准。", true);
+      return;
+    }
+    if (!window.confirm("编码器自校准使用开环三相正弦，电压从零缓升，目标不超过 6.0 A，控制限流最高 15 A，过流保护 30 A，随后扫角采样（正反各一遍，10 极对约 50 秒；期间电机会连续慢转）。请确认极对数与电机铭牌一致，电机轴可自由转动。开始吗？")) {
+      return;
+    }
+    request("/api/control/calibrate?op=start").then(function () {
+      note("loop_hint", "校准已开始；固件已确认磁编码器连续有效读取，请保持电机轴可自由转动。", false);
+      pollControl();
+    }).catch(function (e) { note("loop_hint", e.message, true); });
+  });
+  $("btn_calibrate_abort").addEventListener("click", function () {
+    request("/api/control/calibrate?op=abort").then(function () {
+      note("loop_hint", "已中止编码器校准。", false);
+      pollControl();
+    }).catch(function (e) { note("loop_hint", e.message, true); });
+  });
+
+  var otaBusy = false;
+  /* ★校准按钮的唯一裁决点: 只有"适配器在跑 OTA / 正在校准 / 没有新鲜磁编帧"才禁用。
+     它【不】看当前选了哪个运行模式 —— 校准与模式运行是两件事。 */
+  window.syncCalibrationButton = function () {
+    var calibrationButton = $("btn_calibrate");
+    if (!calibrationButton) { return; }
+    calibrationButton.disabled = otaBusy || calibrationActive || !encoderReadable;
+    calibrationButton.textContent = encoderReadable ? "开始自校准" : "开始自校准（等待磁编数据）";
+  };
+  function renderOta(s) {
+    if (!s) { return; }
+    otaBusy = !!s.running;
+    var labels = {idle:"待命", stopping:"确认停机并释放 CAN", running:"编译与 CAN-OTA 进行中", done:"升级流程完成", failed:"执行失败"};
+    $("ota_status").textContent = (labels[s.state] || s.state) + " · 目标工程 " + (s.project || "FOC_7010") +
+      (s.returncode !== null && s.returncode !== undefined ? " · exit " + s.returncode : "");
+    $("btn_ota_onekey").disabled = otaBusy;
+    $("control_mode_select").disabled = otaBusy;
+    syncRunUi();
+    $("btn_loop_stop").disabled = otaBusy;
+    $("btn_calibrate_abort").disabled = otaBusy || !calibrationActive;
+    $("btn_calibrate").disabled = otaBusy || calibrationActive || !encoderReadable;
+    document.querySelectorAll("#mode_chips .mode-chip").forEach(function (b) {
+      b.disabled = otaBusy;
+    });
+    window.syncCalibrationButton();
+    var lines = (s.output || []).slice(-80);
+    if (s.error) { lines.push("ERROR: " + s.error); }
+    $("ota_output").textContent = lines.length ? lines.join("\n") : "尚未运行";
+    $("ota_output").scrollTop = $("ota_output").scrollHeight;
+  }
+  function pollOta() {
+    return pollOnce("ota", function () { return fetchJSON("/api/ota/status").then(renderOta).catch(function () {}); });
+  }
+  $("btn_ota_onekey").addEventListener("click", function () {
+    if (otaBusy) { return; }
+    if (!window.confirm("将先停止电机，再在 FOC_7010 目录递增版本号、编译 A/B 固件并通过 CAN-OTA 更新当前连接的设备。继续吗？")) {
+      return;
+    }
+    $("btn_ota_onekey").disabled = true;
+    request("/api/ota/onekey").then(function (r) {
+      renderOta(r.ota);
+      pollOta();
+    }).catch(function (e) {
+      $("btn_ota_onekey").disabled = false;
+      $("ota_status").textContent = "启动失败 · " + e.message;
+    });
+  });
+  chooseMode(0);
+  /* ★运行时长默认不限, 三道自动停机:
+       页面关闭/刷新 -> 这里立即发停止 (keepalive, 页面卸载后也会送达);
+       页面卡死/断网 -> 服务端 6 s 没收到请求就停机 (后台 Worker 每秒报到, 标签页进后台被节流也不误停);
+       服务端/USB-CAN/CAN 断 -> 固件 1 s 收不到心跳就停机。 */
+  window.addEventListener("pagehide", function () {
+    try {
+      fetch("/api/motor?enable=0", {method: "POST", keepalive: true, cache: "no-store",
+        headers: {"X-Control-Token": controlToken, "X-Command-Epoch": String(commandEpoch)}});
+    } catch (e) { /* 页面已经在卸载 */ }
+  });
+  try {
+    var aliveSrc = "setInterval(function(){fetch('" + location.origin + "/api/alive',{cache:'no-store'}).catch(function(){});},1000);";
+    new Worker(URL.createObjectURL(new Blob([aliveSrc], {type: "text/javascript"})));
+  } catch (e) { /* 没有 Worker: 页面自己的 200 ms 轮询照样喂看门狗 */ }
+  pollControl();
+  pollOta();
+  setInterval(pollControl, 200);
+  setInterval(pollOta, 1500);
+})();
+</script>
+</body>
+</html>
