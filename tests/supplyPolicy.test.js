@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {supplyMeasurements, supplyPoint, supplyReadbackPoint, supplyOperatingMode} from '../web/src/supplyPolicy.js';
+import {supplyMeasurements, supplyPoint, supplyReadbackPoint, supplyOperatingMode} from '../web/src/supplyPolicy.ts';
 
 test('actual CC/CV follows SSJ status bits and never claims constant current while off or disconnected', () => {
   const device=status=>({connected:true,config:{protocol:'ssj'},snapshot:{status}});

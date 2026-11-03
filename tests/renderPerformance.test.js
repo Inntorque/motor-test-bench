@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {FrameBuffer} from '../web/src/frameBuffer.js';
-import {EncoderBins} from '../web/src/encoderBins.js';
+import {FrameBuffer} from '../web/src/frameBuffer.ts';
+import {EncoderBins} from '../web/src/encoderBins.ts';
 
 function referenceRows(points,limit) {
   const groups=new Map();

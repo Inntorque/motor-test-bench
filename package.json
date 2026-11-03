@@ -18,18 +18,30 @@
     "build:gateway-icons": "node scripts/build_gateway_icons.mjs",
     "test:gateway-icons": "node tests/gateway-icons-ui.mjs",
     "build:browser": "node scripts/build_browser.mjs",
-    "test:browser": "node --test tests/browser-legacy.mjs tests/browser-legacy-control.mjs && node tests/browser-ui.mjs && node tests/bootloader-ui.mjs"
+    "test:browser": "node --test tests/browser-legacy.mjs tests/browser-legacy-control.mjs && node tests/browser-ui.mjs && node tests/bootloader-ui.mjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.strict.json && tsc -p tsconfig.worker.json && tsc -p tsconfig.tools.json",
+    "prebuild": "npm run typecheck",
+    "pretest": "npm run typecheck",
+    "preview:gateway": "vite --config vite.gateway.config.ts",
+    "pretypecheck": "node scripts/generate_browser_metadata.mts"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.18.0"
   },
   "dependencies": {
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/three": "0.187.0",
+    "@types/w3c-web-serial": "1.0.9",
+    "@types/w3c-web-usb": "1.0.14",
     "playwright": "1.64.0",
     "three": "0.187.0",
+    "typescript": "7.0.2",
     "vite": "8.3.4"
   }
 }

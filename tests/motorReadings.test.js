@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {motorTargetCurrentA, motorOutputFeedback, motorDeviceState, motorStepInputError} from '../web/src/model.js';
+import {motorTargetCurrentA, motorOutputFeedback, motorDeviceState, motorStepInputError} from '../web/src/model.ts';
 
 test('step inputs explain missing and invalid values instead of silently blocking the button', () => {
   assert.match(motorStepInputError({}), /电流步长、步进间隔、持续时间/);

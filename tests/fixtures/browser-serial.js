@@ -1,5 +1,5 @@
 import {VirtualBoard} from './virtual-mbp.js';
-import {slcanFrame,SlcanDecoder,ZqwlDecoder,zqwlFrame} from '../../browser/transports.js';
+import {slcanFrame,SlcanDecoder,ZqwlDecoder,zqwlFrame} from '../../browser/transports.ts';
 const state = window.__serialFixture = {board:new VirtualBoard(),authorizations:0,opens:0,writeCount:0,granted:false};
 const slcan = Boolean(window.__browserTestSlcan);
 const port = {

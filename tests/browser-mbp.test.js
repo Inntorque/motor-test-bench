@@ -1,10 +1,10 @@
 import {VirtualBoard} from './fixtures/virtual-mbp.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {MotorDevice} from '../browser/motor.js';
-import {CAN,OP,O,schema,IsoTp,packet,unpack,objects,values,tlv} from '../browser/mbp-codec.js';
-import {concat,crc32,pack,view,sleep,hex} from '../browser/bytes.js';
-import {zqwlFrame} from '../browser/transports.js';
+import {MotorDevice} from '../browser/motor.ts';
+import {CAN,OP,O,schema,IsoTp,packet,unpack,objects,values,tlv} from '../browser/mbp-codec.ts';
+import {concat,crc32,pack,view,sleep,hex} from '../browser/bytes.ts';
+import {zqwlFrame} from '../browser/transports.ts';
 
 
 test('browser USB-CAN -> ISO-TP -> MBP client identifies, prepares, starts maximum Iq, reads frozen data and confirms STOP',async t => {

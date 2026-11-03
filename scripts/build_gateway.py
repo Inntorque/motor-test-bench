@@ -48,11 +48,12 @@ def build(destination):
         shutil.copy2(source / name, destination / name)
     shutil.copy2(icon_bundle, destination / 'icon-motion.js')
     shutil.copytree(source / 'icons', destination / 'icons', dirs_exist_ok=True)
-    version = digest(icon_bundle.read_bytes() + (source / 'home.js').read_bytes()
+    home_bundle = ROOT / '.runtime/gateway-home-bundle/home.js'
+    version = digest(icon_bundle.read_bytes() + home_bundle.read_bytes()
                      + (source / 'styles.css').read_bytes()
                      + b''.join(path.read_bytes() for path in sorted((source / 'icons').glob('*.svg'))))[:12]
-    (destination / 'home.js').write_text((source / 'home.js').read_text(encoding='utf-8').replace('__ICON_VERSION__', version), encoding='utf-8')
-    page = (source / 'index.html').read_text(encoding='utf-8')
+    (destination / 'home.js').write_text(home_bundle.read_text(encoding='utf-8').replace('__ICON_VERSION__', version), encoding='utf-8')
+    page = (source / 'index.html').read_text(encoding='utf-8').replace('./home.ts', './home.js')
     for asset in ['styles.css', 'home.js']:
         page = page.replace('./' + asset, './' + asset + '?v=' + version)
     (destination / 'index.html').write_text(page, encoding='utf-8')

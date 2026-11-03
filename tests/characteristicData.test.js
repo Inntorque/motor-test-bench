@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CharacteristicWindow } from '../web/src/characteristicData.js';
-import {characteristicElectrical} from '../web/src/characteristicData.js';
-import {measuredStopPoint} from '../web/src/characteristicData.js';
+import { CharacteristicWindow } from '../web/src/characteristicData.ts';
+import {characteristicElectrical} from '../web/src/characteristicData.ts';
+import {measuredStopPoint} from '../web/src/characteristicData.ts';
 
 test('measured stop endpoint survives bin averaging without inventing a zero',()=>{
   const run={running:false,measurementEndedAt:1002,stallEndpoint:{receivedAt:1002,torque:2.46,speed:0}};
@@ -58,7 +58,7 @@ test('incremental characteristic window matches full-window statistics and suppo
 });
 
 test('linear trend is a straight fit confined to measured coverage', async () => {
-  const {linearCharacteristic} = await import('../web/src/characteristicData.js');
+  const {linearCharacteristic} = await import('../web/src/characteristicData.ts');
   assert.deepEqual(linearCharacteristic([{torque:1,power:3},{torque:2,power:5},{torque:3,power:7}],'power'),
     [{torque:1,power:3},{torque:3,power:7}]);
   assert.deepEqual(linearCharacteristic([{torque:0,power:3},{torque:0,power:5}],'power'),[]);
@@ -66,7 +66,7 @@ test('linear trend is a straight fit confined to measured coverage', async () =>
 });
 
 test('adjustable curve fit follows curvature instead of flattening to a line', async () => {
-  const {curveCharacteristic} = await import('../web/src/characteristicData.js');
+  const {curveCharacteristic} = await import('../web/src/characteristicData.ts');
   const points = Array.from({length:41},(_,i)=>({torque:i/10,power:(i/10)**2}));
   const fitted = curveCharacteristic(points,'power',70);
   assert.equal(fitted.length,96);

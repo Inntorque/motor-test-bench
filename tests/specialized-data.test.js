@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {referencesCsv,referenceAnalysis,loadAnalysis,saveAnalysis} from '../web/src/specialized/data.js';
+import {referencesCsv,referenceAnalysis,loadAnalysis,saveAnalysis} from '../web/src/specialized/data.ts';
 
 test('external reference import rejects empty, invalid and duplicated visits',()=>{
   assert.deepEqual(referencesCsv('\uFEFFvisit_id,target_deg,reference_deg\r\n1,0,0.1\r\n2,0,0.2'),[{visitId:1,referenceDeg:.1},{visitId:2,referenceDeg:.2}]);

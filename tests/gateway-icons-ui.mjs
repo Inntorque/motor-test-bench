@@ -5,7 +5,7 @@ import {resolve, dirname, extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {Box3, Vector3} from 'three';
-import {createIconScene} from '../gateway/graphics/icon-scene.js';
+import {createIconScene} from '../gateway/graphics/icon-scene.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, '.runtime/img2threejs-icons/pixel-motion');
@@ -91,7 +91,7 @@ try {
     Object.defineProperty(document, 'hidden', {get: () => window.iconProbe.hidden});
   });
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  await page.waitForFunction(() => document.querySelectorAll('.is-animated').length === 3);
+  await page.waitForFunction(() => document.querySelectorAll('.is-animated').length === 4);
   const info = await page.evaluate(() => ({
     contexts: window.iconProbe.webgl.size,
     sizes: [...document.querySelectorAll('.app-icon canvas')].map(c => [c.width, c.height]),
@@ -160,6 +160,30 @@ try {
     assert.equal(await page.locator('.app-icon canvas').nth(index).evaluate(c => getComputedStyle(c).transform), 'none', 'pointer leave must restore normal size');
   }
 
+  const boot = page.locator('.app').nth(3),flow = boot.locator('.boot-data-flow');
+  const motorImages = await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => c.toDataURL()));
+  await boot.hover();await page.waitForFunction(() => document.querySelector('.bootloader').classList.contains('is-flowing'));
+  assert.deepEqual(await boot.locator('svg').evaluate(svg => [svg.getAttribute('width'),svg.getAttribute('height')]),['480','480']);
+  const downward = await flow.evaluate(node => {
+    const animation = node.getAnimations()[0],ys = [];
+    for (const time of [100,350,700]) {animation.currentTime = time;ys.push(new DOMMatrix(getComputedStyle(node).transform).m42);}
+    return ys;
+  });
+  assert.ok(downward[1] > downward[0] && downward[2] < downward[1],'data arrows must move down and loop back to the top');
+  assert.deepEqual(await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => c.toDataURL())),motorImages,'Bootloader flow must not redraw the motors');
+  await page.screenshot({path:resolve(output,'gateway-hover-bootloader.png')});
+  await page.evaluate(() => {window.iconProbe.hidden = true;document.dispatchEvent(new Event('visibilitychange'));});
+  assert.equal(await flow.evaluate(node => getComputedStyle(node).animationPlayState),'paused');
+  await page.evaluate(() => {window.iconProbe.hidden = false;document.dispatchEvent(new Event('visibilitychange'));});
+  await page.waitForFunction(() => document.querySelector('.bootloader').classList.contains('is-flowing'));
+  await page.emulateMedia({reducedMotion:'reduce'});
+  assert.equal(await flow.evaluate(node => getComputedStyle(node).animationName),'none');
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  await page.mouse.move(1,1);await page.waitForTimeout(100);
+  assert.equal(await flow.evaluate(node => getComputedStyle(node).animationPlayState),'paused');
+  const stoppedFlow = await flow.evaluate(node => getComputedStyle(node).transform);await page.waitForTimeout(200);
+  assert.equal(await flow.evaluate(node => getComputedStyle(node).transform),stoppedFlow);
+
   await page.locator('.app').first().hover();
   await page.evaluate(() => {window.iconProbe.hidden = true; document.dispatchEvent(new Event('visibilitychange'));});
   const paused = await page.evaluate(() => window.iconProbe.frames);
@@ -189,7 +213,7 @@ try {
   await checkCentered(page);
   await page.screenshot({path: resolve(output, 'gateway-mobile.png')});
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({passed: true, contexts: info.contexts, sizes: info.sizes, alignment, hoverFps: rates, hoverScale: 1.08, fixedTile: true, idleStatic: true, hoverOnly: true, fixedHousingAndCamera: true, pointerLeaveStops: true, hiddenPause: true, offscreenPause: true, reducedMotion: true, responsive: true, errors}, null, 2));
+  console.log(JSON.stringify({passed: true, contexts: info.contexts, sizes: info.sizes, alignment, hoverFps: rates, hoverScale: 1.08, fixedTile: true, idleStatic: true, hoverOnly: true, fixedHousingAndCamera: true, pointerLeaveStops: true, hiddenPause: true, offscreenPause: true, reducedMotion: true, responsive: true, bootloaderDownwardFlow: true, bootloaderHoverOnly: true, errors}, null, 2));
 } finally {
   await browser?.close();
   await new Promise(done => server.close(done));

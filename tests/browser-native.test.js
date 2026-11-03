@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {concat,crc16,hex,pack,view} from '../browser/bytes.js';
-import {objects,packet,values,IsoTp,SampleAssembler} from '../browser/mbp-codec.js';
-import {zqwlFrame,zqwlConfig,ZqwlDecoder,ModbusRtu} from '../browser/transports.js';
-import {HexParser,supplyConfig} from '../browser/rs485.js';
-import {gsBitTiming} from '../browser/hardware.js';
+import {concat,crc16,hex,pack,view} from '../browser/bytes.ts';
+import {objects,packet,values,IsoTp,SampleAssembler} from '../browser/mbp-codec.ts';
+import {zqwlFrame,zqwlConfig,ZqwlDecoder,ModbusRtu} from '../browser/transports.ts';
+import {HexParser,supplyConfig} from '../browser/rs485.ts';
+import {gsBitTiming} from '../browser/hardware.ts';
 const fromHex = value => Uint8Array.from(Buffer.from(value.replaceAll(' ',''),'hex'));
 
 test('browser MBP codec matches the frozen SDK golden vectors including signed 64-bit positions',async () => {

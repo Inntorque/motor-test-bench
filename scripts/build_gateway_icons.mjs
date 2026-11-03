@@ -13,7 +13,7 @@ await build({
     emptyOutDir: true,
     minify: true,
     lib: {
-      entry: resolve(root, 'gateway/icon-motion.js'),
+      entry: resolve(root, 'gateway/icon-motion.ts'),
       formats: ['es'],
       fileName: () => 'icon-motion.js',
     },
@@ -22,3 +22,7 @@ await build({
 const bundle = resolve(root, '.runtime/gateway-icon-bundle/icon-motion.js');
 const license = await readFile(resolve(root, 'node_modules/three/LICENSE'), 'utf8');
 await writeFile(bundle, `/* Three.js — MIT License\n${license}*/\n${await readFile(bundle, 'utf8')}`);
+
+await build({configFile:false,root,publicDir:false,build:{outDir:resolve(root,'.runtime/gateway-home-bundle'),emptyOutDir:true,minify:true,
+  lib:{entry:resolve(root,'gateway/home.ts'),formats:['es'],fileName:() => 'home.js'},
+  rollupOptions:{external: id => id.startsWith('./icon-motion.js?')}}});

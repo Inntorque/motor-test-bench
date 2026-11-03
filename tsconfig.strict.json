@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "useUnknownInCatchVariables": false,
+    "types": [
+      "w3c-web-usb"
+    ]
+  },
+  "include": [
+    "gateway/ui/bootloader/**/*.ts",
+    "browser/bytes.ts",
+    "browser/types.ts",
+    "browser/messages.ts",
+    "web/src/frameBuffer.ts",
+    "web/src/encoderBins.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "site",
+    "dist",
+    ".runtime"
+  ]
+}

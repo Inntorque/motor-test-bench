@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {motorOutputFeedback,toCsv} from '../web/src/model.js';
-import {subjectText,setupText} from '../web/src/testSubjects.js';
+import {motorOutputFeedback,toCsv} from '../web/src/model.ts';
+import {subjectText,setupText} from '../web/src/testSubjects.ts';
 
 test('bare and geared configurations are explicit and old records are never reinterpreted',()=>{
   const subject={motor:{name:'A'},driverBoard:{name:'B'},testSetup:{id:'bare',name:'裸机',ratio:1,axis:'motor',hasGearbox:false,massKg:.5,volumeL:null}};

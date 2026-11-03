@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {JLink} from '../gateway/ui/bootloader/jlink.js';
-import {Swd,frames,decode,put,request} from '../gateway/ui/bootloader/swd.js';
-import {BASE,BOOT_SIZE,FLASH_SIZE,Bootloader,identify,identity,replacement,validateImage,sha256} from '../gateway/ui/bootloader/n32.js';
+import {JLink} from '../gateway/ui/bootloader/jlink.ts';
+import {Swd,frames,decode,put,request} from '../gateway/ui/bootloader/swd.ts';
+import {BASE,BOOT_SIZE,FLASH_SIZE,Bootloader,identify,identity,replacement,validateImage,sha256} from '../gateway/ui/bootloader/n32.ts';
 import {VirtualJLink} from './fixtures/jlink.js';
 const firmware = new URL('../gateway/ui/bootloader/public/firmware/',import.meta.url);
 const image = new Uint8Array(await readFile(new URL('boot.bin',firmware))),manifest = JSON.parse(await readFile(new URL('manifest.json',firmware),'utf8'));

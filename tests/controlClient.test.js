@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {installApiClient,apiFetch} from '../web/src/apiClient.js';
+import {installApiClient,apiFetch} from '../web/src/apiClient.ts';
 
 test('LAN HTTP without randomUUID supports control headers, stop confirmation and bridge restart',async()=>{
   const previousWindow=globalThis.window;

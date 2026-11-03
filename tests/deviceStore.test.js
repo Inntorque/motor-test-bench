@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {installApiClient,apiFetch} from '../web/src/apiClient.js';
-import {startDeviceStore,cachedResponse} from '../web/src/deviceStore.js';
+import {installApiClient,apiFetch} from '../web/src/apiClient.ts';
+import {startDeviceStore,cachedResponse} from '../web/src/deviceStore.ts';
 
 test('STOP confirmation bypasses an earlier cached disabled state',async()=>{
   const savedWindow=globalThis.window,savedSource=globalThis.EventSource;

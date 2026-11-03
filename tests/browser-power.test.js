@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {PowerChannel} from '../browser/rs485.js';
-import {concat,crc16,view} from '../browser/bytes.js';
+import {PowerChannel} from '../browser/rs485.ts';
+import {concat,crc16,view} from '../browser/bytes.ts';
 class SupplyFixture {
   writes = []; coils = new Map([[133,false],[136,true],[137,true]]); settings = [2400,2000];
   constructor(protocol = 'ru') {this.protocol = protocol;this.listeners = new Set();}
@@ -55,8 +55,8 @@ test('SSJ brake writes retain 0.001A units and independent output register 2016'
 });
 
 test('a mistaken duplicate port selection never closes the device already owned by another channel',async () => {
-  const {CanTransport,ModbusRtu} = await import('../browser/transports.js');
-  const {TorqueSensor} = await import('../browser/rs485.js');let closes = 0;
+  const {CanTransport,ModbusRtu} = await import('../browser/transports.ts');
+  const {TorqueSensor} = await import('../browser/rs485.ts');let closes = 0;
   const io = {subscribe:() => () => {},call:async method => {if (method === 'serial-open') throw new Error('already in use');if (method === 'serial-close') closes++;}};
   const can = new CanTransport(io,() => {});await assert.rejects(can.open({device:'owned'}),/already in use/);
   const modbus = new ModbusRtu(io);await assert.rejects(modbus.open({device:'owned'}),/already in use/);await modbus.close();

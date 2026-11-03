@@ -1,6 +1,6 @@
-import {CAN,OP,O,IsoTp,packet,unpack,objects,values,tlv} from '../../browser/mbp-codec.js';
-import {concat,crc32,pack,view,hex} from '../../browser/bytes.js';
-import {zqwlFrame} from '../../browser/transports.js';
+import {CAN,OP,O,IsoTp,packet,unpack,objects,values,tlv} from '../../browser/mbp-codec.ts';
+import {concat,crc32,pack,view,hex} from '../../browser/bytes.ts';
+import {zqwlFrame} from '../../browser/transports.ts';
 const assert = {equal(actual,expected) {if (actual !== expected) throw new Error(`Virtual board protocol mismatch: ${actual} !== ${expected}`);}};
 export class VirtualBoard {
   constructor() {

@@ -6,6 +6,6 @@
     {"id": "dynamometer", "name": "测功机", "theme": "torque", "port": 5173, "hostApi": 1},
     {"id": "sg-6010hb", "name": "SG-6010HB", "theme": "sg", "port": 8892, "hostApi": 1},
     {"id": "rm-7010", "name": "7010 上位机", "theme": "motor7010", "port": 8888, "hostApi": 1},
-    {"id": "bootloader", "name": "Bootloader", "theme": "bootloader", "hostApi": 1, "browserOnly": true, "iconMotion": false}
+    {"id": "bootloader", "name": "Bootloader", "theme": "bootloader", "hostApi": 1, "browserOnly": true}
   ]
 }

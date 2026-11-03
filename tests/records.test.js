@@ -7,7 +7,7 @@ import {
   mergeRecords,
   relativeSamples,
   eventCsv,
-} from "../web/src/records.js";
+} from "../web/src/records.ts";
 
 const START = Date.parse("2026-10-09T00:00:00.000Z");
 

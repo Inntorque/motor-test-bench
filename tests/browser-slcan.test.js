@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {CanTransport,SlcanDecoder,slcanFrame,canInterface} from '../browser/transports.js';
+import {CanTransport,SlcanDecoder,slcanFrame,canInterface} from '../browser/transports.ts';
 const encode = value => new TextEncoder().encode(value);
 
 test('CANable2 CDC selects SLCAN independently from gs_usb and ZQWL',() => {

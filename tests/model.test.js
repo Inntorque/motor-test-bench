@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { toCsv, formatDuration } from "../web/src/model.js";
+import { toCsv, formatDuration } from "../web/src/model.ts";
 
 test("historical CSV export retains fields and leaves unmeasured PSU channels blank", () => {
   const sample = {

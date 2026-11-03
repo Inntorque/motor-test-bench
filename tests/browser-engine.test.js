@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Bench} from '../browser/bench.js';
-import {CurrentMotor,CoupledCurrent,StandstillConfirmation,BrakeTorque,BrakeCurrent} from '../browser/control.js';
-import {TestSubjects,Recordings} from '../browser/storage.js';
-import {Specialized} from '../browser/specialized.js';
-import {fit,positioning,thermal} from '../browser/metrics.js';
-import {utc} from '../browser/bytes.js';
+import {Bench} from '../browser/bench.ts';
+import {CurrentMotor,CoupledCurrent,StandstillConfirmation,BrakeTorque,BrakeCurrent} from '../browser/control.ts';
+import {TestSubjects,Recordings} from '../browser/storage.ts';
+import {Specialized} from '../browser/specialized.ts';
+import {fit,positioning,thermal} from '../browser/metrics.ts';
+import {utc} from '../browser/bytes.ts';
 class MemoryStore {
   data = new Map(); queries = [];
   async get(key) {return structuredClone(this.data.get(key));}
@@ -179,7 +179,7 @@ test('browser specialized recipes finish and retain named geared/bare records, s
     await env.subjects.select({motorId:motor.id,testSetupId:setup.id});
     env.motor.status = () => {const s = snapshot();s.motor.output_on = enabled;s.motor.state = enabled ? 2 : 0;s.motor.mode = mode;s.feedback.position_deg = mode === 4 ? target / 1000000 * 360 : 0;s.feedback.iq_a = mode === 1 ? target / 1000 : 0;s.feedback.id_a = 0;s.feedback.speed_rpm = 0;return {connected:true,snapshot:s,run:env.motor.run};};
     env.motor.healthy = () => {};env.motor.stop = async () => {enabled = false;env.motor.run.running = false;};
-    const {O} = await import('../browser/mbp-codec.js');env.device.prepare = async config => {mode = config[O.run_mode];return 1;};
+    const {O} = await import('../browser/mbp-codec.ts');env.device.prepare = async config => {mode = config[O.run_mode];return 1;};
     env.device.start = async () => {enabled = true;};env.device.setTarget = async (_oid,value) => {target = Number(value);return {};};
     env.sensor = {status:() => ({connected:true,snapshot:{receivedAt:utc(),torque:target / 1000 * 2,speed:0}}),batch:() => ({frames:[]})};
     t.after(() => clearInterval(env.recordings.timer));

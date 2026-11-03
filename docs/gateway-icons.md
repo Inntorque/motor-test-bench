@@ -30,9 +30,9 @@ python scripts/build_gateway_package.py --windows
 
 主要文件：
 
-- `gateway/graphics/motor-models.js`：机械外形、像素材质。
-- `gateway/graphics/icon-scene.js`：正交相机、光照和轮廓描边。
-- `gateway/icon-motion.js`：共享渲染器、绘制节拍、可见性暂停。
+- `gateway/graphics/motor-models.ts`：机械外形、像素材质。
+- `gateway/graphics/icon-scene.ts`：正交相机、光照和轮廓描边。
+- `gateway/icon-motion.ts`：共享渲染器、绘制节拍、可见性暂停。
 - `scripts/build_gateway_icons.mjs`：独立打包到 `.runtime/gateway-icon-bundle/`，随后由 Pages 构建复制到 `site/`。
 
 ## 隔离验证
@@ -49,3 +49,7 @@ CHROME_PATH=/usr/bin/google-chrome npm run test:gateway-icons
 ```
 
 检查三种图案独立、480×480 缓冲区、单一 WebGL 上下文、像素样式、默认静止、仅悬停项转动、外壳和视角像素保持不变、移开停止、帧率上限、隐藏页面及视口外暂停、减少动态效果和窄屏显示。截图保存在 `.runtime/img2threejs-icons/pixel-motion/`。验证使用隔离静态服务，不连接本机通信桥或真实设备。
+
+## Bootloader 数据流
+
+Bootloader 保留原像素芯片图案，用可缩放 SVG 绘制；芯片和底色框固定。仅悬停 APP 时，中心箭头在裁剪窗口内循环向下移动，模拟下载数据流，头像沿用 8% 放大。移开后暂停，页面隐藏、离开视口或减少动态效果时停止动画。SVG 本体和电机头像继续独立绘制，Bootloader 使用 CSS 位移，不增加 WebGL 上下文或连续 JavaScript 重绘；三个电机仍共用一个渲染器并限制约 24 Hz。

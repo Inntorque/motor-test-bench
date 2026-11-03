@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Connection} from '../gateway/ui/bootloader/connection.js';
+import {Connection} from '../gateway/ui/bootloader/connection.ts';
 import {VirtualJLink} from './fixtures/jlink.js';
 const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
 async function until(condition) {

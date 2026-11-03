@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {LegacyApp} from '../browser/legacy.js';
-import {sleep} from '../browser/bytes.js';
+import {LegacyApp} from '../browser/legacy.ts';
+import {sleep} from '../browser/bytes.ts';
 class Store {
   data = new Map();
   async get(key) {return structuredClone(this.data.get(key));}

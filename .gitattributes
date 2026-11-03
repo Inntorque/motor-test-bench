@@ -9,3 +9,6 @@ gateway/**/*.js text eol=lf
 gateway/**/*.css text eol=lf
 gateway/**/*.svg text eol=lf
 gateway/**/*.json text eol=lf
+
+*.ts text eol=lf
+*.tsx text eol=lf

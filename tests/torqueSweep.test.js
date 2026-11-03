@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {TORQUE_SWEEP_DEFAULTS,torqueSweepError,torqueSweepRequest} from '../web/src/torqueSweep.js';
-import {LoadTrial} from '../web/src/loadTrial.js';
+import {TORQUE_SWEEP_DEFAULTS,torqueSweepError,torqueSweepRequest} from '../web/src/torqueSweep.ts';
+import {LoadTrial} from '../web/src/loadTrial.ts';
 test('safe defaults and torque units, reject blanks and unmeasured targets',()=>{
   assert.equal(torqueSweepError(TORQUE_SWEEP_DEFAULTS),'');
   const request=torqueSweepRequest(TORQUE_SWEEP_DEFAULTS);

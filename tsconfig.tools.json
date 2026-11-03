@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2023"
+    ],
+    "types": [
+      "node"
+    ],
+    "strict": true
+  },
+  "include": [
+    "vite.config.ts",
+    "vite.gateway.config.ts",
+    "scripts/generate_browser_metadata.mts"
+  ],
+  "exclude": [
+    "node_modules",
+    "site",
+    "dist",
+    ".runtime"
+  ]
+}

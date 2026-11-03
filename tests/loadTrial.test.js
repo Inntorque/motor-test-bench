@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {LoadTrial,measuredBrakeLoad} from '../web/src/loadTrial.js';
-import {CharacteristicWindow} from '../web/src/characteristicData.js';
+import {LoadTrial,measuredBrakeLoad} from '../web/src/loadTrial.ts';
+import {CharacteristicWindow} from '../web/src/characteristicData.ts';
 
 const point=(t,extra={})=>({t,receivedAt:new Date((1000+t)*1000).toISOString(),torque:2,speed:5,
   loadEnabled:true,brakeSupplyCurrent:.2,brakeSupplyVoltage:3,brakeSupplyReceivedAt:1000+t,...extra});

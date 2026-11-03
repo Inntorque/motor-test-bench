@@ -48,15 +48,15 @@ body { margin: 0; }
   box-shadow: 0 7px 20px #263c4910, inset 0 0 0 1px #263c4906;
   transition: box-shadow .16s;
 }
-.app-icon img, .app-icon canvas {
+.app-icon img, .app-icon canvas, .app-icon svg {
   grid-area: 1 / 1;
   width: 85.8px;
   height: 85.8px;
   image-rendering: pixelated;
   transition: transform .16s ease-out;
 }
-.app:hover .app-icon img, .app:hover .app-icon canvas { transform: scale(1.08); }
-.app-icon canvas { pointer-events: none; }
+.app:hover .app-icon img, .app:hover .app-icon canvas, .app:hover .app-icon svg { transform: scale(1.08); }
+.app-icon canvas, .app-icon svg { pointer-events: none; }
 .app-icon.is-animated img { visibility: hidden; }
 .torque { background: linear-gradient(145deg, #f8eee3, #ecdecd); }
 .sg { background: linear-gradient(145deg, #edf3f7, #d8e5ee); }
@@ -74,13 +74,18 @@ body { margin: 0; }
   .apps { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; width: 100%; max-width: 300px; }
   .app { gap: 15px; }
   .app-icon { width: 90.2px; height: 90.2px; border-radius: 23.1px; }
-  .app-icon img, .app-icon canvas { width: 71.5px; height: 71.5px; }
+  .app-icon img, .app-icon canvas, .app-icon svg { width: 71.5px; height: 71.5px; }
   .app-name { font-size: 11px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .app-icon, .app-icon img, .app-icon canvas { transition: none; }
+  .app-icon, .app-icon img, .app-icon canvas, .app-icon svg { transition: none; }
 }
 @media (max-height: 520px) {
   .brand { position: static; transform: none; padding-top: 25px; }
   .launcher { min-height: 0; padding-top: 50px; }
 }
+
+.boot-data-flow { animation: boot-data-down .6s steps(12, end) infinite; animation-play-state: paused; }
+.bootloader.is-flowing .boot-data-flow { animation-play-state: running; }
+@keyframes boot-data-down { to { transform: translateY(84px); } }
+@media (prefers-reduced-motion: reduce) { .boot-data-flow { animation: none; } }
