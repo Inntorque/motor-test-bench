@@ -24,19 +24,24 @@ test('published Bootloader has exact digest, vectors and bounded replacement',as
 
 test('N32 DBG_ID model and capacity fields reject other N32/STM32 variants',() => {
   assert.equal(identity(0x410fc241,0x80584501).model,'N32G455');
+  assert.equal(identity(0x410fc241,0x8f584511).model,'N32G455');
   for (const id of [0x80284501,0x80784501,0x80544501,0x40584501,0x10016413]) assert.throws(() => identity(0x410fc241,id),/不符/);
 });
 
-test('SWD read header, released turnaround, ACK and parity use fixed wire vectors',() => {
+test('SWD direction and J-Link sampled ACK/data/parity match captured hardware response',() => {
   assert.equal(request(0,1,0),0xa5);assert.equal(request(1,1,12),0x9f);
   const ops = [{ap:0,read:1,address:0}],packet = frames(ops);
   assert.equal(packet.data[0],0xa5);assert.equal(packet.count,54);
   assert.equal((packet.direction[1] & 1),0);assert.equal((packet.direction[5] >> 5) & 1,0);
-  const response = new Uint8Array(7);put(response,9,1);put(response,12,1);put(response,44,1);
-  assert.deepEqual(decode(response,ops),[1]);put(response,13,1);assert.throws(() => decode(response,ops),/奇偶/);
+  // J-Link V9, N32G455: captured 0xCF response, excluding its trailing status byte.
+  const response = Uint8Array.from([0x00,0xb9,0xa3,0x00,0x5d,0x01,0x00]);
+  assert.deepEqual(decode(response,ops),[0x2ba01477]);
+  response[5] ^= 8;assert.throws(() => decode(response,ops),/奇偶/);
   assert.throws(() => decode(new Uint8Array(7),ops),/ACK/);
-  const fault = new Uint8Array(7);put(fault,11,1);
+  const fault = new Uint8Array(7);put(fault,10,1);
   assert.throws(() => decode(fault,ops),/ACK=4 \(FAULT\).*DP 读寄存器 0x00/);
+  const wait = new Uint8Array(7);put(wait,9,1);
+  assert.throws(() => decode(wait,ops),/ACK=2 \(WAIT\)/);
 });
 
 test('J-Link consumes full version/interface/status replies and leaves core running on identify',async () => {

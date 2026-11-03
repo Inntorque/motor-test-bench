@@ -35,7 +35,7 @@ export class VirtualJLink {
           for (let i = 0; i < 8; i++) header |= get(out,base + i) << i;
           const ap = (header >> 1) & 1,read = (header >> 2) & 1,address = ((header >> 3) & 3) * 4;
           if (get(direction,base + 8) || get(direction,base + (read ? 45 : 12))) throw new Error('Host must release SWD turnaround');
-          put(base + 9,1);
+          put(base + 8,1);
           let value = 0;
           if (!read) for (let i = 0; i < 32; i++) value = (value | get(out,base + 13 + i) << i) >>> 0;
           if (ap) {
@@ -46,8 +46,8 @@ export class VirtualJLink {
           } else if (read) value = address === 0 ? 0x2ba01477 : address === 4 ? 0xf0000001 : this.pending || 0;
           if (read) {
             let parity = 0;
-            for (let i = 0; i < 32; i++) {const bit = (value >>> i) & 1;put(base + 12 + i,bit);parity ^= bit;}
-            put(base + 44,parity);
+            for (let i = 0; i < 32; i++) {const bit = (value >>> i) & 1;put(base + 11 + i,bit);parity ^= bit;}
+            put(base + 43,parity);
           }
         }
       }
