@@ -26,11 +26,14 @@ function log(message) {
   $('log').textContent = events.map(event => `${new Date(event.time).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}  ${event.message}`).join('\n');
   $('log').scrollTop = $('log').scrollHeight;
 }
-function update(message,value = 0) {$('stage').textContent = message;$('progress').value = value;}
+function update(message,value) {
+  $('stage').textContent = message;
+  if (value !== undefined) {$('progress').value = value;$('progress-label').textContent = `总进度 ${Math.floor(value * 100)}%`;}
+}
 function buttons() {
   $('connection-mode').disabled = busy;
   $('choose-device').disabled = busy || choosing || $('connection-mode').value !== 'on';
-  $('flash').disabled = $('backup').disabled = busy || !core || !image || halted;
+  $('flash').disabled = $('flash-direct').disabled = $('backup').disabled = busy || !core || !image || halted;
   $('resume').disabled = busy || !core || !halted || !!engine?.started;
   $('download-backup').disabled = !lastRecord?.before;
 }
@@ -57,7 +60,7 @@ function download(data,name,type) {
 }
 async function action(fn,hardware = false) {
   busy = true;$('stage').dataset.error = 'false';buttons();
-  try {if (hardware) core = await connection.pause();await fn();}
+  try {if (hardware) {update('等待当前连接检查完成',0);core = await connection.pause();}await fn();}
   catch (error) {
     let message = error.message;
     if (error.name === 'NotFoundError') message = '未选择 J-Link';
@@ -102,10 +105,21 @@ $('flash').onclick = () => action(async () => {
     throw error;
   }
 },true);
-$('resume').onclick = () => action(async () => {await core.resume();halted = false;update('已恢复原程序运行');log('操作者恢复原程序运行');},true);
+$('flash-direct').onclick = () => action(async () => {
+  engine = new Bootloader(core,update);halted = true;
+  try {
+    log('直接烧录（不备份）：校验镜像 → 暂停 → 擦除 32 KiB Boot 分区并烧录 → Boot 分区回读 → 复位');
+    await engine.flashDirect(image,manifest);halted = false;
+    log(`完成：${manifest.bytes} B Bootloader；32 KiB Boot 分区回读一致；未创建备份`);
+  } catch (error) {
+    log(engine.started && !engine.verified ? '直接烧录尚未完整验证；未自动复位，本次没有恢复备份。' : '请查看最后完成阶段与操作日志。');
+    throw error;
+  }
+},true);
+$('resume').onclick = () => action(async () => {await core.resume();halted = false;update('已恢复原程序运行',1);log('操作者恢复原程序运行');},true);
 $('download-backup').onclick = () => download(lastRecord.before,`N32G455-before-${lastRecord.id.replaceAll(':','-')}.bin`,'application/octet-stream');
 $('download-log').onclick = () => {
-  const record = lastRecord ? {...lastRecord,before:undefined} : null;
+  const latest = engine?.record || lastRecord,record = latest ? {...latest,before:undefined} : null;
   download(JSON.stringify({manifest,record,events},null,2),'Bootloader-log.json','application/json');
 };
 addEventListener('beforeunload',event => {if (busy || halted) {event.preventDefault();event.returnValue = '';}});
@@ -129,4 +143,4 @@ try {
     });
     if (record) {lastRecord = record;$('saved').textContent = `最近备份：${record.id} · ${record.stage}`;buttons();}
   } finally {db.close();}
-} catch (error) {log(`浏览器备份存储不可用：${error.message}；保存成功前不会擦写`);}
+} catch (error) {log(`浏览器备份存储不可用：${error.message}；备份烧录需先保存成功，直接烧录不创建备份`);}

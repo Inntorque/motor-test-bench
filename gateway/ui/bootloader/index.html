@@ -28,9 +28,11 @@
     </section>
     <section class="card">
       <div class="card-heading"><h2>备份与烧录</h2><span id="stage" role="status">正在加载</span></div>
-      <p>先将 512 KiB 全片备份保存到本浏览器，再仅更新 Bootloader 页面。全片回读一致后复位，Boot 分区以外字节保持原值。</p>
-      <div class="actions"><button id="flash" disabled>备份并烧录 Bootloader</button><button id="backup" class="secondary" disabled>只读取备份</button></div>
+      <p>备份烧录：先保存 512 KiB 全片备份，再更新镜像涉及的 Boot 页面并全片校验。直接烧录：不备份，擦除全部 32 KiB Boot 分区，写入镜像并校验该分区；两种方式均在校验通过后复位。</p>
+      <p class="hint">直接烧录会清除 Boot 分区原有内容，不创建恢复备份；两种方式均不擦写 Boot 分区以外的应用和参数。</p>
+      <div class="actions"><button id="flash" disabled>备份并烧录 Bootloader</button><button id="flash-direct" class="secondary" disabled>直接擦除并烧录（不备份）</button><button id="backup" class="secondary" disabled>只读取备份</button></div>
       <progress id="progress" max="1" value="0"></progress>
+      <p class="hint"><span id="progress-label">总进度 0%</span> · 100% 表示本次操作全部完成。</p>
       <p class="hint">烧录期间保持本页打开及 USB / 电源连接。Bootloader 不替代电机应用；旧固件若从 0x08000000 启动，烧录后仍需 OTA 匹配本布局的电机应用。</p>
       <div class="actions"><button id="download-backup" class="secondary" disabled>导出最近全片备份</button><button id="download-log" class="secondary">导出操作日志</button><button id="resume" class="secondary" disabled>恢复运行（仅读取后）</button></div>
       <p id="saved" class="hint">备份保存在本浏览器本站点内，请另行导出保存。</p>

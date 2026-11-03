@@ -8,7 +8,14 @@ const fixture = (await readFile(resolve(root,'tests/fixtures/jlink.js'),'utf8'))
 window.__jlink = new VirtualJLink();window.__usbRequests = 0;
 window.__usbDevices = [window.__jlink];window.__usbQueries = 0;window.__usbListeners = {};window.__newJlink = () => new VirtualJLink();
 Object.defineProperty(navigator,'usb',{value:{async requestDevice(){window.__usbRequests++;return window.__jlink;},async getDevices(){window.__usbQueries++;return window.__usbDevices;},addEventListener(type,listener){(window.__usbListeners[type] ||= []).push(listener);}}});
+window.__progress = [];
+const progressValue = Object.getOwnPropertyDescriptor(HTMLProgressElement.prototype,'value');
+Object.defineProperty(HTMLProgressElement.prototype,'value',{...progressValue,set(value){progressValue.set.call(this,value);window.__progress.push({value,resets:window.__jlink.resets});}});
 `;
+function completeProgress(samples) {
+  assert.equal(samples.at(-1).value,1);assert.equal(samples.filter(item => item.value === 1).length,1);
+  assert.ok(samples.every((item,index) => item.value >= 0 && item.value <= 1 && (!index || item.value >= samples[index - 1].value)));
+}
 const types = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png'};
 const server = createServer(async (request,response) => {
   try {
@@ -71,26 +78,59 @@ try {
   });
   await page.locator('#device-state').filter({hasText:'已连接'}).waitFor();assert.equal(await page.evaluate(() => window.__usbRequests),authorizationCount);
   assert.equal(await page.evaluate(() => window.__jlink.writes.length),0);
+  await page.evaluate(() => {window.__progress = [];});
   await page.getByRole('button',{name:'只读取备份',exact:true}).click();
   await page.getByRole('status').filter({hasText:'全片备份已保存'}).waitFor({timeout:20000});
   assert.deepEqual(await page.evaluate(() => ({erased:window.__jlink.erased.length,resets:window.__jlink.resets,halted:window.__jlink.halted})),{erased:0,resets:0,halted:true});
+  completeProgress(await page.evaluate(() => window.__progress));assert.equal(await page.locator('#progress-label').textContent(),'总进度 100%');
   const pending = page.waitForEvent('download');await page.getByRole('button',{name:'导出最近全片备份',exact:true}).click();
   const download = await pending,payload = await readFile(await download.path());assert.equal(payload.length,524288);assert.ok(payload.every((value,index) => value === index % 251));
   await page.getByRole('button',{name:'恢复运行（仅读取后）',exact:true}).click();await page.getByRole('status').filter({hasText:'已恢复原程序运行'}).waitFor();
+  await page.evaluate(() => {window.__progress = [];});
   await page.getByRole('button',{name:'备份并烧录 Bootloader',exact:true}).click();
   await page.getByRole('status').filter({hasText:'烧录及回读校验完成'}).waitFor({timeout:30000});
   assert.deepEqual(await page.evaluate(() => ({pages:window.__jlink.erased.length,resets:window.__jlink.resets,preserved:window.__jlink.flash.slice(10592).every((value,index) => value === (10592 + index) % 251)})),{pages:6,resets:1,preserved:true});
+  completeProgress(await page.evaluate(() => window.__progress));
   await page.screenshot({path:resolve(output,'bootloader-complete.png'),fullPage:true});
+
+  const saved = await page.locator('#saved').textContent();
+  await page.evaluate(() => {
+    window.__progress = [];
+    Object.defineProperty(window,'indexedDB',{configurable:true,value:{open(){throw new Error('storage unavailable for direct flash');}}});
+  });
+  await page.getByRole('button',{name:'直接擦除并烧录（不备份）',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'已复位（未备份）'}).waitFor({timeout:30000});
+  const directProgress = await page.evaluate(() => window.__progress);completeProgress(directProgress);
+  assert.equal(directProgress.at(-1).resets,2);assert.equal(await page.locator('#saved').textContent(),saved);
+  assert.equal(await page.locator('#download-backup').isEnabled(),true);
+  assert.deepEqual(await page.evaluate(() => ({pages:window.__jlink.erased.length,resets:window.__jlink.resets,bootTailErased:window.__jlink.flash.slice(10592,32768).every(value => value === 255),appPreserved:window.__jlink.flash.slice(32768).every((value,index) => value === (32768 + index) % 251)})),{pages:22,resets:2,bootTailErased:true,appPreserved:true});
+  const logPending = page.waitForEvent('download');await page.getByRole('button',{name:'导出操作日志',exact:true}).click();
+  const directLog = JSON.parse(await readFile(await (await logPending).path(),'utf8'));
+  assert.equal(directLog.record.mode,'direct');assert.equal(directLog.record.backup,false);assert.equal(directLog.record.stage,'complete');assert.equal(directLog.record.before,undefined);
+  await page.screenshot({path:resolve(output,'bootloader-direct-complete.png'),fullPage:true});
+  await page.evaluate(() => {
+    window.__progress = [];const read = window.__jlink.readMemory.bind(window.__jlink);
+    window.__jlink.readMemory = address => {const value = read(address);return address === 0x08000064 && window.__jlink.erased.length > 22 ? value ^ 1 : value;};
+  });
+  await page.getByRole('button',{name:'直接擦除并烧录（不备份）',exact:true}).click();
+  await page.locator('#stage').filter({hasText:'Boot 分区回读与预期不符'}).waitFor({timeout:30000});
+  assert.equal(await page.evaluate(() => window.__jlink.resets),2);
+  const failedProgress = await page.evaluate(() => window.__progress);
+  assert.ok(failedProgress.at(-1).value > 0 && failedProgress.at(-1).value < 1);
+  assert.ok(failedProgress.every((item,index) => item.value < 1 && (!index || item.value >= failedProgress[index - 1].value)));
+  assert.equal(await page.locator('#flash-direct').isDisabled(),true);
+  page.once('dialog',dialog => dialog.accept());
   await page.reload();await page.getByRole('status').filter({hasText:'网页已就绪'}).waitFor();
   await page.locator('#saved').filter({hasText:'complete'}).waitFor();assert.equal(await page.locator('#download-backup').isEnabled(),true);
   assert.equal(await page.evaluate(() => window.__usbRequests),0,'reload must not reconnect or flash');
   await page.evaluate(() => {window.__jlink.badId = true;});
   await page.locator('#connection-mode').selectOption('on');await page.locator('#connection-detail').filter({hasText:'芯片型号/容量不符'}).waitFor();
   assert.equal(await page.locator('#flash').isDisabled(),true);assert.equal(await page.evaluate(() => window.__jlink.writes.length),0);
+  assert.equal(await page.locator('#flash-direct').isDisabled(),true);
   await page.locator('#connection-mode').selectOption('off');await page.waitForFunction(() => !window.__jlink.opened);
   assert.equal(await page.evaluate(() => window.__jlink.opened),false);
   await page.route('**/firmware/boot.bin',route => route.fulfill({body:Buffer.alloc(10592),contentType:'application/octet-stream'}));
   await page.reload();await page.getByRole('status').filter({hasText:'复位向量无效'}).waitFor();assert.equal(await page.locator('#flash').isDisabled(),true);
   assert.deepEqual(errors,[]);assert.deepEqual(backend,[]);
-  console.log(JSON.stringify({passed:true,apps:4,initialUsbAccess:0,autoIdentifyRetry:true,replugReconnect:true,offStopsScanning:true,singleAuthorization:true,retryLogDeduplicated:true,backupBytes:payload.length,bootPages:6,untouchedBytesPreserved:true,verifiedBeforeReset:true,backupSurvivesReload:true,wrongMcuAndImageRejected:true,pageErrors:errors,backendRequests:backend},null,2));
+  console.log(JSON.stringify({passed:true,apps:4,initialUsbAccess:0,autoIdentifyRetry:true,replugReconnect:true,offStopsScanning:true,singleAuthorization:true,retryLogDeduplicated:true,backupBytes:payload.length,bootPages:6,directBootPages:16,directWithoutStorage:true,directPreservesApp:true,singleOverallProgress:true,failedProgressPreserved:true,untouchedBytesPreserved:true,verifiedBeforeReset:true,backupSurvivesReload:true,wrongMcuAndImageRejected:true,pageErrors:errors,backendRequests:backend},null,2));
 } finally {await browser?.close();await new Promise(done => server.close(done));}

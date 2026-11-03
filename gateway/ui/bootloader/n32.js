@@ -43,42 +43,67 @@ export class Bootloader {
       await sleep(1);
     }
   }
-  async backup() {
+  async backup(progress = value => this.update('读取全片备份',0.02 + value * 0.96)) {
+    this.update('识别芯片并暂停',0.01);
     const chip = await identify(this.core);await this.core.halt();
-    const before = await this.core.read(BASE,FLASH_SIZE,value => this.update('读取全片备份',value));
+    const before = await this.core.read(BASE,FLASH_SIZE,progress);
     if (before.length !== FLASH_SIZE) throw new Error('全片备份读取不完整');
     return {chip,before};
   }
+  async program(expected,pages,from,to) {
+    this.update('解锁 Boot Flash',from);
+    await this.core.write32(KEY,0x45670123);await this.core.write32(KEY,0xcdef89ab);
+    if ((await this.core.read32(CONTROL)) & 0x80) throw new Error('N32 Flash 解锁失败');
+    const control = (await this.core.read32(CONTROL)) & ~7;
+    const words = new DataView(expected.buffer,expected.byteOffset,expected.byteLength);
+    for (const [index,page] of pages.entries()) {
+      this.update(`擦除 Boot 页面 ${index + 1}/${pages.length}`,from + (to - from) * index / pages.length);
+      await this.core.write32(STATUS,0x7c);await this.wait();
+      await this.core.write32(CONTROL,control | 2);await this.core.write32(ADDRESS,page);await this.core.write32(CONTROL,control | 0x42);await this.wait();
+      await this.core.write32(CONTROL,control);await this.core.write32(STATUS,0x7c);await this.core.write32(CONTROL,control | 1);
+      for (let offset = 0; offset < PAGE; offset += 4) {
+        const value = words.getUint32(page - BASE + offset,true);
+        if (value !== 0xffffffff) {await this.core.write32(page + offset,value);await this.wait();}
+        if ((offset + 4) % 128 === 0)
+          this.update(`烧录 Boot 页面 ${index + 1}/${pages.length}`,from + (to - from) * (index + (offset + 4) / PAGE) / pages.length);
+      }
+      await this.core.write32(CONTROL,control);
+    }
+    await this.core.write32(CONTROL,control | 0x80);
+  }
   async flash(image,manifest,persist) {
+    this.update('校验发布镜像',0);
     await validateImage(image,manifest);
-    const {chip,before} = await this.backup(),{expected,pages} = replacement(before,image);
+    const {chip,before} = await this.backup(value => this.update('读取全片备份',0.02 + value * 0.2)),{expected,pages} = replacement(before,image);
     const record = {id:new Date().toISOString(),chip,manifest,before,backupSha256:await sha256(before),stage:'backup',programmed:false,verified:false};
-    await persist(record);this.update('备份已保存，开始烧录',0);
+    this.record = record;this.update('保存全片备份',0.23);await persist(record);
     try {
       record.stage = 'programming';record.programmingStarted = true;await persist(record);this.started = true;
-      await this.core.write32(KEY,0x45670123);await this.core.write32(KEY,0xcdef89ab);
-      if ((await this.core.read32(CONTROL)) & 0x80) throw new Error('N32 Flash 解锁失败');
-      const control = (await this.core.read32(CONTROL)) & ~7;
-      const words = new DataView(expected.buffer,expected.byteOffset,expected.byteLength);
-      for (const [index,page] of pages.entries()) {
-        await this.core.write32(STATUS,0x7c);await this.wait();
-        await this.core.write32(CONTROL,control | 2);await this.core.write32(ADDRESS,page);await this.core.write32(CONTROL,control | 0x42);await this.wait();
-        await this.core.write32(CONTROL,control);await this.core.write32(STATUS,0x7c);await this.core.write32(CONTROL,control | 1);
-        for (let offset = 0; offset < PAGE; offset += 4) {
-          const value = words.getUint32(page - BASE + offset,true);
-          if (value !== 0xffffffff) {await this.core.write32(page + offset,value);await this.wait();}
-        }
-        await this.core.write32(CONTROL,control);this.update(`烧录 Boot 页面 ${index + 1}/${pages.length}`,(index + 1) / pages.length);
-      }
-      await this.core.write32(CONTROL,control | 0x80);record.programmed = true;record.stage = 'verify';
-      const after = await this.core.read(BASE,FLASH_SIZE,value => this.update('全片回读校验',value));
+      await this.program(expected,pages,0.24,0.8);record.programmed = true;record.stage = 'verify';
+      const after = await this.core.read(BASE,FLASH_SIZE,value => this.update('全片回读校验',0.8 + value * 0.18));
       if (after.length !== expected.length || after.some((value,index) => value !== expected[index])) throw new Error('全片回读与预期不符；未复位，保留暂停状态');
       this.verified = record.verified = true;record.afterSha256 = await sha256(after);record.stage = 'verified';
-      await persist(record);await this.core.reset();record.stage = 'complete';await persist(record);
+      this.update('保存校验结果并复位',0.99);await persist(record);await this.core.reset();record.stage = 'complete';await persist(record);
       this.update('烧录及回读校验完成，已复位',1);return record;
     } catch (error) {
       record.stage = 'failed';record.error = error.message;
       await persist(record).catch(() => {});throw error;
     }
+  }
+  async flashDirect(image,manifest) {
+    this.update('校验发布镜像',0);await validateImage(image,manifest);
+    this.update('识别芯片并暂停',0.01);const chip = await identify(this.core);await this.core.halt();
+    const expected = new Uint8Array(BOOT_SIZE).fill(255);expected.set(image);
+    const pages = Array.from({length:BOOT_SIZE / PAGE},(_,index) => BASE + index * PAGE);
+    const record = this.record = {id:new Date().toISOString(),chip,manifest,mode:'direct',backup:false,stage:'programming',programmed:false,verified:false};
+    try {
+      record.programmingStarted = true;this.started = true;await this.program(expected,pages,0.02,0.9);
+      record.programmed = true;record.stage = 'verify';
+      const after = await this.core.read(BASE,BOOT_SIZE,value => this.update('Boot 分区回读校验',0.9 + value * 0.08));
+      if (after.length !== expected.length || after.some((value,index) => value !== expected[index])) throw new Error('Boot 分区回读与预期不符；未复位，保留暂停状态');
+      this.verified = record.verified = true;record.afterSha256 = await sha256(after);record.stage = 'verified';
+      this.update('校验通过，正在复位',0.99);await this.core.reset();record.stage = 'complete';
+      this.update('烧录及回读校验完成，已复位（未备份）',1);return record;
+    } catch (error) {record.stage = 'failed';record.error = error.message;throw error;}
   }
 }

@@ -63,8 +63,11 @@ test('a failed second open never closes another owner’s J-Link session',async 
 });
 
 test('full WebUSB/SWD flash saves backup first, preserves non-Boot bytes and verifies before reset',async () => {
-  const {device,probe,core} = await target(),before = device.flash.slice(),stages = [];
-  const engine = new Bootloader(core);
+  const {device,probe,core} = await target(),before = device.flash.slice(),stages = [],progress = [];
+  const engine = new Bootloader(core,(_message,value) => {
+    progress.push(value);
+    if (value === 1) {assert.equal(device.resets,1);assert.equal(stages.at(-1),'complete');}
+  });
   const record = await engine.flash(image,manifest,async record => {
     stages.push(record.stage);assert.deepEqual(record.before,before);
     if (record.stage === 'backup' || record.stage === 'programming') assert.equal(device.erased.length,0);
@@ -72,7 +75,46 @@ test('full WebUSB/SWD flash saves backup first, preserves non-Boot bytes and ver
   });
   assert.deepEqual(stages,['backup','programming','verified','complete']);assert.equal(record.verified,true);
   assert.deepEqual(device.flash.slice(0,image.length),image);assert.deepEqual(device.flash.slice(image.length),before.slice(image.length));
+  assert.ok(progress.every((value,index) => value >= 0 && value <= 1 && (!index || value >= progress[index - 1])));
+  assert.equal(progress.filter(value => value === 1).length,1);assert.equal(progress.at(-1),1);
   assert.equal(device.erased.length,6);assert.equal(device.resets,1);assert.equal(device.debug,0x10);await probe.close();
+});
+
+test('direct flash skips backup, erases only Boot and reaches 100% only after verification and reset',async () => {
+  const {device,probe,core} = await target(),before = device.flash.slice(),reads = [],progress = [];
+  const read = core.read.bind(core);
+  core.read = async (address,length,update) => {reads.push({address,length,erased:device.erased.length});return read(address,length,update);};
+  const engine = new Bootloader(core,(_message,value) => {
+    progress.push(value);
+    if (value === 1) {assert.equal(device.resets,1);assert.equal(engine.record.stage,'complete');}
+  });
+  try {
+    const record = await engine.flashDirect(image,manifest);
+    assert.deepEqual(reads,[{address:BASE,length:BOOT_SIZE,erased:16}]);
+    assert.equal(record.backup,false);assert.equal(record.before,undefined);assert.equal(record.stage,'complete');
+    assert.equal(record.verified,true);assert.equal(device.erased.length,16);
+    assert.deepEqual(device.flash.slice(0,image.length),image);
+    assert.ok(device.flash.slice(image.length,BOOT_SIZE).every(value => value === 255));
+    assert.deepEqual(device.flash.slice(BOOT_SIZE),before.slice(BOOT_SIZE));
+    assert.equal(device.resets,1);assert.equal(device.control & 0x80,0x80);
+    assert.ok(progress.every((value,index) => value >= 0 && value <= 1 && (!index || value >= progress[index - 1])));
+    assert.equal(progress.filter(value => value === 1).length,1);assert.equal(progress.at(-1),1);
+  } finally {await probe.close();}
+});
+
+test('direct flash rejects an invalid image or MCU before halt and stops on failed verification without 100%',async () => {
+  const {device,probe,core} = await target(),progress = [],engine = new Bootloader(core,(_message,value) => progress.push(value));
+  try {
+    const bad = image.slice();bad[100] ^= 1;
+    await assert.rejects(engine.flashDirect(bad,manifest),/SHA/);
+    device.badId = true;await assert.rejects(engine.flashDirect(image,manifest),/不符/);
+    assert.equal(device.halted,false);assert.deepEqual(device.writes,[]);device.badId = false;
+    const read = core.read.bind(core);
+    core.read = async (...args) => {const data = await read(...args);data[100] ^= 1;return data;};
+    await assert.rejects(engine.flashDirect(image,manifest),/Boot 分区回读/);
+    assert.equal(engine.record.stage,'failed');assert.equal(engine.verified,false);
+    assert.equal(device.resets,0);assert.equal(device.halted,true);assert.ok(progress.every(value => value < 1));
+  } finally {await probe.close();}
 });
 
 test('failed backup persistence prevents any Flash unlock/erase/program/reset',async () => {
