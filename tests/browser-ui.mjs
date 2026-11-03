@@ -44,6 +44,12 @@ try {
     await page.screenshot({path:resolve(output,`${id}.png`),fullPage:false});
     results.push({id,openedWithoutService:true,disconnectedMeasurements:true});
   }
+  await page.goto(base);
+  await page.locator('.apps .app').nth(2).waitFor();
+  for (const app of catalog.apps) {
+    const href = await page.getByRole('link',{name:`打开${app.name}`,exact:true}).getAttribute('href');
+    assert.equal(new URL(href,base).searchParams.get('v'),app.browserVersion);
+  }
   const direct = await browser.newContext({viewport:{width:1440,height:1000}});
   await direct.addInitScript({content:fixture});
   const control = await direct.newPage();

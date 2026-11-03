@@ -7,7 +7,7 @@ try {
   for (const app of catalog.apps) {
     const link = document.createElement('a');
     link.className = 'app';
-    link.href = `./apps/${app.id}/`;
+    link.href = `./apps/${app.id}/?v=${encodeURIComponent(app.browserVersion || app.version)}`;
     link.setAttribute('aria-label', `打开${app.name}`);
     const icon = document.createElement('span');
     icon.className = `app-icon ${app.theme}`;
