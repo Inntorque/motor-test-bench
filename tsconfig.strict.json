@@ -12,6 +12,7 @@
     "browser/bytes.ts",
     "browser/types.ts",
     "browser/messages.ts",
+    "browser/events.ts",
     "web/src/frameBuffer.ts",
     "web/src/encoderBins.ts"
   ],

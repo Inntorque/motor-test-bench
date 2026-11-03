@@ -2104,9 +2104,17 @@ function draw() {
 
 }
 
+var animationFrame = 0;
 function frame() {
-  if (!document.hidden && canvasInView) { draw(); }
-  window.requestAnimationFrame(frame);
+  animationFrame = 0;
+  if (document.hidden || !canvasInView) { return; }
+  draw();
+  animationFrame = window.requestAnimationFrame(frame);
+}
+function updateAnimation() {
+  window.cancelAnimationFrame(animationFrame);
+  animationFrame = 0;
+  if (!document.hidden && canvasInView) { animationFrame = window.requestAnimationFrame(frame); }
 }
 
 /* --------------------------- param table ---------------------------- */
@@ -2355,11 +2363,13 @@ window.addEventListener("resize", resizeCanvas);
 if (typeof ResizeObserver === "function") {
   try { new ResizeObserver(function () { resizeCanvas(); }).observe(cvs); } catch (e) { /* 老浏览器忽略 */ }
 }
-window.requestAnimationFrame(frame);
+updateAnimation();
+document.addEventListener("visibilitychange", updateAnimation);
 
 if (typeof IntersectionObserver === "function") {
   new IntersectionObserver(function (entries) {
     canvasInView = entries[0].isIntersecting;
+    updateAnimation();
   }).observe(cvs);
 }
 

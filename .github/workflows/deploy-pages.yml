@@ -36,6 +36,7 @@ jobs:
       - run: node tests/test-setups-ui.mjs
       - run: node tests/maximum-ui.mjs
       - run: node tests/specialized-v2-ui.mjs
+      - run: node tests/runtime-latency-ui.mjs
       - run: python -m unittest discover -s tests -p 'test_*.py'
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

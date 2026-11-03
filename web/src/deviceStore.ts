@@ -1,9 +1,15 @@
 import {FrameBuffer} from './frameBuffer.ts';
+import {eventData} from '../../browser/events.ts';
 
 let state=null,received=0,stream=null;
 const listeners=new Set<(value: typeof state) => void>();
 const frameRows=new FrameBuffer();
+const frameListeners=new Set<() => void>();
 let frameConfig={},frameReset=false;
+export function subscribeSensorFrames(callback: () => void) {
+  frameListeners.add(callback);
+  return()=>{frameListeners.delete(callback);};
+}
 export function subscribeDevices(callback) {
   listeners.add(callback);
   if(state)callback(state);
@@ -40,13 +46,14 @@ export function startDeviceStore(request) {
   void refresh();
   stream=new EventSource('/api/v1/events');
   stream.addEventListener('open',()=>{void refresh();});
-  stream.addEventListener('state',event=>{apply(JSON.parse(event.data).data);});
+  stream.addEventListener('state',event=>{apply(eventData(event));});
   stream.addEventListener('sensor_frames',event=>{
-    const packet=JSON.parse(event.data).data;frameConfig=packet.config;
+    const packet=eventData<{config: object; frames: [number, ...number[]][]}>(event);frameConfig=packet.config;
     frameRows.append(packet.frames);
+    for(const listener of frameListeners)listener();
   });
   stream.addEventListener('sensor_stream',event=>{
-    const packet=JSON.parse(event.data).data;frameConfig=packet.config;
+    const packet=eventData<{config: object; reset?: boolean}>(event);frameConfig=packet.config;
     if(packet.reset){frameRows.clear();frameReset=true;}
   });
   stream.addEventListener('error',()=>{

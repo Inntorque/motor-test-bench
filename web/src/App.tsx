@@ -1,7 +1,7 @@
 import type {ApiOptions} from './apiClient.ts';
 import type {DeviceMap, WorkbenchDevice} from './types.ts';
 import {apiFetch} from './apiClient.ts';
-import {sensorFrameBatch} from './deviceStore.ts';
+import {sensorFrameBatch,subscribeSensorFrames} from './deviceStore.ts';
 import {useChartVisibility} from './useChartVisibility.ts';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { appendSamples, plotColumns } from "./livePerformance.ts";
@@ -1075,18 +1075,24 @@ export default function App() {
     }, 1500);
     let frameRequest = 0, receiveTimer = 0, cursor = 0, lastPaint = 0, rateStarted = performance.now(), paintCount = 0;
     let pending = [], latestBatch = null, latestPoint = null, resetView = false;
-    let recordedSequence = null, streamError = false;
-    // Network receive is independent of display cadence, and never overlaps itself.
+    let recordedSequence = null, streamError = false, receiving = false;
+    // Stream arrivals wake the receiver; polling remains available and never overlaps it.
     async function receiveSensor() {
+      if (!active || receiving) return;
+      receiving = true;
+      window.clearTimeout(receiveTimer);
       const started = performance.now();
       const sensor = devicesRef.current["torque-sensor"];
       if (active && sensor?.connected && ["hex6", "hex8"].includes(sensor.config?.protocol)) {
         try {
           const batch = sensorFrameBatch(cursor) || await fetchJson(`/api/sensors/torque-sensor/frames?since=${cursor}`,
             { signal: AbortSignal.timeout(2500), cache: "no-store" });
-          if (!active) return;
-          latestBatch = batch;
-          if(!frameRequest)frameRequest=requestAnimationFrame(displaySensor);
+          if (!active) { receiving = false; return; }
+          if (batch.frames?.length || batch.reset || batch.snapshot !== sensor.snapshot ||
+              batch.config !== sensor.config || batch.connected !== sensor.connected || batch.error !== sensor.error) {
+            latestBatch = batch;
+            if(!frameRequest)frameRequest=requestAnimationFrame(displaySensor);
+          }
           streamError = false;
           if (batch.reset) { pending = []; resetView = true; }
           if (batch.frames?.length) {
@@ -1114,6 +1120,7 @@ export default function App() {
           streamError = true;
         }
       }
+      receiving = false;
       if (active) receiveTimer = window.setTimeout(receiveSensor, Math.max(0, (sensor?.connected ? 20 : 250) - (performance.now() - started)));
     }
     // At most 30 display updates/s, aligned to screen frames; keep all received samples.
@@ -1139,6 +1146,7 @@ export default function App() {
       setDisplayRate(Math.round(paintCount * 1000 / (now - rateStarted)));
       paintCount=0;rateStarted=now;
     },1000);
+    const unsubscribeFrames = subscribeSensorFrames(() => { void receiveSensor(); });
     void receiveSensor();
     // Keep read-only motor feedback and the existing page lease while viewing test results.
     let motorPolling = false;
@@ -1166,7 +1174,7 @@ export default function App() {
       }
     }, SENSOR_POLL_MS);
     return () => { active = false; window.clearInterval(timer); window.clearInterval(sensorTimer);
-      window.clearTimeout(receiveTimer); window.clearInterval(motorTimer); window.clearInterval(displayRateTimer); cancelAnimationFrame(frameRequest); };
+      unsubscribeFrames();window.clearTimeout(receiveTimer); window.clearInterval(motorTimer); window.clearInterval(displayRateTimer); cancelAnimationFrame(frameRequest); };
 
   }, []);
 
@@ -1429,7 +1437,9 @@ export default function App() {
   const disconnectedChannels = CHANNELS.filter((channel) => !state[channel.key]);
   const canRecord = recordServiceOnline && Object.values(devices).some(device=>device.connected && device.snapshot);
   const metricHasData = useMemo(() => samples.some(item => Number.isFinite(item[metric])), [samples, metric]);
-  const historyValues = selected ? selected.samples.map((item) => item[historyMetric]).filter(Number.isFinite) : [];
+  const historyValues = useMemo(() => selected ? selected.samples.map((item) => item[historyMetric]).filter(Number.isFinite) : [], [selected, historyMetric]);
+  const historySamples = useMemo(() => view === 'records' && selected ? relativeSamples(selected.samples) : [], [view, selected]);
+  const historyPeak = useMemo(() => historyValues.reduce((peak, value) => Math.max(peak, Math.abs(value)), 0), [historyValues]);
   const historyUnit = { torque: "N·m", speed: "rpm", shaftPowerKw: "kW", current: "A" }[historyMetric];
   const display = (value, digits) => value == null ? "—" : value.toFixed(digits);
 
@@ -2124,12 +2134,7 @@ export default function App() {
                     <dt>峰值绝对值</dt>
                     <dd>
                       {historyValues.length
-                        ? historyValues
-                            .reduce(
-                              (peak, value) => Math.max(peak, Math.abs(value)),
-                              0,
-                            )
-                            .toFixed(historyMetric === "current" || historyMetric === "shaftPowerKw" ? 3 : 2)
+                        ? historyPeak.toFixed(historyMetric === "current" || historyMetric === "shaftPowerKw" ? 3 : 2)
                         : "—"}{" "}
                       {historyUnit}
                     </dd>
@@ -2157,7 +2162,7 @@ export default function App() {
                   </div>
                 </div>
                 <Plot
-                  samples={relativeSamples(selected.samples)}
+                  samples={historySamples}
                   metric={historyMetric}
                   range={selected.range}
                   windowSeconds={Math.max(

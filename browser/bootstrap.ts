@@ -1,5 +1,6 @@
 import type {AppId, WorkerToMain} from './messages.ts';
 import {DeviceAccess} from './hardware.ts';
+import {DeviceEvent} from './events.ts';
 const script = document.currentScript as HTMLScriptElement;
 const app = script.dataset.app as AppId;
 window.INNTORQUE_BROWSER_DIRECT = true;
@@ -52,7 +53,7 @@ worker.addEventListener('message',async event => {
       const url = URL.createObjectURL(new Blob([message.data.body],{type:message.data.type})), link = document.createElement('a');
       link.href = url; link.download = message.data.name; link.click(); setTimeout(() => URL.revokeObjectURL(url),1000);
     }
-    for (const stream of streams) stream.dispatchEvent(new MessageEvent(message.event,{data:JSON.stringify({type:message.event,data:message.data})}));
+    for (const stream of streams) stream.dispatchEvent(new DeviceEvent(message.event,message.data));
     if (message.event === 'state') {
       const safety = message.data.control;
       bar.dataset.active = String(!!message.data.test?.running || !!message.data.devices?.['current-motor']?.snapshot?.motor?.output_on || (Object.values(message.data.devices || {}) as {snapshot?: {status?: number}}[]).some(device => device.snapshot?.status & 128));

@@ -57,13 +57,18 @@ export class Bench {
   busy() { return !!(this.motor.run.running || this.brake.run.running || this.coupled.run.running || this.recordings.live?.running || this.specialized.active()); }
   source() { return {...Object.fromEntries(Object.entries(this.channels).map(([key,channel]) => [key,channel.status()])), 'torque-sensor':this.sensor.status(),'current-motor':this.motor.status()}; }
   safety() { return {epoch:this.epoch,owned:!!this.owner,blocked:this.blocked,stopping:this.stopping,reason:this.reason,errors:[...this.errors],motorIsolated:!!this.motorIsolated,unusedChannels:Object.entries(this.channels).filter(([,channel]) => !channel.config && !channel.outputUncertain).map(([key]) => key),leaseTimeoutS:3,lastPowerFault:this.lastPowerFault || null}; }
-  health() { return {app:'motor-test-bench-hardware',hostApi:1,recordSchema:2,wireProtocol:[1,0],runtime:'browser',token:this.token,safety:this.safety(),channels:this.source()}; }
-  routes() {
-    return {'/api/health':this.health(),'/api/control/status':this.safety(),'/api/connections/status':this.connection,'/api/motor-current/status':{...this.motor.status(),safety:this.safety()},'/api/brake-current/status':{...this.brake.status(),safety:this.safety()},'/api/coupled-current/status':this.coupled.status(),'/api/recordings/status':{current:this.recordings.status()},'/api/automatic/status':this.specialized.status('automatic',false),'/api/specialized/status':this.specialized.status('specialized',false),'/api/test-subjects':this.subjects.status()};
+  health(channels = this.source(),safety = this.safety()) { return {app:'motor-test-bench-hardware',hostApi:1,recordSchema:2,wireProtocol:[1,0],runtime:'browser',token:this.token,safety,channels}; }
+  routes(devices = this.source(),control = this.safety(),recording = this.recordings.status()) {
+    const motor = devices['current-motor'],brake = this.brake.status();
+    return {'/api/health':this.health(devices,control),'/api/control/status':control,'/api/connections/status':this.connection,'/api/motor-current/status':{...motor,safety:control},'/api/brake-current/status':{...brake,safety:control},'/api/coupled-current/status':this.coupled.status(motor,brake,control),'/api/recordings/status':{current:recording},'/api/automatic/status':this.specialized.status('automatic',false),'/api/specialized/status':this.specialized.status('specialized',false),'/api/test-subjects':this.subjects.status()};
+  }
+  state() {
+    const devices = this.source(),control = this.safety(),recording = this.recordings.status();
+    return {hostApi:1,recordSchema:2,routes:this.routes(devices,control,recording),devices,control,test:this.coupled.run,recording};
   }
   publish() {
     if (this.owner && !this.stopping && !this.blocked && !this.coupled.run.running && [this.motor,this.brake].some(engine => engine.run.phase === 'stopped' && engine.run.stopConfirmed === false)) this.beginStop('输出关闭未确认，执行原电源断电兜底',Object.keys(this.channels));
-    this.emit('state',{hostApi:1,recordSchema:2,routes:this.routes(),devices:this.source(),control:this.safety(),test:this.coupled.run,recording:this.recordings.status()});
+    this.emit('state',this.state());
   }
   async poll() {
     if (this.polling) return;
@@ -187,12 +192,17 @@ export class Bench {
   }
   async request(path,method,body,headers = {}) {
     const url = new URL(path,'https://browser.invalid'); path = url.pathname.replace('/api/v1/','/api/');
-    const routes = this.routes();
     if (method === 'GET') {
       if (path === '/api/recordings/status') return {current:this.recordings.status(),...(url.searchParams.get('history') !== '0' ? {records:await this.recordings.history()} : {})};
       if (path === '/api/automatic/status' || path === '/api/specialized/status') return this.specialized.status(path.split('/')[2],url.searchParams.get('history') !== '0');
-      if (path === '/api/state') return {hostApi:1,recordSchema:2,routes,devices:this.source(),control:this.safety(),test:this.coupled.run,recording:this.recordings.status()};
-      if (routes[path]) return routes[path];
+      if (path === '/api/state') return this.state();
+      if (path === '/api/health') return this.health();
+      if (path === '/api/control/status') return this.safety();
+      if (path === '/api/connections/status') return this.connection;
+      if (path === '/api/motor-current/status') return {...this.motor.status(),safety:this.safety()};
+      if (path === '/api/brake-current/status') return {...this.brake.status(),safety:this.safety()};
+      if (path === '/api/coupled-current/status') return this.coupled.status();
+      if (path === '/api/test-subjects') return this.subjects.status();
       if (path === '/api/ports') return {ports:await this.io.call('ports',{})};
       if (path === '/api/recordings') return {records:await this.recordings.history(),current:this.recordings.status()};
       if (path === '/api/sensors/torque-sensor/frames') return this.sensor.batch(Number(url.searchParams.get('since') || 0));

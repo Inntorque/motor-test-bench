@@ -35,13 +35,18 @@ const connection = new Connection(navigator.usb,state => {
   buttons();
 });
 function log(message: string) {
-  events.push({time:new Date().toISOString(),message});
-  $('log').textContent = events.map(event => `${new Date(event.time).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}  ${event.message}`).join('\n');
+  const time = new Date().toISOString();events.push({time,message});
+  if (events.length === 1) $('log').replaceChildren();
+  $('log').append(document.createTextNode(`${events.length > 1 ? '\n' : ''}${new Date(time).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}  ${message}`));
   $('log').scrollTop = $('log').scrollHeight;
 }
 function update(message: string,value?: number) {
-  $('stage').textContent = message;
-  if (value !== undefined) {$('progress').value = value;$('progress-label').textContent = `总进度 ${Math.floor(value * 100)}%`;}
+  if ($('stage').textContent !== message) $('stage').textContent = message;
+  if (value !== undefined) {
+    $('progress').value = value;
+    const label = `总进度 ${Math.floor(value * 100)}%`;
+    if ($('progress-label').textContent !== label) $('progress-label').textContent = label;
+  }
 }
 function buttons() {
   $('connection-mode').disabled = busy;

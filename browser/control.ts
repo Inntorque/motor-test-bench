@@ -210,7 +210,7 @@ export class CoupledCurrent {
 
   run: RunState = {running:false,phase:'idle',reason:'',stopConfirmed:null}; generation = 0;
   constructor(env) { this.env = env; }
-  status() { return {run:structuredClone(this.run),motor:this.env.motor.status(),brake:this.env.brake.status(),safety:this.env.safety(),capabilities:{torqueSweep:true,fullIqRamp:true,maximumOutput:!!this.env.motor.status().snapshot?.capabilities?.maximumOutput},torqueCalibration:torqueMetadata}; }
+  status(motor = this.env.motor.status(),brake = this.env.brake.status(),safety = this.env.safety()) { return {run:structuredClone(this.run),motor,brake,safety,capabilities:{torqueSweep:true,fullIqRamp:true,maximumOutput:!!motor.snapshot?.capabilities?.maximumOutput},torqueCalibration:torqueMetadata}; }
   async start(data) {
     if (this.run.running || this.run.stopConfirmed === false || this.env.motor.run.running || this.env.brake.run.running) throw new Error('已有输出任务或输出关闭未确认');
     if (data.mode !== 'torque_sweep') return this.startHold(data);
