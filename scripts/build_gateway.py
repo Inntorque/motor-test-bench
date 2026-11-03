@@ -1,8 +1,9 @@
-"""Build a relocatable Pages gateway and immutable per-application UI archives."""
+"""Build standalone browser applications and reference UI archives for Pages."""
 import argparse
 import html
 import io
 import json
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -37,7 +38,13 @@ def build(destination):
             raise ValueError('Refusing to replace an unrecognized build directory')
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True)
-    for name in ['styles.css', 'open.js', 'open.css', 'inntorque-logo.png']:
+    native = ROOT / '.runtime/browser-native-bundle'
+    if not (native / 'worker.js').is_file():
+        raise ValueError('Missing browser runtime; run npm run build first')
+    native_version = digest(b''.join(path.read_bytes() for path in sorted(native.glob('*.js'))))[:16]
+    legacy = json.loads((ROOT / '.runtime/browser-native-data/legacy.json').read_text(encoding='utf-8'))
+    shutil.copytree(native, destination / 'browser')
+    for name in ['styles.css', 'inntorque-logo.png']:
         shutil.copy2(source / name, destination / name)
     shutil.copy2(icon_bundle, destination / 'icon-motion.js')
     shutil.copytree(source / 'icons', destination / 'icons', dirs_exist_ok=True)
@@ -69,18 +76,41 @@ def build(destination):
         target = destination / app['bundle']
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(bundle)
-        launcher = destination / 'apps' / app['id']
-        launcher.mkdir(parents=True, exist_ok=True)
-        (launcher / 'index.html').write_text(f'''<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>打开{html.escape(app['name'])} · Inntorque</title><link rel="stylesheet" href="../../open.css">
-<script type="module" src="../../open.js"></script></head><body data-app="{app['id']}"><main>
-<h1 id="message">正在连接本机服务…</h1><section id="help" hidden>
-<p>USB-CAN 和串口设备接在这台测试电脑上。本机连接服务启动后，重新打开此 APP。</p>
-<p>已安装：双击“启动测试总网关”。首次使用：<a href="../../downloads/Inntorque-Local-Services-Windows-x64.zip">下载 Windows 独立运行包</a>，或<a href="../../downloads/Inntorque-Local-Services-Source.zip">下载 Ubuntu / Python 运行包</a>。</p>
-<p>切换或更新 APP 前，可在 <a href="{html.escape(catalog['serviceUrl'])}/">本机服务页面</a>正常关闭当前 APP。</p>
-<p>浏览器询问本地网络访问时，请允许本站连接本机服务。</p><p id="detail"></p></section>
-<a href="../../">返回总网关</a></main></body></html>''', encoding='utf-8')
+        page_root = destination / 'apps' / app['id']
+        shutil.copytree(ui, page_root)
+        index = page_root / 'index.html'
+        page = index.read_text(encoding='utf-8')
+        if app['id'] != 'dynamometer':
+            data = legacy[app['id']]
+            heartbeat_start = page.index('  try {\n    var aliveSrc = ')
+            heartbeat_end = page.index('\n  pollControl();', heartbeat_start)
+            page = page[:heartbeat_start] + page[heartbeat_end:]
+            page = page.replace('__CONTROL_TOKEN__', 'browser-direct').replace('__COMMAND_EPOCH__', '0')
+            page = page.replace('__MUTATING_ROUTES__', json.dumps(data['mutatingRoutes']))
+            tuning = [{key: item[key] for key in ('id', 'default', 'min', 'max')}
+                      for item in data['emptyStatus']['params']]
+            page = page.replace('__TUNE_CATALOG__', json.dumps(tuning))
+            page = page.replace('href="/guide?name=project"', 'href="./guide/"')
+            page = page.replace('关闭服务', '断开设备').replace('停止输出并关闭后台网页服务', '停止输出并释放浏览器设备连接')
+            page = page.replace('网页服务已关闭，可关闭此标签页。重新使用请双击启动网页。', '设备已断开，可关闭此标签页。重新使用请刷新本网页。')
+            page = page.replace('一键编译并 CAN-OTA', '固件编译请使用维护工程')
+            page = page.replace('编译当前工程并升级设备', '浏览器不运行本机固件工具链')
+            page = page.replace('执行前会先发送停机命令并释放网页的 CAN 适配器；Makefile 会递增固件版本、编译 A/B 槽并更新设备。', '固件编译和升级由独立维护工程完成；本网页仅直接连接设备进行控制、读取和测试。')
+            page = page.replace('$("btn_ota_onekey").disabled = otaBusy;', '$("btn_ota_onekey").disabled = true;')
+        script = f'<script src="../../browser/bootstrap.js?v={native_version}" data-app="{app["id"]}"></script>'
+        page, count = re.subn(r'(<head\b[^>]*>)', lambda match: match[1]+'\n'+script, page, count=1, flags=re.I)
+        if count != 1 or re.search(r'__(?:CONTROL_TOKEN|COMMAND_EPOCH|MUTATING_ROUTES|TUNE_CATALOG)__', page):
+            raise ValueError('Incomplete standalone browser page: ' + app['id'])
+        index.write_text(page, encoding='utf-8')
+        app.update(runtime='browser', entry=f'apps/{app["id"]}/',
+                   browserVersion=digest(page.encode()+native_version.encode())[:16])
+        app.pop('port', None)
+        guide = page_root / 'guide'
+        guide.mkdir(exist_ok=True)
+        guide.joinpath('index.html').write_text('<meta charset="utf-8"><pre style="white-space:pre-wrap">'+
+            html.escape((ROOT / 'docs/gateway-deployment.md').read_text(encoding='utf-8'))+'</pre>', encoding='utf-8')
+    catalog.pop('serviceUrl', None)
+    catalog.update(runtime='browser', browserRuntimeVersion=native_version)
     (destination / 'catalog.json').write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     (destination / '.nojekyll').touch()
     print(json.dumps({'directory': str(destination), 'apps': [{key: app[key] for key in ['id', 'version', 'bytes']} for app in catalog['apps']]}, ensure_ascii=False))

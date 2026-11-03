@@ -22,6 +22,7 @@ import {
   eventCsv,
 } from "./records.js";
 import { toCsv, formatDuration, shaftPowerKw as calculateShaftPowerKw, motorTemperatureC, motorTargetCurrentA, motorLiveCurrents, characteristicAxisMax } from "./model.js";
+const BROWSER_DIRECT = Boolean(globalThis.INNTORQUE_BROWSER_DIRECT);
 
 const MAX_SAMPLES = 1500;
 const SENSOR_POLL_MS = 50;
@@ -83,6 +84,7 @@ function loadConfig(id) {
   try {
     const saved=JSON.parse(localStorage.getItem(`motor-bench:${id}:config`) || "{}");
     const next={ ...defaults, ...saved };
+    if (BROWSER_DIRECT) next.transport="serial";
     if(motor && saved.protocol!=="ru") {
       Object.assign(next,{protocol:"ru",baud:"9600",parity:"N",stopbits:"1",address:"1",
         voltageDecimals:"2",currentDecimals:"2",measuredCurrentDecimals:"2",
@@ -430,12 +432,12 @@ const SupplyPanel = React.memo(function SupplyPanel({
       </div>
       <div className="hw-supply-body" id={`${supply.id}-controls`} hidden={collapsed}>
         {device?.error && <div className="hw-inline-error" role="alert">{device.error}</div>}
-        {!bridgeReady && <div className="hw-inline-error">本机通信桥未运行，请先启动 <code>npm run hardware</code>。</div>}
+        {!bridgeReady && <div className="hw-inline-error">{BROWSER_DIRECT ? "浏览器设备执行器未就绪，请刷新网页查看初始化状态。" : <>本机通信桥未运行，请先启动 <code>npm run hardware</code>。</>}</div>}
         <details className="hw-connection-config" open={!device?.connected}>
           <summary>独立通信参数</summary>
           <div className="hw-form-grid">
             {motorSupply && <label>电源型号 / 协议<span>万瑞达 RU-36-6060 / RU 系列 · Modbus RTU</span></label>}
-            <label>传输方式<select value={config.transport} disabled={locked} onChange={(e) => patchConfig({ transport: e.target.value })}><option value="serial">{ru ? "串口 RS485 / RS232" : "串口 RS485"}</option><option value="tcp">网口 RTU 透明透传</option></select></label>
+            <label>传输方式<select value={config.transport} disabled={locked} onChange={(e) => patchConfig({ transport: e.target.value })}><option value="serial">{ru ? "串口 RS485 / RS232" : "串口 RS485"}</option>{!BROWSER_DIRECT && <option value="tcp">网口 RTU 透明透传</option>}</select></label>
             {config.transport === "serial" ? <>
               <label>串口<select value={config.device} disabled={locked} onChange={(e) => patchConfig({ device: e.target.value })}><option value="">选择串口</option>{ports.map((port) => <option key={port.port} value={port.port}>{port.port} · {port.description}</option>)}</select></label>
               <label>波特率<select value={config.baud} disabled={locked} onChange={(e) => patchConfig({ baud: e.target.value })}>{(ru ? [9600,1200,2400,4800,14400,19200,38400,43000,57600,76800,115200,128000] : [9600,19200,38400,115200,4800,2400,1200,57600]).map((baud) => <option key={baud} value={baud}>{baud}</option>)}</select></label>
@@ -522,7 +524,7 @@ function SensorPanel({ displayRate, device, config, setConfig, ports, bridgeRead
       </div>
       </details>
       {device?.error && <div className="hw-inline-error" role="alert">{device.error}</div>}
-      {!bridgeReady && <div className="hw-inline-error">本机通信桥未运行，请先启动 <code>npm run hardware</code>。</div>}
+      {!bridgeReady && <div className="hw-inline-error">{BROWSER_DIRECT ? "浏览器设备执行器未就绪，请刷新网页查看初始化状态。" : <>本机通信桥未运行，请先启动 <code>npm run hardware</code>。</>}</div>}
     </section>
   );
 }
@@ -543,7 +545,7 @@ function Settings({ onClose, state, devices, bridgeReady, stopAll }) {
       <div className="dialog-body">
         <div className="notice">
           <Icon name="info" />
-          <div><strong>{bridgeReady ? "本机设备通信桥已启动" : "本机设备通信桥未启动"}</strong>
+          <div><strong>{BROWSER_DIRECT ? (bridgeReady ? "浏览器设备执行器已就绪" : "浏览器设备执行器未就绪") : (bridgeReady ? "本机设备通信桥已启动" : "本机设备通信桥未启动")}</strong>
             <p>电机、电源和传感器连接状态只由设备真实协议回复确认。未接入的接口保持未连接，读数留空，不生成模拟数据。</p>
           </div>
         </div>
@@ -569,7 +571,7 @@ function Settings({ onClose, state, devices, bridgeReady, stopAll }) {
                 <div><dt>电流上限</dt><dd>{snapshot?.limitA ?? "—"} A</dd></div>
                 <div><dt>设备输出</dt><dd>{connected ? snapshot?.motor?.output_on ? "输出开启" : "输出关闭" : "状态未知"}</dd></div>
               </> : deviceId ? <>
-                <div><dt>连接方式</dt><dd>Modbus RTU 串口 / RTU 透明 TCP</dd></div>
+                <div><dt>连接方式</dt><dd>{BROWSER_DIRECT ? "Web Serial · Modbus RTU 串口" : "Modbus RTU 串口 / RTU 透明 TCP"}</dd></div>
                 <div><dt>设备输出</dt><dd>{connected && Number.isFinite(snapshot?.status) ? (snapshot.status & 0x80 ? "输出开启" : "输出关闭") : "状态未知"}</dd></div>
                 <div><dt>实际电压 / 电流</dt><dd>{connected && snapshot?.measured ? `${numberText(snapshotValues(devices[deviceId])?.voltage, snapshotValues(devices[deviceId])?.voltageDecimals)} V / ${numberText(snapshotValues(devices[deviceId])?.current, snapshotValues(devices[deviceId])?.currentDecimals)} A` : "—"}</dd></div>
                 <div><dt>寄存器应答</dt><dd>{connected ? "有效 CRC 与读回已验证" : "未完成握手"}</dd></div>
@@ -882,12 +884,18 @@ export default function App() {
     try {
       const result = await fetchJson("/api/ports");
       setPorts(result.ports || []);
-      if (showToast) setToast(result.ports?.length ? `发现 ${result.ports.length} 个串口` : "未发现串口；也可配置 RTU 透明 TCP 网关");
+      if (showToast) setToast(result.ports?.length ? `发现 ${result.ports.length} 个串口` : (BROWSER_DIRECT ? "请先点击顶部授权串口，再选择设备" : "未发现串口；也可配置 RTU 透明 TCP 网关"));
     } catch {
       setPorts([]);
-      if (showToast) setToast("无法读取串口列表，请确认本机通信桥已启动");
+      if (showToast) setToast(BROWSER_DIRECT ? "无法读取串口，请检查浏览器授权与初始化状态" : "无法读取串口列表，请确认本机通信桥已启动");
     }
   }
+
+  useEffect(() => {
+    const refresh = () => { void refreshPorts(false); };
+    window.addEventListener('inntorque-ports-changed', refresh);
+    return () => window.removeEventListener('inntorque-ports-changed', refresh);
+  }, []);
 
   function readSupply(id, quiet = false) {
     if (!token.current || inFlight.current.has(id)) return;
@@ -1510,7 +1518,7 @@ export default function App() {
         <div className={`simulation-banner hardware-banner ${bridgeReady ? "ready" : ""}`}>
           <div>
             <Icon name="info" size={17} />
-            <strong>{bridgeReady ? "真实设备模式" : "通信桥未启动"}</strong>
+            <strong>{bridgeReady ? "真实设备模式" : BROWSER_DIRECT ? "设备执行器未就绪" : "通信桥未启动"}</strong>
             <span>{bridgeReady ? "读数来自实际设备应答；未接入接口保持未连接" : "设备通道不可用；不会显示模拟连接或读数"}</span>
           </div>
           <button onClick={() => setSettings(true)}>

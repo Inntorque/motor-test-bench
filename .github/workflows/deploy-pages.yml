@@ -31,69 +31,18 @@ jobs:
       - run: npm run build
       - run: python scripts/build_gateway.py
       - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
       - run: npm run test:gateway-icons
       - run: node tests/test-setups-ui.mjs
       - run: node tests/maximum-ui.mjs
       - run: node tests/specialized-v2-ui.mjs
       - run: python -m unittest discover -s tests -p 'test_*.py'
-      - run: python scripts/build_gateway_package.py
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: gateway-site
-          path: site
-          include-hidden-files: true
-
-  windows-runtime:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '22'
-          cache: npm
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.13'
-      - run: npm ci
-      - run: python -m pip install -r requirements-motor.txt
-      - run: npm run build
-      - run: python scripts/build_gateway.py
-      - run: python scripts/build_gateway_package.py --windows
-      - name: Verify the portable Windows interpreter and all three offline HTTP apps
-        shell: pwsh
-        run: |
-          Expand-Archive -Path site/downloads/Inntorque-Local-Services-Windows-x64.zip -DestinationPath .runtime/portable-verify
-          $package = (Resolve-Path .runtime/portable-verify/Inntorque-Local-Services-Windows-x64).Path
-          $env:INNTORQUE_TEST_ROOT = $package
-          $env:INNTORQUE_TEST_SITE = (Resolve-Path site).Path
-          & "$package/runtime/python/python.exe" -X utf8 tests/test_gateway.py -v
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: gateway-windows-runtime
-          path: |
-            site/downloads/Inntorque-Local-Services-Windows-x64.zip
-            site/downloads/Inntorque-Local-Services-Windows-x64.sha256
-
-  assemble:
-    needs: [build, windows-runtime]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
-        with:
-          name: gateway-site
-          path: site
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
-        with:
-          name: gateway-windows-runtime
-          path: site/downloads
-      - run: cd site/downloads && sha256sum -c Inntorque-Local-Services-Windows-x64.sha256
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
 
   deploy:
-    needs: assemble
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       pages: write

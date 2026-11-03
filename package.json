@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "hardware": "python3 -m workbench.service",
     "build": "vite build",
-    "postbuild": "node scripts/build_gateway_icons.mjs",
+    "postbuild": "node scripts/build_gateway_icons.mjs && node scripts/build_browser.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
     "test:ui": "node tests/ui-smoke.mjs",
@@ -16,7 +16,9 @@
     "stop": "node scripts/launch.mjs stop",
     "test:maximum-ui": "node tests/maximum-ui.mjs",
     "build:gateway-icons": "node scripts/build_gateway_icons.mjs",
-    "test:gateway-icons": "node tests/gateway-icons-ui.mjs"
+    "test:gateway-icons": "node tests/gateway-icons-ui.mjs",
+    "build:browser": "node scripts/build_browser.mjs",
+    "test:browser": "node --test tests/browser-legacy.mjs tests/browser-legacy-control.mjs && node tests/browser-ui.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

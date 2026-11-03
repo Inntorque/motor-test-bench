@@ -1,0 +1,2086 @@
+{
+  "sourceTimeUnix": 1700000000,
+  "sourceSha256": {
+    "sg-6010hb": "8b67518c7266d9f36f22b0a457d1fdb118d9ef9475baf00c9375580c94a35209",
+    "rm-7010": "4f8c08cc4d36933c1c79de7d36a2d3633053555009cd0bc2e64681cbdb8dd957"
+  },
+  "apps": {
+    "sg-6010hb": [
+      {
+        "id": 1408,
+        "hex": "83000101033c0a03",
+        "name": "info",
+        "expected": {
+          "active_slot": "A",
+          "active_slot_raw": 0,
+          "state": "APP",
+          "version": "0x0A3C",
+          "version_raw": 2620,
+          "try_left": 3
+        }
+      },
+      {
+        "id": 1408,
+        "hex": "8778563412ff0000",
+        "name": "foc",
+        "expected": {
+          "foc_loops": 305419896,
+          "foc_init_rc": -1
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a1c7cf2909102700",
+        "name": "telem",
+        "expected": {
+          "telem": {
+            "ia_mA": -12345,
+            "ib_mA": 2345,
+            "ic_mA": 10000,
+            "vbus_dV": 0,
+            "age_s": 0,
+            "rate_hz": null,
+            "count": 1,
+            "enable": 0,
+            "period_ms": 20,
+            "supported": true,
+            "stale": false,
+            "vbus_not_fitted": true,
+            "error": ""
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a2fa000008012d00",
+        "name": "ntc",
+        "expected": {
+          "ntc": {
+            "temp_c": 25.0,
+            "temp_c_x10": 250,
+            "raw": 2048,
+            "valid": true,
+            "over": false,
+            "tripped": false,
+            "tripped_latched": false,
+            "recovered_s": 0,
+            "fault": false,
+            "limit_c": 45,
+            "age_s": 0
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "86070306e02e0323",
+        "name": "motor",
+        "expected": {
+          "motor": {
+            "available": true,
+            "mode": 7,
+            "state": 3,
+            "state_name": "fault",
+            "step": null,
+            "step_ms": null,
+            "fault_reason": 6,
+            "fault_peak_ma": 12000,
+            "duty_permille": 30,
+            "output_on": true,
+            "fault": true,
+            "host_timeout": false,
+            "supervised": false,
+            "updated_at": 1700000000,
+            "age_s": 0
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a670feb068e02e82",
+        "name": "feedback",
+        "expected": {
+          "feedback": {
+            "id_a": -0.4,
+            "iq_a": 26.8,
+            "speed_rpm": 120.0,
+            "state": 2,
+            "updated_at": 1700000000,
+            "stale": false,
+            "position_stale": true
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a72efbffff000000",
+        "name": "position",
+        "expected": {
+          "feedback": {
+            "id_a": -0.4,
+            "iq_a": 26.8,
+            "speed_rpm": 120.0,
+            "state": 2,
+            "updated_at": 1700000000,
+            "position_deg": -1.234,
+            "position_at": 1700000000,
+            "stale": false,
+            "position_stale": false
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "83000a0000000100",
+        "name": "param",
+        "expected": {
+          "params": [
+            {
+              "id": 0,
+              "name": "pole_pairs",
+              "value": 10,
+              "unit": "pairs",
+              "saved": true,
+              "is_default": false,
+              "min": 1,
+              "max": 64,
+              "default": 10,
+              "known": true
+            },
+            {
+              "id": 1,
+              "name": "enc_offset",
+              "value": null,
+              "unit": "cnt",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 16383,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 2,
+              "name": "enc_dir",
+              "value": null,
+              "unit": "0/1/2",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 2,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 3,
+              "name": "cur_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 150,
+              "known": false
+            },
+            {
+              "id": 4,
+              "name": "cur_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000000,
+              "default": 100,
+              "known": false
+            },
+            {
+              "id": 5,
+              "name": "spd_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 500,
+              "known": false
+            },
+            {
+              "id": 6,
+              "name": "spd_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 7,
+              "name": "i_limit",
+              "value": null,
+              "unit": "mA",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 30000,
+              "default": 3000,
+              "known": false
+            },
+            {
+              "id": 8,
+              "name": "pos_kp",
+              "value": null,
+              "unit": "x100/s",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 9,
+              "name": "pos_ki",
+              "value": null,
+              "unit": "x100/s2",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 10,
+              "name": "pos_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 11,
+              "name": "speed_limit",
+              "value": null,
+              "unit": "rpm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 300,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 12,
+              "name": "voltage_limit",
+              "value": null,
+              "unit": "mV",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 10000,
+              "default": 9000,
+              "known": false
+            },
+            {
+              "id": 13,
+              "name": "deadtime_comp_ns",
+              "value": null,
+              "unit": "ns;0=off",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 400,
+              "known": false
+            },
+            {
+              "id": 14,
+              "name": "speed_ramp",
+              "value": null,
+              "unit": "rpm/s",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 3000,
+              "default": 60,
+              "known": false
+            },
+            {
+              "id": 15,
+              "name": "speed_filter",
+              "value": null,
+              "unit": "ms",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 16,
+              "name": "current_bw",
+              "value": null,
+              "unit": "rad/s;0=manual",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 2000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 17,
+              "name": "phase_rs",
+              "value": null,
+              "unit": "uOhm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000000,
+              "default": 224,
+              "known": false
+            },
+            {
+              "id": 18,
+              "name": "phase_ls",
+              "value": null,
+              "unit": "uH",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000,
+              "default": 235,
+              "known": false
+            },
+            {
+              "id": 19,
+              "name": "spd_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 20,
+              "name": "voltage_ramp",
+              "value": null,
+              "unit": "mV/s",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 100000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 21,
+              "name": "torque_limit",
+              "value": null,
+              "unit": "mNm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 5000,
+              "default": 2700,
+              "known": false
+            },
+            {
+              "id": 22,
+              "name": "current_filter",
+              "value": null,
+              "unit": "us",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 100,
+              "known": false
+            }
+          ]
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "83014c0400000100",
+        "name": "param",
+        "expected": {
+          "params": [
+            {
+              "id": 0,
+              "name": "pole_pairs",
+              "value": 10,
+              "unit": "pairs",
+              "saved": true,
+              "is_default": false,
+              "min": 1,
+              "max": 64,
+              "default": 10,
+              "known": true
+            },
+            {
+              "id": 1,
+              "name": "enc_offset",
+              "value": 1100,
+              "unit": "cnt",
+              "saved": true,
+              "is_default": false,
+              "min": 0,
+              "max": 16383,
+              "default": 0,
+              "known": true
+            },
+            {
+              "id": 2,
+              "name": "enc_dir",
+              "value": null,
+              "unit": "0/1/2",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 2,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 3,
+              "name": "cur_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 150,
+              "known": false
+            },
+            {
+              "id": 4,
+              "name": "cur_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000000,
+              "default": 100,
+              "known": false
+            },
+            {
+              "id": 5,
+              "name": "spd_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 500,
+              "known": false
+            },
+            {
+              "id": 6,
+              "name": "spd_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 7,
+              "name": "i_limit",
+              "value": null,
+              "unit": "mA",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 30000,
+              "default": 3000,
+              "known": false
+            },
+            {
+              "id": 8,
+              "name": "pos_kp",
+              "value": null,
+              "unit": "x100/s",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 9,
+              "name": "pos_ki",
+              "value": null,
+              "unit": "x100/s2",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 10,
+              "name": "pos_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 11,
+              "name": "speed_limit",
+              "value": null,
+              "unit": "rpm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 300,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 12,
+              "name": "voltage_limit",
+              "value": null,
+              "unit": "mV",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 10000,
+              "default": 9000,
+              "known": false
+            },
+            {
+              "id": 13,
+              "name": "deadtime_comp_ns",
+              "value": null,
+              "unit": "ns;0=off",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 400,
+              "known": false
+            },
+            {
+              "id": 14,
+              "name": "speed_ramp",
+              "value": null,
+              "unit": "rpm/s",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 3000,
+              "default": 60,
+              "known": false
+            },
+            {
+              "id": 15,
+              "name": "speed_filter",
+              "value": null,
+              "unit": "ms",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 16,
+              "name": "current_bw",
+              "value": null,
+              "unit": "rad/s;0=manual",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 2000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 17,
+              "name": "phase_rs",
+              "value": null,
+              "unit": "uOhm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000000,
+              "default": 224,
+              "known": false
+            },
+            {
+              "id": 18,
+              "name": "phase_ls",
+              "value": null,
+              "unit": "uH",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000,
+              "default": 235,
+              "known": false
+            },
+            {
+              "id": 19,
+              "name": "spd_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 20,
+              "name": "voltage_ramp",
+              "value": null,
+              "unit": "mV/s",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 100000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 21,
+              "name": "torque_limit",
+              "value": null,
+              "unit": "mNm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 5000,
+              "default": 2700,
+              "known": false
+            },
+            {
+              "id": 22,
+              "name": "current_filter",
+              "value": null,
+              "unit": "us",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 100,
+              "known": false
+            }
+          ]
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "8302020000000100",
+        "name": "param",
+        "expected": {
+          "params": [
+            {
+              "id": 0,
+              "name": "pole_pairs",
+              "value": 10,
+              "unit": "pairs",
+              "saved": true,
+              "is_default": false,
+              "min": 1,
+              "max": 64,
+              "default": 10,
+              "known": true
+            },
+            {
+              "id": 1,
+              "name": "enc_offset",
+              "value": 1100,
+              "unit": "cnt",
+              "saved": true,
+              "is_default": false,
+              "min": 0,
+              "max": 16383,
+              "default": 0,
+              "known": true
+            },
+            {
+              "id": 2,
+              "name": "enc_dir",
+              "value": 2,
+              "unit": "0/1/2",
+              "saved": true,
+              "is_default": false,
+              "min": 0,
+              "max": 2,
+              "default": 0,
+              "known": true
+            },
+            {
+              "id": 3,
+              "name": "cur_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 150,
+              "known": false
+            },
+            {
+              "id": 4,
+              "name": "cur_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000000,
+              "default": 100,
+              "known": false
+            },
+            {
+              "id": 5,
+              "name": "spd_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 500,
+              "known": false
+            },
+            {
+              "id": 6,
+              "name": "spd_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 7,
+              "name": "i_limit",
+              "value": null,
+              "unit": "mA",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 30000,
+              "default": 3000,
+              "known": false
+            },
+            {
+              "id": 8,
+              "name": "pos_kp",
+              "value": null,
+              "unit": "x100/s",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 9,
+              "name": "pos_ki",
+              "value": null,
+              "unit": "x100/s2",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 10,
+              "name": "pos_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 11,
+              "name": "speed_limit",
+              "value": null,
+              "unit": "rpm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 300,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 12,
+              "name": "voltage_limit",
+              "value": null,
+              "unit": "mV",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 10000,
+              "default": 9000,
+              "known": false
+            },
+            {
+              "id": 13,
+              "name": "deadtime_comp_ns",
+              "value": null,
+              "unit": "ns;0=off",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 400,
+              "known": false
+            },
+            {
+              "id": 14,
+              "name": "speed_ramp",
+              "value": null,
+              "unit": "rpm/s",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 3000,
+              "default": 60,
+              "known": false
+            },
+            {
+              "id": 15,
+              "name": "speed_filter",
+              "value": null,
+              "unit": "ms",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 16,
+              "name": "current_bw",
+              "value": null,
+              "unit": "rad/s;0=manual",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 2000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 17,
+              "name": "phase_rs",
+              "value": null,
+              "unit": "uOhm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000000,
+              "default": 224,
+              "known": false
+            },
+            {
+              "id": 18,
+              "name": "phase_ls",
+              "value": null,
+              "unit": "uH",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000,
+              "default": 235,
+              "known": false
+            },
+            {
+              "id": 19,
+              "name": "spd_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 20,
+              "name": "voltage_ramp",
+              "value": null,
+              "unit": "mV/s",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 100000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 21,
+              "name": "torque_limit",
+              "value": null,
+              "unit": "mNm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 5000,
+              "default": 2700,
+              "known": false
+            },
+            {
+              "id": 22,
+              "name": "current_filter",
+              "value": null,
+              "unit": "us",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 100,
+              "known": false
+            }
+          ]
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a50702036470fe00",
+        "name": "control",
+        "expected": {
+          "control": {
+            "mode": 7,
+            "state": 2,
+            "calibration_stage": 3,
+            "calibration_progress": 100,
+            "iq_target_ma": -400,
+            "calibration_error": 0,
+            "updated_at": 1700000000
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a4d204970a010200",
+        "name": "encoder",
+        "expected": {
+          "encoder": {
+            "received": true,
+            "valid": true,
+            "raw": 1234,
+            "angle_cdeg": 2711,
+            "angle_deg": 27.11,
+            "speed_rpm": null,
+            "status": 1,
+            "status_text": "数据有效",
+            "error_count": 2,
+            "updated_at": 1700000000,
+            "age_s": 0.0,
+            "stale": false,
+            "electrical_angle_valid": true,
+            "electrical_calibrated": true,
+            "pole_pairs": 10,
+            "electrical_angle_deg": 330.556640625
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a200800000012d00",
+        "name": "ntc-invalid",
+        "expected": {
+          "ntc": {
+            "temp_c": null,
+            "temp_c_x10": -32768,
+            "raw": 0,
+            "valid": false,
+            "over": false,
+            "tripped": false,
+            "tripped_latched": false,
+            "recovered_s": null,
+            "fault": false,
+            "limit_c": 45,
+            "age_s": 0
+          }
+        }
+      }
+    ],
+    "rm-7010": [
+      {
+        "id": 1408,
+        "hex": "83000101033c0a03",
+        "name": "info",
+        "expected": {
+          "active_slot": "A",
+          "active_slot_raw": 0,
+          "state": "APP",
+          "version": "0x0A3C",
+          "version_raw": 2620,
+          "try_left": 3
+        }
+      },
+      {
+        "id": 1408,
+        "hex": "8778563412ff0000",
+        "name": "foc",
+        "expected": {
+          "foc_loops": 305419896,
+          "foc_init_rc": -1
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a1c7cf2909102700",
+        "name": "telem",
+        "expected": {
+          "telem": {
+            "ia_mA": -12345,
+            "ib_mA": 2345,
+            "ic_mA": 10000,
+            "vbus_dV": 0,
+            "age_s": 0,
+            "rate_hz": null,
+            "count": 1,
+            "enable": 0,
+            "period_ms": 20,
+            "supported": true,
+            "stale": false,
+            "vbus_not_fitted": true,
+            "error": ""
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a2fa000008012d00",
+        "name": "ntc",
+        "expected": {
+          "ntc": {
+            "temp_c": 25.0,
+            "temp_c_x10": 250,
+            "raw": 2048,
+            "valid": true,
+            "over": false,
+            "tripped": false,
+            "tripped_latched": false,
+            "recovered_s": 0,
+            "fault": false,
+            "limit_c": 45,
+            "age_s": 0
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "86070306e02e0323",
+        "name": "motor",
+        "expected": {
+          "motor": {
+            "available": true,
+            "mode": 7,
+            "state": 3,
+            "state_name": "fault",
+            "step": 6,
+            "step_ms": 12000,
+            "duty_permille": 30,
+            "output_on": true,
+            "fault": true,
+            "host_timeout": false,
+            "supervised": false,
+            "updated_at": 1700000000,
+            "age_s": 0
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a670feb068e02e82",
+        "name": "feedback",
+        "expected": {
+          "feedback": {
+            "id_a": -0.4,
+            "iq_a": 26.8,
+            "speed_rpm": 12000,
+            "state": 130,
+            "updated_at": 1700000000,
+            "stale": false,
+            "position_stale": true
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a72efbffff000000",
+        "name": "position",
+        "expected": {
+          "feedback": {
+            "id_a": -0.4,
+            "iq_a": 26.8,
+            "speed_rpm": 12000,
+            "state": 130,
+            "updated_at": 1700000000,
+            "position_deg": -1.234,
+            "position_at": 1700000000,
+            "stale": false,
+            "position_stale": false
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "83000a0000000100",
+        "name": "param",
+        "expected": {
+          "params": [
+            {
+              "id": 0,
+              "name": "pole_pairs",
+              "value": 10,
+              "unit": "pairs",
+              "saved": true,
+              "is_default": false,
+              "min": 1,
+              "max": 64,
+              "default": 10,
+              "known": true
+            },
+            {
+              "id": 1,
+              "name": "enc_offset",
+              "value": null,
+              "unit": "cnt",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 16383,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 2,
+              "name": "enc_dir",
+              "value": null,
+              "unit": "0/1/2",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 2,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 3,
+              "name": "cur_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 150,
+              "known": false
+            },
+            {
+              "id": 4,
+              "name": "cur_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000000,
+              "default": 100,
+              "known": false
+            },
+            {
+              "id": 5,
+              "name": "spd_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 500,
+              "known": false
+            },
+            {
+              "id": 6,
+              "name": "spd_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 7,
+              "name": "i_limit",
+              "value": null,
+              "unit": "mA",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 15000,
+              "default": 15000,
+              "known": false
+            },
+            {
+              "id": 8,
+              "name": "pos_kp",
+              "value": null,
+              "unit": "x100/s",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 9,
+              "name": "pos_ki",
+              "value": null,
+              "unit": "x100/s2",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 10,
+              "name": "pos_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 11,
+              "name": "speed_limit",
+              "value": null,
+              "unit": "rpm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 300,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 12,
+              "name": "voltage_limit",
+              "value": null,
+              "unit": "mV",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 8000,
+              "default": 5000,
+              "known": false
+            },
+            {
+              "id": 13,
+              "name": "current_ramp",
+              "value": null,
+              "unit": "mA/s",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 30000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 14,
+              "name": "speed_ramp",
+              "value": null,
+              "unit": "rpm/s",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 3000,
+              "default": 60,
+              "known": false
+            },
+            {
+              "id": 15,
+              "name": "speed_filter",
+              "value": null,
+              "unit": "ms",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 16,
+              "name": "current_bw",
+              "value": null,
+              "unit": "rad/s;0=manual",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 2000,
+              "default": 200,
+              "known": false
+            },
+            {
+              "id": 17,
+              "name": "phase_rs",
+              "value": null,
+              "unit": "mOhm equivalent",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000,
+              "default": 275,
+              "known": false
+            },
+            {
+              "id": 18,
+              "name": "phase_ls",
+              "value": null,
+              "unit": "uH; provisional",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000,
+              "default": 600,
+              "known": false
+            },
+            {
+              "id": 19,
+              "name": "spd_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 20,
+              "name": "voltage_ramp",
+              "value": null,
+              "unit": "mV/s",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 100000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 21,
+              "name": "torque_limit",
+              "value": null,
+              "unit": "mNm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 500,
+              "default": 330,
+              "known": false
+            },
+            {
+              "id": 22,
+              "name": "current_filter",
+              "value": null,
+              "unit": "us",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 1000,
+              "known": false
+            }
+          ]
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "83014c0400000100",
+        "name": "param",
+        "expected": {
+          "params": [
+            {
+              "id": 0,
+              "name": "pole_pairs",
+              "value": 10,
+              "unit": "pairs",
+              "saved": true,
+              "is_default": false,
+              "min": 1,
+              "max": 64,
+              "default": 10,
+              "known": true
+            },
+            {
+              "id": 1,
+              "name": "enc_offset",
+              "value": 1100,
+              "unit": "cnt",
+              "saved": true,
+              "is_default": false,
+              "min": 0,
+              "max": 16383,
+              "default": 0,
+              "known": true
+            },
+            {
+              "id": 2,
+              "name": "enc_dir",
+              "value": null,
+              "unit": "0/1/2",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 2,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 3,
+              "name": "cur_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 150,
+              "known": false
+            },
+            {
+              "id": 4,
+              "name": "cur_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000000,
+              "default": 100,
+              "known": false
+            },
+            {
+              "id": 5,
+              "name": "spd_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 500,
+              "known": false
+            },
+            {
+              "id": 6,
+              "name": "spd_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 7,
+              "name": "i_limit",
+              "value": null,
+              "unit": "mA",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 15000,
+              "default": 15000,
+              "known": false
+            },
+            {
+              "id": 8,
+              "name": "pos_kp",
+              "value": null,
+              "unit": "x100/s",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 9,
+              "name": "pos_ki",
+              "value": null,
+              "unit": "x100/s2",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 10,
+              "name": "pos_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 11,
+              "name": "speed_limit",
+              "value": null,
+              "unit": "rpm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 300,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 12,
+              "name": "voltage_limit",
+              "value": null,
+              "unit": "mV",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 8000,
+              "default": 5000,
+              "known": false
+            },
+            {
+              "id": 13,
+              "name": "current_ramp",
+              "value": null,
+              "unit": "mA/s",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 30000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 14,
+              "name": "speed_ramp",
+              "value": null,
+              "unit": "rpm/s",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 3000,
+              "default": 60,
+              "known": false
+            },
+            {
+              "id": 15,
+              "name": "speed_filter",
+              "value": null,
+              "unit": "ms",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 16,
+              "name": "current_bw",
+              "value": null,
+              "unit": "rad/s;0=manual",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 2000,
+              "default": 200,
+              "known": false
+            },
+            {
+              "id": 17,
+              "name": "phase_rs",
+              "value": null,
+              "unit": "mOhm equivalent",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000,
+              "default": 275,
+              "known": false
+            },
+            {
+              "id": 18,
+              "name": "phase_ls",
+              "value": null,
+              "unit": "uH; provisional",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000,
+              "default": 600,
+              "known": false
+            },
+            {
+              "id": 19,
+              "name": "spd_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 20,
+              "name": "voltage_ramp",
+              "value": null,
+              "unit": "mV/s",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 100000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 21,
+              "name": "torque_limit",
+              "value": null,
+              "unit": "mNm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 500,
+              "default": 330,
+              "known": false
+            },
+            {
+              "id": 22,
+              "name": "current_filter",
+              "value": null,
+              "unit": "us",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 1000,
+              "known": false
+            }
+          ]
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "8302020000000100",
+        "name": "param",
+        "expected": {
+          "params": [
+            {
+              "id": 0,
+              "name": "pole_pairs",
+              "value": 10,
+              "unit": "pairs",
+              "saved": true,
+              "is_default": false,
+              "min": 1,
+              "max": 64,
+              "default": 10,
+              "known": true
+            },
+            {
+              "id": 1,
+              "name": "enc_offset",
+              "value": 1100,
+              "unit": "cnt",
+              "saved": true,
+              "is_default": false,
+              "min": 0,
+              "max": 16383,
+              "default": 0,
+              "known": true
+            },
+            {
+              "id": 2,
+              "name": "enc_dir",
+              "value": 2,
+              "unit": "0/1/2",
+              "saved": true,
+              "is_default": false,
+              "min": 0,
+              "max": 2,
+              "default": 0,
+              "known": true
+            },
+            {
+              "id": 3,
+              "name": "cur_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 150,
+              "known": false
+            },
+            {
+              "id": 4,
+              "name": "cur_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000000,
+              "default": 100,
+              "known": false
+            },
+            {
+              "id": 5,
+              "name": "spd_kp",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 500,
+              "known": false
+            },
+            {
+              "id": 6,
+              "name": "spd_ki",
+              "value": null,
+              "unit": "x100",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 7,
+              "name": "i_limit",
+              "value": null,
+              "unit": "mA",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 15000,
+              "default": 15000,
+              "known": false
+            },
+            {
+              "id": 8,
+              "name": "pos_kp",
+              "value": null,
+              "unit": "x100/s",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 9,
+              "name": "pos_ki",
+              "value": null,
+              "unit": "x100/s2",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 10,
+              "name": "pos_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 11,
+              "name": "speed_limit",
+              "value": null,
+              "unit": "rpm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 300,
+              "default": 300,
+              "known": false
+            },
+            {
+              "id": 12,
+              "name": "voltage_limit",
+              "value": null,
+              "unit": "mV",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 8000,
+              "default": 5000,
+              "known": false
+            },
+            {
+              "id": 13,
+              "name": "current_ramp",
+              "value": null,
+              "unit": "mA/s",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 30000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 14,
+              "name": "speed_ramp",
+              "value": null,
+              "unit": "rpm/s",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 3000,
+              "default": 60,
+              "known": false
+            },
+            {
+              "id": 15,
+              "name": "speed_filter",
+              "value": null,
+              "unit": "ms",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 1000,
+              "default": 20,
+              "known": false
+            },
+            {
+              "id": 16,
+              "name": "current_bw",
+              "value": null,
+              "unit": "rad/s;0=manual",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 2000,
+              "default": 200,
+              "known": false
+            },
+            {
+              "id": 17,
+              "name": "phase_rs",
+              "value": null,
+              "unit": "mOhm equivalent",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000,
+              "default": 275,
+              "known": false
+            },
+            {
+              "id": 18,
+              "name": "phase_ls",
+              "value": null,
+              "unit": "uH; provisional",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 10000,
+              "default": 600,
+              "known": false
+            },
+            {
+              "id": 19,
+              "name": "spd_kd",
+              "value": null,
+              "unit": "x1000",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 0,
+              "known": false
+            },
+            {
+              "id": 20,
+              "name": "voltage_ramp",
+              "value": null,
+              "unit": "mV/s",
+              "saved": false,
+              "is_default": false,
+              "min": 100,
+              "max": 100000,
+              "default": 1000,
+              "known": false
+            },
+            {
+              "id": 21,
+              "name": "torque_limit",
+              "value": null,
+              "unit": "mNm",
+              "saved": false,
+              "is_default": false,
+              "min": 1,
+              "max": 500,
+              "default": 330,
+              "known": false
+            },
+            {
+              "id": 22,
+              "name": "current_filter",
+              "value": null,
+              "unit": "us",
+              "saved": false,
+              "is_default": false,
+              "min": 0,
+              "max": 10000,
+              "default": 1000,
+              "known": false
+            }
+          ]
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a50702036470fe00",
+        "name": "control",
+        "expected": {
+          "control": {
+            "mode": 7,
+            "state": 2,
+            "calibration_stage": 3,
+            "calibration_progress": 100,
+            "iq_target_ma": -400,
+            "calibration_error": 0,
+            "updated_at": 1700000000
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a4d204970a010200",
+        "name": "encoder",
+        "expected": {
+          "encoder": {
+            "received": true,
+            "valid": true,
+            "raw": 1234,
+            "angle_cdeg": 2711,
+            "angle_deg": 27.11,
+            "speed_rpm": null,
+            "status": 1,
+            "status_text": "数据有效",
+            "error_count": 2,
+            "updated_at": 1700000000,
+            "age_s": 0.0,
+            "stale": false,
+            "electrical_angle_valid": true,
+            "electrical_calibrated": true,
+            "electrical_angle_deg": 330.556640625
+          }
+        }
+      },
+      {
+        "id": 1424,
+        "hex": "a200800000012d00",
+        "name": "ntc-invalid",
+        "expected": {
+          "ntc": {
+            "temp_c": null,
+            "temp_c_x10": -32768,
+            "raw": 0,
+            "valid": false,
+            "over": false,
+            "tripped": false,
+            "tripped_latched": false,
+            "recovered_s": null,
+            "fault": false,
+            "limit_c": 45,
+            "age_s": 0
+          }
+        }
+      }
+    ]
+  }
+}
