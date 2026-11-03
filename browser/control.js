@@ -188,7 +188,12 @@ export class BrakeCurrent {
     })();
     return this.status();
   }
-  async stop() { this.generation++; await this.channel.output(false); Object.assign(this.run,{running:false,phase:'stopped',targetA:0,stopConfirmed:true}); return this.status(); }
+  async stop() {
+    this.generation++;this.run.stopConfirmed = false;
+    try {await this.channel.output(false);Object.assign(this.run,{targetA:0,stopConfirmed:true});}
+    finally {Object.assign(this.run,{running:false,phase:'stopped'});}
+    return this.status();
+  }
 }
 export class CoupledCurrent {
   run = {running:false,phase:'idle',reason:'',stopConfirmed:null}; generation = 0;

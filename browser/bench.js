@@ -36,7 +36,10 @@ export class Bench {
   routes() {
     return {'/api/health':this.health(),'/api/control/status':this.safety(),'/api/connections/status':this.connection,'/api/motor-current/status':{...this.motor.status(),safety:this.safety()},'/api/brake-current/status':{...this.brake.status(),safety:this.safety()},'/api/coupled-current/status':this.coupled.status(),'/api/recordings/status':{current:this.recordings.status()},'/api/automatic/status':this.specialized.status('automatic',false),'/api/specialized/status':this.specialized.status('specialized',false),'/api/test-subjects':this.subjects.status()};
   }
-  publish() { this.emit('state',{hostApi:1,recordSchema:2,routes:this.routes(),devices:this.source(),control:this.safety(),test:this.coupled.run,recording:this.recordings.status()}); }
+  publish() {
+    if (this.owner && !this.stopping && !this.blocked && !this.coupled.run.running && [this.motor,this.brake].some(engine => engine.run.phase === 'stopped' && engine.run.stopConfirmed === false)) this.beginStop('输出关闭未确认，执行原电源断电兜底',Object.keys(this.channels));
+    this.emit('state',{hostApi:1,recordSchema:2,routes:this.routes(),devices:this.source(),control:this.safety(),test:this.coupled.run,recording:this.recordings.status()});
+  }
   async poll() {
     if (this.polling) return;
     this.polling = true;

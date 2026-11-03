@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Bench} from '../browser/bench.js';
-import {CurrentMotor,CoupledCurrent,StandstillConfirmation,BrakeTorque} from '../browser/control.js';
+import {CurrentMotor,CoupledCurrent,StandstillConfirmation,BrakeTorque,BrakeCurrent} from '../browser/control.js';
 import {TestSubjects,Recordings} from '../browser/storage.js';
 import {Specialized} from '../browser/specialized.js';
 import {fit,positioning,thermal} from '../browser/metrics.js';
@@ -197,4 +197,19 @@ test('browser supply limit updates preserve the independent 2.3A brake ceiling',
   const env = await bench(),channel = env.channels['brake-supply'];channel.config = {maxVoltage:24,maxCurrent:2.3,ratedCurrent:60};
   await assert.rejects(env.request('/api/supplies/brake-supply/limits','POST',{maxVoltage:12,maxCurrent:20},client(env)),/限幅电流/);
   assert.equal(channel.config.maxCurrent,2.3);assert.equal(channel.config.maxVoltage,24);
+});
+
+test('failed autonomous stop retains uncertainty and invokes the original power-discharge fallback',async () => {
+  const stopped = new BrakeCurrent({output:async () => {},status:() => ({})});stopped.run.running = true;
+  assert.equal((await stopped.stop()).run.running,false);
+  const brake = new BrakeCurrent({output:async () => {throw new Error('no OFF acknowledgement');},status:() => ({})});
+  brake.run.running = true;await assert.rejects(brake.stop(),/no OFF acknowledgement/);
+  assert.equal(brake.run.running,false);assert.equal(brake.run.phase,'stopped');assert.equal(brake.run.stopConfirmed,false);
+  const env = await bench();let off = 0;
+  env.owner = 'active-browser-client';env.motor.run = {running:false,phase:'stopped',stopConfirmed:false};
+  env.device.bus = {closed:false};env.motor.stop = async () => {throw new Error('CAN link lost');};
+  const channel = env.channels['motor-supply'];channel.config = {voltageDecimals:2};channel.outputUncertain = true;
+  channel.output = async enabled => {assert.equal(enabled,false);off++;channel.outputUncertain = false;channel.snapshot = {status:0,measured:[0,0]};};channel.read = async () => channel.status();
+  env.publish();await env.stopTask;
+  assert.ok(off > 0);assert.equal(env.motorIsolated,true);assert.equal(env.blocked,false);assert.equal(env.motor.run.stopConfirmed,true);assert.equal((await env.store.get('output-journal')).dirty,false);
 });
