@@ -19,9 +19,10 @@
       <p class="links"><a href="./firmware/boot.bin" download>下载 BIN</a><a href="./firmware/boot.hex" download>下载 HEX</a><a href="./guide/">操作说明</a></p>
     </section>
     <section class="card">
-      <div class="card-heading"><h2>设备</h2><span id="device-state">未连接</span></div>
+      <div class="card-heading"><h2>设备</h2><span id="device-state">不连接</span></div>
       <p>连接 J-Link 的 SWDIO、SWCLK、GND 和 VTref；目标板自行供电。先结束其他 APP 的测试并停止输出。</p>
-      <div class="actions"><button id="connect">连接 J-Link 并识别</button><button id="disconnect" class="secondary" disabled>断开</button></div>
+      <div class="actions"><label for="connection-mode">连接选择</label><select id="connection-mode"><option value="off">不连接</option><option value="on">连接</option></select><button id="choose-device" class="secondary" disabled>选择 J-Link</button></div>
+      <p id="connection-detail" role="status">选择“连接”并授权探针后，持续自动识别和重连；选择“不连接”停止。</p>
       <pre id="identity">尚未读取芯片信息</pre>
       <p class="hint">使用 Chrome / Edge。USB 权限不足时需处理系统探针权限；Windows 需要 WebUSB 可访问的驱动。CAN 适配器不能用于首次 SWD 烧录。</p>
     </section>

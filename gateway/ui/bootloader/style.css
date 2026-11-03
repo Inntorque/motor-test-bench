@@ -13,6 +13,8 @@ dl {display:flex;gap:24px;flex-wrap:wrap;margin:0}dt {color:#84949e;font-size:12
 .digest {color:#82939e;font-size:11px;overflow-wrap:anywhere}code {font-family:ui-monospace,monospace}.links {font-size:12px}
 button {padding:10px 15px;font:inherit;font-size:13px;border:1px solid #244b60;border-radius:7px;background:#244b60;color:#fff;cursor:pointer}
 button.secondary {color:#426273;background:#fff;border-color:#d1dee6}button:disabled {opacity:.4;cursor:default}
+select {padding:9px 30px 9px 12px;font:inherit;font-size:13px;border:1px solid #c6d5df;border-radius:7px;background:#fff;color:#354957}select:disabled {opacity:.4}
+#connection-detail {font-size:12px;color:#6c858e}
 button:focus-visible,a:focus-visible {outline:2px solid #77a4bb;outline-offset:3px}
 .hint {font-size:12px;color:#82939e}.actions {margin:12px 0}
 pre {font:12px/1.8 ui-monospace,"Noto Sans CJK SC",monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:14px 0 0}

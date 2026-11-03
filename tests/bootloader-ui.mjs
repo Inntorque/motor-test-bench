@@ -6,7 +6,8 @@ import {chromium} from 'playwright';
 const root = process.cwd(),output = resolve(root,'.runtime/bootloader-ui-tests');await mkdir(output,{recursive:true});
 const fixture = (await readFile(resolve(root,'tests/fixtures/jlink.js'),'utf8')).replace('export class VirtualJLink','class VirtualJLink') + `
 window.__jlink = new VirtualJLink();window.__usbRequests = 0;
-Object.defineProperty(navigator,'usb',{value:{async requestDevice(){window.__usbRequests++;return window.__jlink;},addEventListener(){}}});
+window.__usbDevices = [window.__jlink];window.__usbQueries = 0;window.__usbListeners = {};window.__newJlink = () => new VirtualJLink();
+Object.defineProperty(navigator,'usb',{value:{async requestDevice(){window.__usbRequests++;return window.__jlink;},async getDevices(){window.__usbQueries++;return window.__usbDevices;},addEventListener(type,listener){(window.__usbListeners[type] ||= []).push(listener);}}});
 `;
 const types = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png'};
 const server = createServer(async (request,response) => {
@@ -37,7 +38,38 @@ try {
   await page.getByRole('status').filter({hasText:'网页已就绪'}).waitFor();
   assert.deepEqual(await page.evaluate(() => ({requests:window.__usbRequests,opened:window.__jlink.opened,writes:window.__jlink.writes.length})),{requests:0,opened:false,writes:0});
   await page.screenshot({path:resolve(output,'bootloader.png'),fullPage:true});
-  await page.getByRole('button',{name:'连接 J-Link 并识别',exact:true}).click();await page.locator('#device-state').filter({hasText:'已识别'}).waitFor();
+  assert.equal(await page.locator('#connection-mode').inputValue(),'off');
+  await page.evaluate(() => {
+    window.__requestDevice = navigator.usb.requestDevice;
+    navigator.usb.requestDevice = () => {window.__usbRequests++;return new Promise(resolve => {window.__finishChooser = resolve;});};
+  });
+  await page.locator('#connection-mode').selectOption('on');await page.waitForFunction(() => !!window.__finishChooser);
+  await page.locator('#connection-mode').selectOption('off');
+  await page.evaluate(() => {window.__finishChooser(window.__jlink);navigator.usb.requestDevice = window.__requestDevice;});
+  assert.deepEqual(await page.evaluate(() => ({queries:window.__usbQueries,opens:window.__jlink.opens,writes:window.__jlink.writes.length})),{queries:0,opens:0,writes:0},'a late chooser result must not reconnect after off');
+  const authorizationCount = await page.evaluate(() => window.__usbRequests + 1);
+  await page.evaluate(() => {window.__jlink.badId = true;});
+  await page.locator('#connection-mode').selectOption('on');
+  await page.locator('#connection-detail').filter({hasText:'芯片型号/容量不符'}).waitFor();
+  await page.waitForFunction(() => window.__jlink.opens >= 3);
+  assert.equal(await page.evaluate(() => window.__usbRequests),authorizationCount,'retries must not repeat authorization dialogs');
+  assert.equal(await page.locator('#log').evaluate(node => node.textContent.split('芯片型号/容量不符').length - 1),1,'identical retry errors must not grow the log');
+  await page.locator('#connection-mode').selectOption('off');await page.waitForFunction(() => !window.__jlink.opened);
+  const stopped = await page.evaluate(() => ({opens:window.__jlink.opens,queries:window.__usbQueries}));await page.waitForTimeout(1150);
+  assert.deepEqual(await page.evaluate(() => ({opens:window.__jlink.opens,queries:window.__usbQueries})),stopped,'off must stop scanning');
+  await page.evaluate(() => {window.__jlink.badId = false;});
+  await page.locator('#connection-mode').selectOption('on');await page.locator('#device-state').filter({hasText:'已连接'}).waitFor();
+  assert.equal(await page.evaluate(() => window.__usbRequests),authorizationCount,'re-enabling the selected probe must not ask again');
+  await page.evaluate(() => {
+    const device = window.__jlink;device.opened = false;window.__usbDevices = [];
+    for (const listener of window.__usbListeners.disconnect) listener({device});
+  });
+  await page.locator('#device-state').filter({hasText:'连接中'}).waitFor();assert.equal(await page.locator('#flash').isDisabled(),true);
+  await page.evaluate(() => {
+    window.__jlink = window.__newJlink();window.__usbDevices = [window.__jlink];
+    for (const listener of window.__usbListeners.connect) listener({device:window.__jlink});
+  });
+  await page.locator('#device-state').filter({hasText:'已连接'}).waitFor();assert.equal(await page.evaluate(() => window.__usbRequests),authorizationCount);
   assert.equal(await page.evaluate(() => window.__jlink.writes.length),0);
   await page.getByRole('button',{name:'只读取备份',exact:true}).click();
   await page.getByRole('status').filter({hasText:'全片备份已保存'}).waitFor({timeout:20000});
@@ -53,11 +85,12 @@ try {
   await page.locator('#saved').filter({hasText:'complete'}).waitFor();assert.equal(await page.locator('#download-backup').isEnabled(),true);
   assert.equal(await page.evaluate(() => window.__usbRequests),0,'reload must not reconnect or flash');
   await page.evaluate(() => {window.__jlink.badId = true;});
-  await page.getByRole('button',{name:'连接 J-Link 并识别',exact:true}).click();await page.getByRole('status').filter({hasText:'芯片型号/容量不符'}).waitFor();
+  await page.locator('#connection-mode').selectOption('on');await page.locator('#connection-detail').filter({hasText:'芯片型号/容量不符'}).waitFor();
   assert.equal(await page.locator('#flash').isDisabled(),true);assert.equal(await page.evaluate(() => window.__jlink.writes.length),0);
+  await page.locator('#connection-mode').selectOption('off');await page.waitForFunction(() => !window.__jlink.opened);
   assert.equal(await page.evaluate(() => window.__jlink.opened),false);
   await page.route('**/firmware/boot.bin',route => route.fulfill({body:Buffer.alloc(10592),contentType:'application/octet-stream'}));
   await page.reload();await page.getByRole('status').filter({hasText:'复位向量无效'}).waitFor();assert.equal(await page.locator('#flash').isDisabled(),true);
   assert.deepEqual(errors,[]);assert.deepEqual(backend,[]);
-  console.log(JSON.stringify({passed:true,apps:4,initialUsbAccess:0,backupBytes:payload.length,bootPages:6,untouchedBytesPreserved:true,verifiedBeforeReset:true,backupSurvivesReload:true,wrongMcuAndImageRejected:true,pageErrors:errors,backendRequests:backend},null,2));
+  console.log(JSON.stringify({passed:true,apps:4,initialUsbAccess:0,autoIdentifyRetry:true,replugReconnect:true,offStopsScanning:true,singleAuthorization:true,retryLogDeduplicated:true,backupBytes:payload.length,bootPages:6,untouchedBytesPreserved:true,verifiedBeforeReset:true,backupSurvivesReload:true,wrongMcuAndImageRejected:true,pageErrors:errors,backendRequests:backend},null,2));
 } finally {await browser?.close();await new Promise(done => server.close(done));}

@@ -4,19 +4,22 @@ export class VirtualJLink {
   configuration = {interfaces:[{interfaceNumber:0,alternates:[{interfaceClass:255,alternateSetting:0,endpoints:[{type:'bulk',direction:'in',endpointNumber:1},{type:'bulk',direction:'out',endpointNumber:2}]}]}]};
   flash = Uint8Array.from({length:0x80000},(_,i) => i % 251);
   responses = [];commands = [];writes = [];erased = [];resets = 0;halted = false;control = 0x80;status = 0;debug = 0x10;badId = false;
-  async open() {this.opened = true;}
+  opens = 0;closes = 0;
+  async open() {this.opens++;this.opened = true;}
   async claimInterface() {this.claimed = true;}
   async selectAlternateInterface() {}
   async releaseInterface() {this.claimed = false;}
-  async close() {this.opened = false;}
+  async close() {this.closes++;this.opened = false;}
   queue(data) {this.responses.push(Uint8Array.from(data));}
   async transferIn(_ep,length) {
+    if (!this.opened) throw new Error('USB device disconnected');
     if (!this.responses.length) throw new Error('Unexpected USB read without device response');
     const chunk = this.responses[0],data = chunk.slice(0,length);
     if (data.length === chunk.length) this.responses.shift();else this.responses[0] = chunk.slice(length);
     return {status:'ok',data:new DataView(data.buffer)};
   }
   async transferOut(_ep,packet) {
+    if (!this.opened) throw new Error('USB device disconnected');
     const data = new Uint8Array(packet);this.commands.push(data[0]);
     if (data[0] === 1) {const text = new TextEncoder().encode('J-Link V9 compiled test');this.queue([text.length,0,...text]);}
     else if (data[0] === 7) this.queue([0xd7,0x0c,1,1,1,1,1,1]);

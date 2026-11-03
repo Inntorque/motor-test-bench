@@ -1,9 +1,26 @@
-import {JLink} from './jlink.js';
-import {Swd} from './swd.js';
-import {Bootloader,validateImage,identify,sha256} from './n32.js';
+import {Connection} from './connection.js';
+import {Bootloader,validateImage,sha256} from './n32.js';
 
 const $ = id => document.getElementById(id),events = [];
-let probe,core,engine,manifest,image,lastRecord,busy = false,halted = false;
+let core,engine,manifest,image,lastRecord,busy = false,halted = false,choosing = false,choice = 0;
+let connectionState = 'off',lastConnectionError = '';
+const connection = new Connection(navigator.usb,state => {
+  const previous = connectionState;connectionState = state.state;core = state.session?.core;
+  $('device-state').textContent = {off:'不连接',waiting:'连接中，自动识别',connected:'已连接，持续识别'}[state.state];
+  $('connection-detail').textContent = state.message + (state.state === 'waiting' ? `（第 ${state.attempts} 次）` : '');
+  $('connection-detail').dataset.error = String(!!state.error);
+  if (state.session) {
+    const {probe,chip} = state.session,device = probe.device;
+    $('identity').textContent = `${chip.model} · Flash ${chip.flashKiB} KiB · SRAM ${chip.sramKiB} KiB\nCPUID ${chip.cpuid} · DBG_ID ${chip.dbgId}\nJ-Link ${device.serialNumber || '无序列号'} · ${(probe.millivolts / 1000).toFixed(3)} V · SWD 100 kHz\n${probe.version}`;
+  } else $('identity').textContent = state.state === 'off' ? '尚未读取芯片信息' : '芯片尚未识别，持续等待连接';
+  if (state.error && state.message !== lastConnectionError) {log(state.message);lastConnectionError = state.message;}
+  if (state.state !== previous) {
+    if (state.state === 'connected') {log('J-Link 与 N32G455 识别成功；持续检查连接，未自动擦写');lastConnectionError = '';}
+    else if (state.state === 'off') {log('已选择不连接；停止识别并释放本 APP 的探针');lastConnectionError = '';}
+    else log('保持连接选择，正在自动识别 J-Link 与芯片');
+  }
+  buttons();
+});
 function log(message) {
   events.push({time:new Date().toISOString(),message});
   $('log').textContent = events.map(event => `${new Date(event.time).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}  ${event.message}`).join('\n');
@@ -11,8 +28,8 @@ function log(message) {
 }
 function update(message,value = 0) {$('stage').textContent = message;$('progress').value = value;}
 function buttons() {
-  $('connect').disabled = busy || !!probe;
-  $('disconnect').disabled = busy || !probe;
+  $('connection-mode').disabled = busy;
+  $('choose-device').disabled = busy || choosing || $('connection-mode').value !== 'on';
   $('flash').disabled = $('backup').disabled = busy || !core || !image || halted;
   $('resume').disabled = busy || !core || !halted || !!engine?.started;
   $('download-backup').disabled = !lastRecord?.before;
@@ -38,37 +55,42 @@ function download(data,name,type) {
   const url = URL.createObjectURL(new Blob([data],{type})),link = document.createElement('a');
   link.href = url;link.download = name;link.click();setTimeout(() => URL.revokeObjectURL(url),30000);
 }
-async function action(fn) {
+async function action(fn,hardware = false) {
   busy = true;$('stage').dataset.error = 'false';buttons();
-  try {await fn();}
+  try {if (hardware) core = await connection.pause();await fn();}
   catch (error) {
     let message = error.message;
     if (error.name === 'NotFoundError') message = '未选择 J-Link';
     if (error.name === 'SecurityError' || error.name === 'NetworkError') message += '；请检查 USB 权限、驱动及是否被其他程序占用';
     log(message);update(message);$('stage').dataset.error = 'true';
-  } finally {busy = false;buttons();}
+  } finally {busy = false;if (hardware) connection.resume();buttons();}
 }
-$('connect').onclick = () => action(async () => {
-  if (!navigator.usb || !window.isSecureContext) throw new Error('请使用 Chrome / Edge，通过 HTTPS 打开此 APP');
-  const device = await navigator.usb.requestDevice({filters:[{vendorId:0x1366}]});
-  const selected = new JLink(device);
+async function chooseDevice() {
+  if (choosing) return;
+  const generation = ++choice;choosing = true;buttons();
   try {
-    await selected.open();const target = new Swd(selected);await target.init();const chip = await identify(target);
-    probe = selected;core = target;engine = undefined;halted = false;
-    $('identity').textContent = `${chip.model} · Flash ${chip.flashKiB} KiB · SRAM ${chip.sramKiB} KiB\nCPUID ${chip.cpuid} · DBG_ID ${chip.dbgId}\nJ-Link ${device.serialNumber || '无序列号'} · ${(probe.millivolts / 1000).toFixed(3)} V · SWD 100 kHz\n${probe.version}`;
-    $('device-state').textContent = '已识别';update('已连接，尚未暂停或擦写芯片');log('J-Link 与 N32G455 识别成功；未擦写');
-  } catch (error) {await selected.close();throw error;}
-});
-$('disconnect').onclick = () => action(async () => {
-  await probe.close();probe = core = undefined;$('device-state').textContent = '未连接';
-  update(halted ? '已断开，芯片仍可能处于暂停状态' : '已断开');log('已释放 J-Link USB 接口');
-});
+    if (!navigator.usb || !window.isSecureContext) throw new Error('请使用 Chrome / Edge，通过 HTTPS 打开此 APP');
+    const device = await navigator.usb.requestDevice({filters:[{vendorId:0x1366}]});
+    if (generation === choice && $('connection-mode').value === 'on') connection.connect(device);
+  } catch (error) {
+    if (generation !== choice) return;
+    const message = error.name === 'NotFoundError' ? '未选择 J-Link' : error.message;
+    if (!connection.enabled) {$('connection-mode').value = 'off';connection.disconnect();}
+    $('connection-detail').textContent = message;$('connection-detail').dataset.error = 'true';log(message);
+  } finally {choosing = false;buttons();}
+}
+$('connection-mode').onchange = () => {
+  if ($('connection-mode').value === 'off') {choice++;connection.disconnect();}
+  else if (connection.selected) connection.connect(connection.selected);
+  else chooseDevice();
+};
+$('choose-device').onclick = chooseDevice;
 $('backup').onclick = () => action(async () => {
   engine = new Bootloader(core,update);halted = true;
   const {chip,before} = await engine.backup();
   await persist({id:new Date().toISOString(),chip,before,stage:'read-only',backupSha256:await sha256(before)});
   update('全片备份已保存；芯片保持暂停，可导出备份或恢复运行',1);log('仅读取全片备份，未擦写、未复位');
-});
+},true);
 $('flash').onclick = () => action(async () => {
   engine = new Bootloader(core,update);halted = true;
   try {
@@ -79,8 +101,8 @@ $('flash').onclick = () => action(async () => {
     log(engine.started && !engine.verified ? '尚未完整验证；未自动复位，请保留并导出备份。' : '请查看最后完成阶段与操作日志。');
     throw error;
   }
-});
-$('resume').onclick = () => action(async () => {await core.resume();halted = false;update('已恢复原程序运行');log('操作者恢复原程序运行');});
+},true);
+$('resume').onclick = () => action(async () => {await core.resume();halted = false;update('已恢复原程序运行');log('操作者恢复原程序运行');},true);
 $('download-backup').onclick = () => download(lastRecord.before,`N32G455-before-${lastRecord.id.replaceAll(':','-')}.bin`,'application/octet-stream');
 $('download-log').onclick = () => {
   const record = lastRecord ? {...lastRecord,before:undefined} : null;
@@ -88,15 +110,15 @@ $('download-log').onclick = () => {
 };
 addEventListener('beforeunload',event => {if (busy || halted) {event.preventDefault();event.returnValue = '';}});
 navigator.usb?.addEventListener('disconnect',event => {
-  if (probe?.device !== event.device) return;
-  probe = core = undefined;$('device-state').textContent = 'USB 已断开';log('探针 USB 断开');buttons();
+  connection.deviceChanged(event.device);
 });
+navigator.usb?.addEventListener('connect',event => connection.deviceChanged(event.device));
 await action(async () => {
   const [metadata,binary] = await Promise.all([fetch('./firmware/manifest.json',{cache:'no-store'}),fetch('./firmware/boot.bin',{cache:'no-store'})]);
   if (!metadata.ok || !binary.ok) throw new Error('发布镜像加载失败');
   const data = new Uint8Array(await binary.arrayBuffer()),description = await metadata.json();await validateImage(data,description);
   manifest = description;image = data;$('release').textContent = manifest.release;$('image-size').textContent = `${image.length.toLocaleString()} B`;
-  $('image-hash').textContent = manifest.sha256;$('image-state').textContent = '镜像校验通过';update('网页已就绪，未访问设备');log('发布镜像校验通过；等待手动连接 J-Link');
+  $('image-hash').textContent = manifest.sha256;$('image-state').textContent = '镜像校验通过';update('网页已就绪；连接状态见设备区');log('发布镜像校验通过；默认不连接，等待选择连接');
 });
 try {
   const db = await database();

@@ -27,7 +27,10 @@ export function frames(operations) {
 export function decode(data,operations) {
   return operations.map((op,index) => {
     const base = index * 54,ack = bit(data,base + 9) | bit(data,base + 10) << 1 | bit(data,base + 11) << 2;
-    if (ack !== 1) throw new Error(`SWD ACK=${ack}；请核对 SWD 接线、目标供电和芯片状态`);
+    if (ack !== 1) {
+      const status = ack === 4 ? 'FAULT' : ack === 2 ? 'WAIT' : '无有效应答';
+      throw new Error(`SWD ACK=${ack} (${status})，${op.ap ? 'AP' : 'DP'} ${op.read ? '读' : '写'}寄存器 0x${op.address.toString(16).padStart(2,'0')}；请核对 SWD 接线、目标供电和芯片状态`);
+    }
     if (!op.read) return 0;
     let value = 0;
     for (let i = 0; i < 32; i++) value = (value | bit(data,base + 12 + i) << i) >>> 0;

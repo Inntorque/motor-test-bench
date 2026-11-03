@@ -35,6 +35,8 @@ test('SWD read header, released turnaround, ACK and parity use fixed wire vector
   const response = new Uint8Array(7);put(response,9,1);put(response,12,1);put(response,44,1);
   assert.deepEqual(decode(response,ops),[1]);put(response,13,1);assert.throws(() => decode(response,ops),/奇偶/);
   assert.throws(() => decode(new Uint8Array(7),ops),/ACK/);
+  const fault = new Uint8Array(7);put(fault,11,1);
+  assert.throws(() => decode(fault,ops),/ACK=4 \(FAULT\).*DP 读寄存器 0x00/);
 });
 
 test('J-Link consumes full version/interface/status replies and leaves core running on identify',async () => {
