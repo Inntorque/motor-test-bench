@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {OutlineEffect} from 'three/addons/effects/OutlineEffect.js';
 import {createMotorIconModel, motorIconViews} from './motor-models.js';
 
-export const ICON_SIZE = 240;
+export const ICON_SIZE = 480;
 
 export function createIconRenderer() {
   const renderer = new THREE.WebGLRenderer({alpha: true, antialias: false, powerPreference: 'low-power'});

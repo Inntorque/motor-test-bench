@@ -10,10 +10,14 @@ const materials = () => {
     satin: '#91acb5', brass: '#d5b979', dark: '#30494f',
   }).map(([name, color]) => {
     const material = new THREE.MeshToonMaterial({color, gradientMap: ramp});
-    material.onBeforeCompile = shader => {
-      shader.fragmentShader = shader.fragmentShader.replace('#include <colorspace_fragment>', `
+    material.onBeforeCompile = (shader, renderer) => {
+      shader.uniforms.grainScale = {value: renderer.getDrawingBufferSize(new THREE.Vector2()).x / 240};
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float grainScale;')
+        .replace('#include <colorspace_fragment>', `
         #include <colorspace_fragment>
-        float checker = mod(floor(gl_FragCoord.x), 2.0) + 2.0 * mod(floor(gl_FragCoord.y), 2.0);
+        vec2 grainPixel = floor(gl_FragCoord.xy / grainScale);
+        float checker = mod(grainPixel.x, 2.0) + 2.0 * mod(grainPixel.y, 2.0);
         float dither = (checker - 1.5) / 4.0;
         gl_FragColor.rgb = floor(gl_FragColor.rgb * 20.0 + 0.5 + dither) / 20.0;
       `);

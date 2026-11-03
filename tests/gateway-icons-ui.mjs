@@ -9,6 +9,7 @@ import {createIconScene} from '../gateway/graphics/icon-scene.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, '.runtime/img2threejs-icons/pixel-motion');
+const iconSize = 480;
 await mkdir(output, {recursive: true});
 const movingRegions = Object.entries({
   dynamometer: ['output-shaft', 'shaft-end-chamfer', 'shaft-keyway', 'shaft-index-mark'],
@@ -25,10 +26,10 @@ const movingRegions = Object.entries({
     }
   }
   return {
-    left: Math.floor(Math.min(...points.map(p => (p.x + 1) * 120))) - 3,
-    right: Math.ceil(Math.max(...points.map(p => (p.x + 1) * 120))) + 3,
-    top: Math.floor(Math.min(...points.map(p => (1 - p.y) * 120))) - 3,
-    bottom: Math.ceil(Math.max(...points.map(p => (1 - p.y) * 120))) + 3,
+    left: Math.floor(Math.min(...points.map(p => (p.x + 1) * iconSize / 2))) - 6,
+    right: Math.ceil(Math.max(...points.map(p => (p.x + 1) * iconSize / 2))) + 6,
+    top: Math.floor(Math.min(...points.map(p => (1 - p.y) * iconSize / 2))) - 6,
+    bottom: Math.ceil(Math.max(...points.map(p => (1 - p.y) * iconSize / 2))) + 6,
   };
 });
 const types = {'.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png'};
@@ -98,7 +99,7 @@ try {
     names: [...document.querySelectorAll('.app-name')].map(n => n.textContent),
   }));
   assert.equal(info.contexts, 1);
-  assert.deepEqual(info.sizes, [[240,240], [240,240], [240,240]]);
+  assert.deepEqual(info.sizes, [[iconSize,iconSize], [iconSize,iconSize], [iconSize,iconSize]]);
   assert.equal(info.pixels, true);
   assert.deepEqual(info.names, ['测功机', 'SG-6010HB', '7010 上位机']);
   const alignment = await checkCentered(page);
@@ -117,7 +118,7 @@ try {
   for (let index = 0; index < 3; index++) {
     const before = await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => c.toDataURL()));
     await page.evaluate(() => {
-      window.iconProbe.pixels = [...document.querySelectorAll('.app-icon canvas')].map(c => c.getContext('2d').getImageData(0, 0, 240, 240).data);
+      window.iconProbe.pixels = [...document.querySelectorAll('.app-icon canvas')].map(c => c.getContext('2d').getImageData(0, 0, c.width, c.height).data);
     });
     const position = await page.locator('.app-icon').nth(index).boundingBox();
     await page.locator('.app').nth(index).hover();
@@ -139,12 +140,13 @@ try {
     for (let other = 0; other < 3; other++) if (other !== index) assert.equal(after[other], before[other], 'other APPs must stay frozen');
     const changedOutside = await page.evaluate(({index, region}) => {
       const initial = window.iconProbe.pixels[index];
-      const current = document.querySelectorAll('.app-icon canvas')[index].getContext('2d').getImageData(0, 0, 240, 240).data;
+      const canvas = document.querySelectorAll('.app-icon canvas')[index];
+      const current = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
       let changed = 0;
-      for (let y = 0; y < 240; y++) {
-        for (let x = 0; x < 240; x++) {
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
           if (x >= region.left && x <= region.right && y >= region.top && y <= region.bottom) continue;
-          const offset = (y * 240 + x) * 4;
+          const offset = (y * canvas.width + x) * 4;
           for (let channel = 0; channel < 4; channel++) if (initial[offset + channel] !== current[offset + channel]) changed++;
         }
       }
