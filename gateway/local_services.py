@@ -38,6 +38,7 @@ def listening(port):
 class Manager:
     def __init__(self, site_url, offline=False):
         self.catalog = config()
+        self.catalog['apps'] = [app for app in self.catalog['apps'] if not app.get('browserOnly')]
         parsed = urlsplit(site_url)
         if site_url != self.catalog['siteUrl'] and not (parsed.scheme == 'http' and parsed.hostname in ('127.0.0.1', 'localhost') and parsed.port):
             raise ValueError('Only the configured Pages site or a loopback test site is allowed')

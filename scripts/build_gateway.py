@@ -60,7 +60,7 @@ def build(destination):
     for app in catalog['apps']:
         if not (source / 'icons' / f'{app["id"]}.svg').is_file():
             raise ValueError('Missing application icon: ' + app['id'])
-        ui = ROOT / ('dist' if app['id'] == 'dynamometer' else 'gateway/ui/' + app['id'])
+        ui = ROOT / ('.runtime/bootloader-ui' if app['id'] == 'bootloader' else 'dist' if app['id'] == 'dynamometer' else 'gateway/ui/' + app['id'])
         files = {path.relative_to(ui).as_posix(): path.read_bytes()
                  for path in sorted(ui.rglob('*')) if path.is_file()}
         if 'index.html' not in files:
@@ -80,7 +80,7 @@ def build(destination):
         shutil.copytree(ui, page_root)
         index = page_root / 'index.html'
         page = index.read_text(encoding='utf-8')
-        if app['id'] != 'dynamometer':
+        if app['id'] not in ('dynamometer', 'bootloader'):
             data = legacy[app['id']]
             heartbeat_start = page.index('  try {\n    var aliveSrc = ')
             heartbeat_end = page.index('\n  pollControl();', heartbeat_start)
@@ -97,18 +97,23 @@ def build(destination):
             page = page.replace('编译当前工程并升级设备', '浏览器不运行本机固件工具链')
             page = page.replace('执行前会先发送停机命令并释放网页的 CAN 适配器；Makefile 会递增固件版本、编译 A/B 槽并更新设备。', '固件编译和升级由独立维护工程完成；本网页仅直接连接设备进行控制、读取和测试。')
             page = page.replace('$("btn_ota_onekey").disabled = otaBusy;', '$("btn_ota_onekey").disabled = true;')
-        script = f'<script src="../../browser/bootstrap.js?v={native_version}" data-app="{app["id"]}"></script>'
-        page, count = re.subn(r'(<head\b[^>]*>)', lambda match: match[1]+'\n'+script, page, count=1, flags=re.I)
-        if count != 1 or re.search(r'__(?:CONTROL_TOKEN|COMMAND_EPOCH|MUTATING_ROUTES|TUNE_CATALOG)__', page):
+        if not app.get('browserOnly'):
+            script = f'<script src="../../browser/bootstrap.js?v={native_version}" data-app="{app["id"]}"></script>'
+            page, count = re.subn(r'(<head\b[^>]*>)', lambda match: match[1]+'\n'+script, page, count=1, flags=re.I)
+            if count != 1:
+                raise ValueError('Missing page head: ' + app['id'])
+        if re.search(r'__(?:CONTROL_TOKEN|COMMAND_EPOCH|MUTATING_ROUTES|TUNE_CATALOG)__', page):
             raise ValueError('Incomplete standalone browser page: ' + app['id'])
         index.write_text(page, encoding='utf-8')
+        runtime_version = metadata['engine'] if app.get('browserOnly') else native_version
         app.update(runtime='browser', entry=f'apps/{app["id"]}/',
-                   browserVersion=digest(page.encode()+native_version.encode())[:16])
+                   browserVersion=digest(page.encode()+runtime_version.encode())[:16])
         app.pop('port', None)
         guide = page_root / 'guide'
         guide.mkdir(exist_ok=True)
+        guide_name = 'bootloader-app.md' if app['id'] == 'bootloader' else 'gateway-deployment.md'
         guide.joinpath('index.html').write_text('<meta charset="utf-8"><pre style="white-space:pre-wrap">'+
-            html.escape((ROOT / 'docs/gateway-deployment.md').read_text(encoding='utf-8'))+'</pre>', encoding='utf-8')
+            html.escape((ROOT / 'docs' / guide_name).read_text(encoding='utf-8'))+'</pre>', encoding='utf-8')
     catalog.pop('serviceUrl', None)
     catalog.update(runtime='browser', browserRuntimeVersion=native_version)
     (destination / 'catalog.json').write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

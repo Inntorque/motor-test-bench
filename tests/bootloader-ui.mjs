@@ -1,0 +1,63 @@
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {readFile,mkdir} from 'node:fs/promises';
+import {resolve,extname} from 'node:path';
+import {chromium} from 'playwright';
+const root = process.cwd(),output = resolve(root,'.runtime/bootloader-ui-tests');await mkdir(output,{recursive:true});
+const fixture = (await readFile(resolve(root,'tests/fixtures/jlink.js'),'utf8')).replace('export class VirtualJLink','class VirtualJLink') + `
+window.__jlink = new VirtualJLink();window.__usbRequests = 0;
+Object.defineProperty(navigator,'usb',{value:{async requestDevice(){window.__usbRequests++;return window.__jlink;},addEventListener(){}}});
+`;
+const types = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png'};
+const server = createServer(async (request,response) => {
+  try {
+    const path = new URL(request.url,'http://localhost').pathname;
+    const file = resolve(root,'site','.' + (path.endsWith('/') ? path + 'index.html' : path));
+    response.setHeader('Content-Type',types[extname(file)] || 'application/octet-stream');response.end(await readFile(file));
+  } catch {response.writeHead(404);response.end();}
+});
+await new Promise(done => server.listen(0,'127.0.0.1',done));
+const base = `http://127.0.0.1:${server.address().port}/`;let browser;
+try {
+  browser = await chromium.launch({headless:true,...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
+  const context = await browser.newContext({viewport:{width:1440,height:1050}});await context.addInitScript({content:fixture});
+  const page = await context.newPage(),errors = [],backend = [];
+  page.on('pageerror',error => errors.push(error.message));
+  page.on('request',request => {const url = new URL(request.url());if (url.pathname.startsWith('/api/') || ['5173','5181','8892','8888'].includes(url.port)) backend.push(url.href);});
+  await page.goto(base);await page.getByRole('link',{name:'打开Bootloader',exact:true}).waitFor();
+  const layout = await page.locator('.apps .app').evaluateAll(links => links.map(link => {const r = link.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width};}));
+  assert.equal(layout.length,4);assert.equal(new Set(layout.map(item => item.y)).size,1);
+  assert.ok(Math.abs((layout[0].x + layout[3].x + layout[3].width) / 2 - 720) < 1);
+  await page.screenshot({path:resolve(output,'gateway.png')});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth),390);
+  const rows = await page.locator('.apps .app').evaluateAll(links => links.map(link => link.getBoundingClientRect().y));
+  assert.equal(new Set(rows).size,2);await page.screenshot({path:resolve(output,'gateway-mobile.png')});
+  await page.setViewportSize({width:1440,height:1050});await page.getByRole('link',{name:'打开Bootloader',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'网页已就绪'}).waitFor();
+  assert.deepEqual(await page.evaluate(() => ({requests:window.__usbRequests,opened:window.__jlink.opened,writes:window.__jlink.writes.length})),{requests:0,opened:false,writes:0});
+  await page.screenshot({path:resolve(output,'bootloader.png'),fullPage:true});
+  await page.getByRole('button',{name:'连接 J-Link 并识别',exact:true}).click();await page.locator('#device-state').filter({hasText:'已识别'}).waitFor();
+  assert.equal(await page.evaluate(() => window.__jlink.writes.length),0);
+  await page.getByRole('button',{name:'只读取备份',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'全片备份已保存'}).waitFor({timeout:20000});
+  assert.deepEqual(await page.evaluate(() => ({erased:window.__jlink.erased.length,resets:window.__jlink.resets,halted:window.__jlink.halted})),{erased:0,resets:0,halted:true});
+  const pending = page.waitForEvent('download');await page.getByRole('button',{name:'导出最近全片备份',exact:true}).click();
+  const download = await pending,payload = await readFile(await download.path());assert.equal(payload.length,524288);assert.ok(payload.every((value,index) => value === index % 251));
+  await page.getByRole('button',{name:'恢复运行（仅读取后）',exact:true}).click();await page.getByRole('status').filter({hasText:'已恢复原程序运行'}).waitFor();
+  await page.getByRole('button',{name:'备份并烧录 Bootloader',exact:true}).click();
+  await page.getByRole('status').filter({hasText:'烧录及回读校验完成'}).waitFor({timeout:30000});
+  assert.deepEqual(await page.evaluate(() => ({pages:window.__jlink.erased.length,resets:window.__jlink.resets,preserved:window.__jlink.flash.slice(10592).every((value,index) => value === (10592 + index) % 251)})),{pages:6,resets:1,preserved:true});
+  await page.screenshot({path:resolve(output,'bootloader-complete.png'),fullPage:true});
+  await page.reload();await page.getByRole('status').filter({hasText:'网页已就绪'}).waitFor();
+  await page.locator('#saved').filter({hasText:'complete'}).waitFor();assert.equal(await page.locator('#download-backup').isEnabled(),true);
+  assert.equal(await page.evaluate(() => window.__usbRequests),0,'reload must not reconnect or flash');
+  await page.evaluate(() => {window.__jlink.badId = true;});
+  await page.getByRole('button',{name:'连接 J-Link 并识别',exact:true}).click();await page.getByRole('status').filter({hasText:'芯片型号/容量不符'}).waitFor();
+  assert.equal(await page.locator('#flash').isDisabled(),true);assert.equal(await page.evaluate(() => window.__jlink.writes.length),0);
+  assert.equal(await page.evaluate(() => window.__jlink.opened),false);
+  await page.route('**/firmware/boot.bin',route => route.fulfill({body:Buffer.alloc(10592),contentType:'application/octet-stream'}));
+  await page.reload();await page.getByRole('status').filter({hasText:'复位向量无效'}).waitFor();assert.equal(await page.locator('#flash').isDisabled(),true);
+  assert.deepEqual(errors,[]);assert.deepEqual(backend,[]);
+  console.log(JSON.stringify({passed:true,apps:4,initialUsbAccess:0,backupBytes:payload.length,bootPages:6,untouchedBytesPreserved:true,verifiedBeforeReset:true,backupSurvivesReload:true,wrongMcuAndImageRejected:true,pageErrors:errors,backendRequests:backend},null,2));
+} finally {await browser?.close();await new Promise(done => server.close(done));}

@@ -18,7 +18,7 @@
     "build:gateway-icons": "node scripts/build_gateway_icons.mjs",
     "test:gateway-icons": "node tests/gateway-icons-ui.mjs",
     "build:browser": "node scripts/build_browser.mjs",
-    "test:browser": "node --test tests/browser-legacy.mjs tests/browser-legacy-control.mjs && node tests/browser-ui.mjs"
+    "test:browser": "node --test tests/browser-legacy.mjs tests/browser-legacy-control.mjs && node tests/browser-ui.mjs && node tests/bootloader-ui.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

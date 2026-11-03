@@ -1,0 +1,36 @@
+N32G455 Bootloader firmware notices
+
+Nations Technologies peripheral library:
+/*****************************************************************************
+ * Copyright (c) 2019, Nations Technologies Inc.
+ *
+ * All rights reserved.
+ * ****************************************************************************
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * - Redistributions of source code must retain the above copyright notice,
+ * this list of conditions and the disclaimer below.
+ *
+ * Nations' name may not be used to endorse or promote products derived from
+ * this software without specific prior written permission.
+ *
+ * DISCLAIMER: THIS SOFTWARE IS PROVIDED BY NATIONS "AS IS" AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT ARE
+ * DISCLAIMED. IN NO EVENT SHALL NATIONS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+ * OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * ****************************************************************************/
+
+Arm CMSIS: Copyright (c) 2009-2018 Arm Limited. All rights reserved.
+Licensed under Apache-2.0; see licenses/Apache-2.0.txt.
+
+Arm GNU Toolchain 13.3.Rel1 runtime libraries: applicable GCC runtime exception
+and Newlib/Libgloss notices are reproduced in licenses/Arm-GNU-runtime.txt.
+The compiler and desktop flashing tools are not distributed by this APP.

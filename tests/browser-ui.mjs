@@ -21,7 +21,7 @@ await new Promise(done => server.listen(0,'127.0.0.1',done));
 const base = process.env.BROWSER_SITE_URL || `http://127.0.0.1:${server.address().port}/`;
 const catalog = JSON.parse(await readFile(resolve(root,'site/catalog.json'),'utf8'));
 assert.equal(catalog.runtime,'browser');assert.equal(catalog.serviceUrl,undefined);
-assert.equal(catalog.apps.length,3);assert.equal(catalog.apps.every(app => app.runtime === 'browser' && !app.port),true);
+assert.equal(catalog.apps.length,4);assert.equal(catalog.apps.every(app => app.runtime === 'browser' && !app.port),true);
 let browser;
 try {
   browser = await chromium.launch({headless:true,...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});

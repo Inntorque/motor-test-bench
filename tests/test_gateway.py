@@ -230,6 +230,7 @@ class GatewayIntegrationTests(unittest.TestCase):
             for name in ['web_server.py', 'lan_access.py', 'instance_lock.py']:
                 shutil.copy2(ROOT / 'scripts' / name, root / 'scripts' / name)
             catalog = config()
+            catalog['apps'] = [app for app in catalog['apps'] if not app.get('browserOnly')]
             reserved = []
             for app in catalog['apps']:
                 sock = socket.socket(); sock.bind(('127.0.0.1', 0)); reserved.append(sock)
@@ -244,7 +245,7 @@ class GatewayIntegrationTests(unittest.TestCase):
                     manager.catalog = catalog
                     online = json.loads((SITE / 'catalog.json').read_text())
                     try:
-                        for app in online['apps']:
+                        for app in (app for app in online['apps'] if not app.get('browserOnly')):
                             with self.subTest(app=app['id']):
                                 url = manager.open(app['id'], app['version'])
                                 with urlopen(url, timeout=5) as response:

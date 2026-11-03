@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Bootloader · Inntorque</title>
+  <link rel="icon" href="../../inntorque-logo.png">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./main.js"></script>
+</head>
+<body>
+  <main>
+    <header><a href="../../">← 返回总网关</a><span>INNTORQUE / 固件维护</span></header>
+    <section class="title"><h1>Bootloader</h1><p>N32G455REL7 · J-Link / SWD · 浏览器直接烧录</p></section>
+    <section class="card">
+      <div class="card-heading"><h2>当前发布镜像</h2><span id="image-state">正在核对镜像</span></div>
+      <dl><div><dt>版本日期</dt><dd id="release">—</dd></div><div><dt>镜像大小</dt><dd id="image-size">—</dd></div><div><dt>烧录范围</dt><dd>仅 Bootloader · 32 KiB 分区</dd></div></dl>
+      <p class="digest">SHA-256 <code id="image-hash">—</code></p>
+      <p class="links"><a href="./firmware/boot.bin" download>下载 BIN</a><a href="./firmware/boot.hex" download>下载 HEX</a><a href="./guide/">操作说明</a></p>
+    </section>
+    <section class="card">
+      <div class="card-heading"><h2>设备</h2><span id="device-state">未连接</span></div>
+      <p>连接 J-Link 的 SWDIO、SWCLK、GND 和 VTref；目标板自行供电。先结束其他 APP 的测试并停止输出。</p>
+      <div class="actions"><button id="connect">连接 J-Link 并识别</button><button id="disconnect" class="secondary" disabled>断开</button></div>
+      <pre id="identity">尚未读取芯片信息</pre>
+      <p class="hint">使用 Chrome / Edge。USB 权限不足时需处理系统探针权限；Windows 需要 WebUSB 可访问的驱动。CAN 适配器不能用于首次 SWD 烧录。</p>
+    </section>
+    <section class="card">
+      <div class="card-heading"><h2>备份与烧录</h2><span id="stage" role="status">正在加载</span></div>
+      <p>先将 512 KiB 全片备份保存到本浏览器，再仅更新 Bootloader 页面。全片回读一致后复位，Boot 分区以外字节保持原值。</p>
+      <div class="actions"><button id="flash" disabled>备份并烧录 Bootloader</button><button id="backup" class="secondary" disabled>只读取备份</button></div>
+      <progress id="progress" max="1" value="0"></progress>
+      <p class="hint">烧录期间保持本页打开及 USB / 电源连接。Bootloader 不替代电机应用；旧固件若从 0x08000000 启动，烧录后仍需 OTA 匹配本布局的电机应用。</p>
+      <div class="actions"><button id="download-backup" class="secondary" disabled>导出最近全片备份</button><button id="download-log" class="secondary">导出操作日志</button><button id="resume" class="secondary" disabled>恢复运行（仅读取后）</button></div>
+      <p id="saved" class="hint">备份保存在本浏览器本站点内，请另行导出保存。</p>
+    </section>
+    <section class="card"><h2>操作日志</h2><pre id="log" aria-live="polite">网页加载中……</pre></section>
+  </main>
+</body>
+</html>

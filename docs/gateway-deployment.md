@@ -2,13 +2,15 @@
 
 ## 网页入口与使用
 
-打开 [Inntorque 测试总网关](https://inntorque.github.io/motor-test-bench/)，选择测功机、SG-6010HB 或 7010 上位机。三个 APP 的完整页面、控制执行器和设备通信代码均从 GitHub Pages 加载，在浏览器内运行。测试电脑不安装 Python、Node.js 或运行包，不启动本机 HTTP 服务，不请求 5181、5173、8892、8888 等回环端口。旧桌面启动脚本不再是公网网页的运行条件。
+打开 [Inntorque 测试总网关](https://inntorque.github.io/motor-test-bench/)，选择测功机、SG-6010HB、7010 上位机或独立 Bootloader APP。三个电机测试 APP 的完整页面、控制执行器和设备通信代码均从 GitHub Pages 加载，在浏览器内运行。测试电脑不安装 Python、Node.js 或运行包，不启动本机 HTTP 服务，不请求 5181、5173、8892、8888 等回环端口。旧桌面启动脚本不再是公网网页的运行条件。
 
 使用桌面版 Chrome 或 Edge，通过 HTTPS 打开。点击顶部“授权串口”，在浏览器弹窗选择 USB-CAN 串口或 USB-RS485；多台设备需分别授权。gs_usb 类适配器使用“授权 USB-CAN”。授权只取得访问许可，不打开设备、不发送配置、不启动输出。浏览器要求用户点击授权，网页无法跳过这一步。参见 [Web Serial 官方说明](https://developer.chrome.com/docs/capabilities/serial)和 [WebUSB 官方说明](https://developer.chrome.com/docs/capabilities/usb)。
 
 授权后，在现有连接配置中选择对应接口，再连接验证。CAN 适配器及节点在顶部选择，CAN 波特率沿用 500 kbit/s；测功机默认 MBP 节点 1，两个独立电机 APP 默认原协议节点 0。不要将同型号的两个电源串口互换；浏览器不会根据相同 VID/PID 猜测供电对象，刷新后需要重新选择授权接口。
 
 测功机的一键连接、两阶段加载、最大输出、专项测试、电机/驱动板名称和裸机/减速箱配置保持原界面和控制含义。万瑞达电机电源连接只读，开启前核对面板 24 V / 20 A 预设；制动电源保留原 SSJ 缩放和限幅。传感器保留 Modbus RTU 与 HEX6/HEX8 只读采集。浏览器不能访问任意原始 TCP 端口，本版本使用 USB-RS485，不提供旧 RTU 透明 TCP 网关选项。
+
+Bootloader APP 使用 J-Link / SWD 单独维护发布镜像，流程为识别、备份、仅更新 Boot 和全片回读，不运行电机测试。使用方法及验证边界见 [Bootloader 网页 APP](bootloader-app.md)。
 
 ## 适配器与权限
 
@@ -49,7 +51,7 @@ npm run test:gateway-icons
 python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-`dist/` 是测功机基础网页构建；`site/` 才是公网交付内容，包含总网关、三个完整 APP 和浏览器执行器。构建时注入独立运行入口与内容版本，清理已识别的旧输出目录，不包含本机服务安装包。旧网页 ZIP 作为原界面回归参照保留，不是运行依赖。`.runtime/`、`site/`、设备配置及现场数据均不提交。
+`dist/` 是测功机基础网页构建；`site/` 才是公网交付内容，包含总网关、三个电机测试 APP、Bootloader APP 和浏览器执行器。构建时注入独立运行入口与内容版本，清理已识别的旧输出目录，不包含本机服务安装包。旧网页 ZIP 作为原界面回归参照保留，不是运行依赖。`.runtime/`、`site/`、设备配置及现场数据均不提交。
 
 `motor-test-bench` 为开发分支，已校验版本同步到同一仓库 `main`；Pages 工作流只监听 `main`，运行构建、协议/控制/记录测试和隔离浏览器测试，再发布原网址。移除原 Windows 本机服务打包前置条件，避免网页发布继续依赖已取消的运行包。已有 Windows 历史工具发布流程不由 Pages 触发。
 

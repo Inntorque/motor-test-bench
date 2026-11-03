@@ -15,9 +15,14 @@ def config(root=ROOT):
     for app in data['apps']:
         if not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', app['id']):
             raise ValueError('Invalid application ID')
-        if app['id'] in ids or app['port'] in ports or not 1024 <= app['port'] <= 65535:
+        if app['id'] in ids:
+            raise ValueError('Duplicate application ID')
+        ids.add(app['id'])
+        if app.get('browserOnly'):
+            continue
+        if app['port'] in ports or not 1024 <= app['port'] <= 65535:
             raise ValueError('Duplicate application ID or invalid port')
-        ids.add(app['id']); ports.add(app['port'])
+        ports.add(app['port'])
     return data
 
 
@@ -26,6 +31,9 @@ def digest(data):
 
 
 def engine_files(app_id, root=ROOT):
+    if app_id == 'bootloader':
+        base = root / 'gateway/ui/bootloader'
+        return {path.relative_to(base).as_posix(): path.read_bytes() for path in sorted(base.rglob('*')) if path.is_file()}
     if app_id != 'dynamometer':
         base = root / 'gateway/hosts' / app_id
         return {path.relative_to(base).as_posix(): path.read_bytes()

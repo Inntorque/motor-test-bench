@@ -2,6 +2,14 @@
 
 仓库：[Inntorque/motor-test-bench](https://github.com/Inntorque/motor-test-bench)。机械链为 **电机 → 减速箱 → 动态扭矩传感器 → 磁粉制动器**。两台程控电源分别给驱动板和制动线圈供电，传感器测量减速箱输出端扭矩。公网网页通过浏览器 Web Serial / WebUSB 直接访问真实设备，不需要本机通信服务或运行包，不生成模拟连接或试验读数。
 
+## Bootloader 独立网页 APP（2026-11-03）
+
+测试总网关新增 **Bootloader** APP，使用 Chrome / Edge 的 WebUSB 直接连接 J-Link / SWD，不依赖本机服务或桌面脚本。发布当前 CAN_OTA 工程的 **N32G455REL7 Bootloader，10,592 B**；镜像、芯片型号/容量及分区校验通过后，先将 512 KiB 全片备份保存到浏览器，再仅更新 Boot 页面。全片回读一致后复位，保留 App A/B、元数据、用户参数及未覆盖字节；不进行整片擦除、读保护解除或电机应用升级。
+
+新 APP 的页面、设备执行器及镜像单独维护，三个电机测试 APP、SDK、CAN 协议和原固件源码不变。新增像素芯片图标，总网关四个入口在宽屏单行、窄屏两列居中。网页不自动连接、暂停、擦写或复位；软件模拟验收与实物烧录分开记录。接线、权限、备份导出及维护边界见 [Bootloader 网页 APP](docs/bootloader-app.md)。
+
+发布前通过 **JavaScript 99/99、Python 全量 260/260**、三个电机 APP 浏览器回归、新 APP 的 WebUSB / SWD 模拟烧录和备份导出/持久化检查，以及图标悬停和响应式回归。模拟确认仅 6 个 Boot 页面参与擦写、其他字节保持一致、存储失败不解锁 Flash、回读失败不复位；未连接实物探针或执行实机烧录。
+
 ## CANable2 浏览器串口适配（2026-11-03）
 
 补齐 CANable2 SLCAN 串口固件的浏览器直连。识别 `16d0:117e` 后使用“授权串口”，按原固件命令配置 500 kbit/s 并收发 Classic CAN；ZQWL、gs_usb、电机 SDK、协议和参数保持原样。授权提示区分 CANable2 串口固件与原生 USB 接口，连接失败清理不会关闭其他通道已占用的串口。

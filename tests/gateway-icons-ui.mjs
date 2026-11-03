@@ -101,7 +101,7 @@ try {
   assert.equal(info.contexts, 1);
   assert.deepEqual(info.sizes, [[iconSize,iconSize], [iconSize,iconSize], [iconSize,iconSize]]);
   assert.equal(info.pixels, true);
-  assert.deepEqual(info.names, ['测功机', 'SG-6010HB', '7010 上位机']);
+  assert.deepEqual(info.names, ['测功机', 'SG-6010HB', '7010 上位机', 'Bootloader']);
   const alignment = await checkCentered(page);
   const images = await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => c.toDataURL()));
   assert.equal(new Set(images).size, 3, 'shared renderer must preserve three distinct motors');

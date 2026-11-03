@@ -21,7 +21,7 @@ try {
     name.textContent = app.name;
     link.append(icon, name);
     navigation.append(link);
-    icons.push({id: app.id, element: icon});
+    if (app.iconMotion !== false) icons.push({id: app.id, element: icon});
   }
   import('./icon-motion.js?v=__ICON_VERSION__').then(module => module.animateIcons(icons)).catch(error => {
     console.warn('动态图标未启用，保留像素图片：', error);
