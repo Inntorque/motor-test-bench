@@ -103,6 +103,24 @@ try {
   const stopped = await control.evaluate(async () => (await fetch('/api/v1/motor-current/status')).json());assert.equal(stopped.snapshot.motor.output_on,false);assert.equal(stopped.run.stopConfirmed,true);
   results.push({id:'dynamometer',virtualSerialOnly:true,workerCanRoundTrip:true,connectNeverStarts:true,maximumIqReference:27,actualIq:26.8,stopConfirmed:true,subjectLocked:true,indexedDbRecord:true,detachedAnchorCsvExport:true});
   await direct.close();
+  const canable = await browser.newContext();
+  await canable.addInitScript({content:'window.__browserTestSlcan = true;\n' + fixture});
+  const canablePage = await canable.newPage();
+  canablePage.on('pageerror',error => errors.push(error.message));
+  canablePage.on('request',request => {if (new URL(request.url()).pathname.startsWith('/api/')) apiNetwork.push(request.url());});
+  await canablePage.goto(`${base}apps/dynamometer/`);
+  await canablePage.getByRole('status').filter({hasText:'网页已就绪'}).first().waitFor();
+  await canablePage.getByRole('button',{name:'授权串口',exact:true}).click();
+  assert.equal(await canablePage.evaluate(() => window.__serialFixture.writeCount),0);
+  const canableState = await canablePage.evaluate(async () => {
+    const health = await (await fetch('/api/v1/health')).json();
+    const response = await fetch('/api/v1/motor-current/connect',{method:'POST',headers:{'Content-Type':'application/json','X-MotorBench-Token':health.token,'X-Workbench-Client':'canable-fixture-readonly-0001','X-Control-Epoch':String(health.safety.epoch)},body:'{}'});
+    return {ok:response.ok,data:await response.json(),ports:await (await fetch('/api/v1/ports')).json(),commands:window.__serialFixture.board.commands.map(command => command.opcode)};
+  });
+  assert.equal(canableState.ok,true,JSON.stringify(canableState.data));assert.equal(canableState.data.connected,true);
+  assert.equal(canableState.ports.ports[0].canInterface,'slcan');assert.equal(canableState.commands.some(op => [4,5,6,7].includes(op)),false);
+  results.push({id:'dynamometer',adapter:'CANable2/SLCAN',virtualSerialOnly:true,readonlyConnected:true,authorizationNeverOpens:true});
+  await canable.close();
   assert.deepEqual(errors,[]);assert.deepEqual(apiNetwork,[]);assert.deepEqual(serviceNetwork,[]);
   console.log(JSON.stringify({passed:true,apps:results,pageErrors:errors,httpApiRequests:apiNetwork,localhostServiceRequests:serviceNetwork},null,2));
 } finally {await browser?.close();await new Promise(done => server.close(done));}

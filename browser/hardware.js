@@ -1,4 +1,5 @@
 import {bytes, concat, pack, SerialQueue, view} from './bytes.js';
+import {canInterface} from './transports.js';
 export const GS_FILTERS = [
   {vendorId:0x1d50,productId:0x606f},{vendorId:0x1209,productId:0x2323},
   {vendorId:0x1cd2,productId:0x606f},{vendorId:0x16d0,productId:0x10b8},{vendorId:0x1209,productId:0xca01},
@@ -51,7 +52,8 @@ export class DeviceAccess {
   ports() {
     return [...this.devices].map(([port,entry]) => {
       const info = entry.kind === 'serial' ? entry.device.getInfo() : {usbVendorId:entry.device.vendorId,usbProductId:entry.device.productId};
-      return {port,description:`${entry.name} · ${[info.usbVendorId,info.usbProductId].map(id => (id || 0).toString(16).padStart(4,'0')).join(':')}`,kind:entry.kind,vid:info.usbVendorId,pid:info.usbProductId,opened:!!entry.open};
+      const device = {port,kind:entry.kind,vid:info.usbVendorId,pid:info.usbProductId,opened:!!entry.open}, transport = canInterface(device);
+      return {...device,canInterface:transport,description:`${transport === 'slcan' ? 'CANable2 / SLCAN' : entry.name} · ${[device.vid,device.pid].map(id => (id || 0).toString(16).padStart(4,'0')).join(':')}`};
     });
   }
   async call(method, args) {

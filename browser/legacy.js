@@ -1,5 +1,5 @@
 import metadata from '../.runtime/browser-native-data/legacy.json' with {type:'json'};
-import {CanTransport} from './transports.js';
+import {CanTransport,canInterface} from './transports.js';
 import {bytes,concat,finite,now,pack,SerialQueue,sleep,utc,view} from './bytes.js';
 import {FrameBuffer} from '../web/src/frameBuffer.js';
 import {LegacyRecording} from './legacy-recording.js';
@@ -87,12 +87,13 @@ export class LegacyApp {
     if (this.data.motor.output_on) throw new Error('请先停止电机');
     if (this.bus && !this.bus.closed) await this.bus.close();
     const config = await this.io.call('can-config',{}), ports = await this.io.call('ports',{});
-    const port = ports.find(port => port.port === config.device) || ports.find(port => port.vid === 0x3562) || ports.find(port => port.kind === 'usb');
+    const port = ports.find(port => port.port === config.device) || ports.find(canInterface);
     if (!port) throw new Error('请先授权 USB-CAN 适配器');
+    if (!canInterface(port)) throw new Error('所选接口不是已支持的 CAN 适配器');
     this.node = finite(config.node ?? 0,'节点',0,63);this.lastIdentityAt = 0;
     if (!Number.isInteger(this.node)) throw new Error('CAN 节点必须为整数');
     this.bus = new CanTransport(this.io,(id,data) => this.receive(id,data));
-    await this.bus.open({device:port.port,interface:port.kind === 'usb' ? 'gs_usb' : 'zqwl',baud:500000});
+    await this.bus.open({device:port.port,interface:canInterface(port),baud:500000});
     await this.command(Uint8Array.of(1),[0x83,0x82],{ota:true});
     await this.command(Uint8Array.of(3),[0x84,0x82]); await this.poll(); return {ok:true,channel:port.description};
   }

@@ -1,6 +1,33 @@
 import {bytes, concat, crc16, hex, now, SerialQueue, sleep, view} from './bytes.js';
 const arbitrationCodes = new Map([1000000,800000,500000,400000,250000,200000,125000,100000,50000,40000,25000,20000,15000,10000,5000].map((rate, index) => [rate, index]));
 const dataCodes = new Map([5000000,4000000,2000000,1000000,800000,500000,400000,250000,200000,125000,100000].map((rate, index) => [rate, index]));
+const slcanRates = new Map([10000,20000,50000,100000,125000,250000,500000,750000,1000000,83300].map((rate,index) => [rate,index]));
+export function canInterface(port) {
+  return port.kind === 'usb' ? 'gs_usb' : port.vid === 0x16d0 && port.pid === 0x117e ? 'slcan' : port.vid === 0x3562 ? 'zqwl' : null;
+}
+export function slcanFrame(id,data) {
+  if (!Number.isInteger(id) || id < 0 || id > 0x7ff || data.length > 8) throw new Error('Classic CAN standard frame required');
+  return new TextEncoder().encode(`t${id.toString(16).padStart(3,'0')}${data.length}${hex(data)}\r`);
+}
+export class SlcanDecoder {
+  buffer = ''; version = ''; rejected = 0; dropped = 0;
+  constructor(receive) {this.receive = receive;}
+  push(chunk) {
+    const text = new TextDecoder().decode(chunk);this.rejected += text.split('\x07').length - 1;
+    this.buffer += text.replaceAll('\x07','');
+    const lines = this.buffer.split(/[\r\n]/);this.buffer = lines.pop();
+    if (this.buffer.length > 512) {this.buffer = '';this.dropped++;}
+    for (const line of lines) {
+      if (/canable2/i.test(line) || /^V[\da-f]{4}$/i.test(line)) {this.version = line;continue;}
+      if (!line.startsWith('t')) continue;
+      const match = /^t([\da-f]{3})([0-8])([\da-f]*?)$/i.exec(line);
+      if (!match) {this.dropped++;continue;}
+      const id = parseInt(match[1],16),length = Number(match[2]),data = match[3];
+      if (id > 0x7ff || data.length !== length * 2 && data.length !== length * 2 + 4) {this.dropped++;continue;}
+      this.receive(id,Uint8Array.from({length},(_,index) => parseInt(data.slice(index * 2,index * 2 + 2),16)));
+    }
+  }
+}
 export function zqwlConfig(func, data) {
   const body = new Uint8Array(16); body.set(data.slice(0,16));
   return concat(Uint8Array.of(0x49,0x3b,func,0x57), body, Uint8Array.of(0x45,0x2e));
@@ -37,21 +64,34 @@ export class ZqwlDecoder {
 }
 export class CanTransport {
   queue = new SerialQueue();
-  constructor(io, receive) { this.io = io; this.receive = receive; this.closed = true; }
+  constructor(io, receive) { this.io = io; this.receive = receive; this.closed = true;this.owned = false; }
   async open(config) {
     this.device = config.device; this.interface = config.interface || 'zqwl';
     const bitrate = Number(config.bitrate || config.baud || 500000);
-    if (!arbitrationCodes.has(bitrate)) throw new Error('Unsupported CAN bitrate');
+    if (!(this.interface === 'slcan' ? slcanRates : arbitrationCodes).has(bitrate)) throw new Error('Unsupported CAN bitrate');
     if (this.interface === 'gs_usb') {
       await this.io.call('usb-open', {device:this.device, bitrate});
+      this.owned = true;
       this.remove = this.io.subscribe(this.device, frame => this.receive(frame.id, bytes(frame.data)));
+    } else if (this.interface === 'slcan') {
+      this.decoder = new SlcanDecoder(this.receive);
+      this.remove = this.io.subscribe(this.device,data => this.decoder.push(bytes(data)));
+      try {
+        await this.io.call('serial-open',{device:this.device,baudRate:115200,dataBits:8,stopBits:1,parity:'none'});
+        this.owned = true;
+        const command = value => this.io.call('serial-write',{device:this.device,data:new TextEncoder().encode(value + '\r')});
+        await command('V');const deadline = now() + 1;
+        while (!this.decoder.version && now() < deadline) await sleep(10);
+        if (!this.decoder.version) throw new Error('CANable2/SLCAN 版本查询没有应答，请核对串口');
+        for (const value of ['C',`S${slcanRates.get(bitrate)}`,'M0','O']) {await command(value);await sleep(10);}
+        if (this.decoder.rejected) throw new Error('CANable2 拒绝适配器配置');
+      } catch (error) {await this.close();throw error;}
     } else {
       this.decoder = new ZqwlDecoder(this.receive);
       this.remove = this.io.subscribe(this.device, data => this.decoder.push(bytes(data)));
-      let opened = false;
       try {
         await this.io.call('serial-open', {device:this.device, baudRate:3000000, dataBits:8, stopBits:1, parity:'none'});
-        opened = true;
+        this.owned = true;
         const code = (arbitrationCodes.get(bitrate) << 4) | (dataCodes.get(bitrate) || 0);
         await this.io.call('serial-write', {device:this.device, data:zqwlConfig(0x42,[0,0,code])});
         await this.io.call('serial-write', {device:this.device, data:zqwlConfig(0x44,[1,0,1,0])});
@@ -59,7 +99,7 @@ export class CanTransport {
         while (this.decoder.heartbeats < 2 && now() < deadline) await sleep(20);
         await sleep(150);
         if (!this.decoder.heartbeats) throw new Error('ZQWL 适配器没有心跳，请核对所选串口');
-      } catch (error) { this.remove(); if (opened) await this.io.call('serial-close',{device:this.device}); throw error; }
+      } catch (error) {await this.close();throw error;}
     }
     this.closed = false;
   }
@@ -67,13 +107,15 @@ export class CanTransport {
     if (this.closed) return Promise.reject(new Error('CAN 未连接'));
     return this.queue.run(async () => {
       if (this.interface === 'gs_usb') return this.io.call('usb-send',{device:this.device,id,data});
-      await this.io.call('serial-write',{device:this.device,data:zqwlFrame(id,data)});
+      await this.io.call('serial-write',{device:this.device,data:this.interface === 'slcan' ? slcanFrame(id,data) : zqwlFrame(id,data)});
       await sleep(.3);
     });
   }
   async close() {
-    this.closed = true; this.remove?.();
-    if (this.device) await this.io.call(this.interface === 'gs_usb' ? 'usb-close' : 'serial-close',{device:this.device});
+    this.closed = true;this.remove?.();
+    if (!this.owned) return;
+    try {if (this.interface === 'slcan') await this.io.call('serial-write',{device:this.device,data:new TextEncoder().encode('C\r')});}
+    finally {await this.io.call(this.interface === 'gs_usb' ? 'usb-close' : 'serial-close',{device:this.device});this.owned = false;}
   }
 }
 export class ModbusRtu {

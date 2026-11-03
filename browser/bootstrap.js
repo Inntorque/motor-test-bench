@@ -15,6 +15,8 @@ const css = document.createElement('style');
 css.textContent = '#inntorque-browser-access{position:relative;z-index:20;display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:8px 16px;background:#fff;border-bottom:1px solid #e1e8ed;color:#425466;font:13px system-ui,sans-serif}#inntorque-browser-access button,#inntorque-browser-access select,#inntorque-browser-access input{font:inherit;color:inherit;padding:5px 8px;border:1px solid #cfd9e2;border-radius:6px;background:#fff}#inntorque-browser-access a{color:#436b82;text-decoration:none}#inntorque-browser-access [role=status]{margin-left:auto;font-size:12px}';
 document.head.append(css);
 const status = bar.querySelector('[role=status]'), select = bar.querySelector('select'), nodeInput = bar.querySelector('input'); nodeInput.value = node;
+bar.querySelector('[data-serial]').title = 'CANable2（SLCAN）、ZQWL 与 USB-RS485 均使用串口授权';
+bar.querySelector('[data-usb]').title = '仅 gs_usb / candleLight；CANable2 串口固件请使用“授权串口”';
 select.onchange = () => {canDevice = select.value;}; nodeInput.onchange = () => {node = Number(nodeInput.value);};
 const access = new DeviceAccess((message,transfer) => worker.postMessage(message,transfer || []),() => {
   const previous = select.value;
@@ -24,8 +26,8 @@ const access = new DeviceAccess((message,transfer) => worker.postMessage(message
 });
 for (const [selector,authorize] of [['[data-serial]',() => access.authorizeSerial()],['[data-usb]',() => access.authorizeUsb()]]) {
   bar.querySelector(selector).onclick = async () => {
-    try {const id = await authorize();status.textContent = '已授权，请在设备配置中选择对应接口并连接';if (selector === '[data-usb]' || access.ports().find(port => port.port === id)?.vid === 0x3562) {canDevice = id;select.value = id;}}
-    catch (error) {status.textContent = error.name === 'NotFoundError' ? '已取消设备选择' : error.message;}
+    try {const id = await authorize();status.textContent = '已授权，请选择对应接口并点击连接/重连';if (access.ports().find(port => port.port === id)?.canInterface) {canDevice = id;select.value = id;}}
+    catch (error) {status.textContent = error.name === 'NotFoundError' ? '未选择设备；CANable2 / ZQWL 请使用“授权串口”' : error.message;}
   };
 }
 const mount = () => document.body.prepend(bar);

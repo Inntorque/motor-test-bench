@@ -12,7 +12,7 @@
 
 ## 适配器与权限
 
-支持现有 ZQWL USB 串口 CAN（串口 3 Mbit/s）和 gs_usb USB-CAN，均发送原有 Classic CAN 帧。浏览器直连并不免除操作系统设备驱动、串口权限或 USB 接口权限：Ubuntu 用户仍需具备串口/USB 访问权限；Windows 的原生 gs_usb 接口需可由 WebUSB/WinUSB 访问。系统已占用接口、其他 APP 已打开设备或接口驱动不匹配时，浏览器会返回实际打开错误，不接管其他程序。
+支持 ZQWL USB 串口 CAN（串口 3 Mbit/s）、CANable2 的 SLCAN 串口固件（VID:PID `16d0:117e`、串口 115200 / 8N1）和 gs_usb USB-CAN，均发送原有 Classic CAN 帧。CANable2 与 ZQWL 均点击“授权串口”，CANable2 识别后自动走 SLCAN，不使用 gs_usb 的 USB 筛选。CAN 总线仍为 500 kbit/s；串口数字不代表 CAN 波特率。CANable2 原固件没有配置 ACK，软件读取适配器版本后配置通道，再以板端真实应答判断设备连接，不能将串口打开当成板端连接成功。命令依据 [CANable2 原固件说明](https://github.com/normaldotcom/canable2-fw#supported-commands)。浏览器直连并不免除操作系统设备驱动、串口权限或 USB 接口权限：Ubuntu 用户仍需具备串口/USB 访问权限；Windows 的原生 gs_usb 接口需可由 WebUSB/WinUSB 访问。系统已占用接口、其他 APP 已打开设备或接口驱动不匹配时，浏览器会返回实际打开错误，不接管其他程序。
 
 三个 APP 不自动打开设备。切换 APP 前，先停止、确认设备输出关闭并断开当前连接。两个独立电机 APP 的“断开设备”会先发送原 STOP、读取最新状态确认，再释放 USB-CAN；无需关闭任何本机服务。某些旧固件只支持独立电机 APP 的原私有协议，不能把网页打开当成 MBP/1 固件兼容。测功机继续依据 MBP/1 能力声明接入。
 

@@ -1,5 +1,6 @@
 import {MotorDevice} from './motor.js';
 import {PowerChannel,TorqueSensor} from './rs485.js';
+import {canInterface} from './transports.js';
 import {CurrentMotor,BrakeCurrent,CoupledCurrent} from './control.js';
 import {TestSubjects,Recordings} from './storage.js';
 import {Specialized} from './specialized.js';
@@ -137,9 +138,10 @@ export class Bench {
   }
   async motorConfig(data = {}) {
     const ports = await this.io.call('ports',{}), selected = await this.io.call('can-config',{});
-    const port = ports.find(port => port.port === (data.device || selected.device)) || ports.find(port => port.vid === 0x3562) || ports.find(port => port.kind === 'usb');
+    const port = ports.find(port => port.port === (data.device || selected.device)) || ports.find(canInterface);
     if (!port) throw new Error('请先授权 USB-CAN 适配器');
-    return {...data,device:port.port,interface:port.kind === 'usb' ? 'gs_usb' : 'zqwl',baud:500000,node:Number(data.node ?? selected.node ?? 1)};
+    if (!canInterface(port)) throw new Error('所选接口不是已支持的 CAN 适配器');
+    return {...data,device:port.port,interface:canInterface(port),baud:500000,node:Number(data.node ?? selected.node ?? 1)};
   }
   async connectAll(hints) {
     if (this.busy() || this.connection.running) throw new Error('试验或记录中不重新扫描');
