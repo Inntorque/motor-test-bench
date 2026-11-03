@@ -1,3 +1,6 @@
+import {installStandby} from './standby/entry.ts';
+
+installStandby();
 const navigation = document.querySelector<HTMLElement>('.apps')!;
 try {
   const response = await fetch('./catalog.json', {cache: 'no-store'});

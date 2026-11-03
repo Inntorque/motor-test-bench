@@ -10,11 +10,25 @@
   <script type="module" src="./home.ts"></script>
 </head>
 <body>
+  <button class="standby-toggle" id="enter-standby" type="button" aria-haspopup="dialog" aria-label="进入宇宙待机模式">
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M7 1h2v4h2v2h4v2h-4v2H9v4H7v-4H5V9H1V7h4V5h2z"/></svg>
+    <span>待机模式</span>
+  </button>
   <header class="brand">
     <img src="./inntorque-logo.png" width="998" height="308" alt="Inntorque LOGO">
   </header>
   <main class="launcher" aria-label="Inntorque 测试总网关">
     <nav class="apps" aria-label="选择上位机"></nav>
   </main>
+  <dialog class="cosmic-standby" id="cosmic-standby" aria-label="宇宙像素待机模式">
+    <canvas class="cosmic-canvas" aria-hidden="true"></canvas>
+    <div class="cosmic-header">
+      <img src="./inntorque-logo.png" width="998" height="308" alt="Inntorque LOGO">
+      <button id="leave-standby" type="button" aria-label="退出待机模式，返回总网关">返回总网关 <kbd>Esc</kbd></button>
+    </div>
+    <div class="cosmic-caption" aria-hidden="true"><span>INNTORQUE / OBSERVATORY</span><span class="cosmic-coordinate">01 — COSMIC FLOW</span></div>
+    <p class="cosmic-message" role="status"></p>
+    <footer class="cosmic-footer"><span>宇宙待机</span><span>移动指针探索 · Esc 返回</span></footer>
+  </dialog>
 </body>
 </html>

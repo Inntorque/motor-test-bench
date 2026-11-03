@@ -9,6 +9,7 @@
   },
   "include": [
     "gateway/ui/bootloader/**/*.ts",
+    "gateway/standby/**/*.ts",
     "browser/bytes.ts",
     "browser/types.ts",
     "browser/messages.ts",

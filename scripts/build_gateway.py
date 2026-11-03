@@ -49,6 +49,9 @@ def build(destination):
     shutil.copy2(icon_bundle, destination / 'icon-motion.js')
     shutil.copytree(source / 'icons', destination / 'icons', dirs_exist_ok=True)
     home_bundle = ROOT / '.runtime/gateway-home-bundle/home.js'
+    for chunk in home_bundle.parent.iterdir():
+        if chunk.is_file() and chunk.name != 'home.js':
+            shutil.copy2(chunk, destination / chunk.name)
     version = digest(icon_bundle.read_bytes() + home_bundle.read_bytes()
                      + (source / 'styles.css').read_bytes()
                      + b''.join(path.read_bytes() for path in sorted((source / 'icons').glob('*.svg'))))[:12]

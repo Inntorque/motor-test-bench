@@ -33,6 +33,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
       - run: npm run test:gateway-icons
+      - run: node tests/gateway-standby-ui.mjs
       - run: node tests/test-setups-ui.mjs
       - run: node tests/maximum-ui.mjs
       - run: node tests/specialized-v2-ui.mjs

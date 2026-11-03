@@ -10,11 +10,12 @@ function animateBootIcon({element}: IconEntry) {
   element.append(svg);element.classList.add('is-animated');
   const app = element.parentElement!,reduced = matchMedia('(prefers-reduced-motion: reduce)');
   let visible = false;
-  const update = () => element.classList.toggle('is-flowing',visible && !document.hidden && app.matches(':hover') && !reduced.matches);
+  const update = () => element.classList.toggle('is-flowing',visible && !document.hidden && !document.documentElement.hasAttribute('data-cosmic-standby') && app.matches(':hover') && !reduced.matches);
   const observer = new IntersectionObserver(([entry]) => {visible = entry.isIntersecting;update();});
   observer.observe(element);
   app.addEventListener('pointerenter',update);app.addEventListener('pointerleave',update);
   document.addEventListener('visibilitychange',update);reduced.addEventListener('change',update);
+  document.addEventListener('cosmic-standby-change',update);
   window.addEventListener('pagehide',() => element.classList.remove('is-flowing'));
   window.addEventListener('pageshow',update);
 }
@@ -67,7 +68,7 @@ export function animateIcons(entries: IconEntry[]) {
 
   function update() {
     stop();
-    if (!document.hidden && icons.some(icon => icon.visible && (!icon.drawn || moving(icon)))) frame = requestAnimationFrame(draw);
+    if (!document.hidden && !document.documentElement.hasAttribute('data-cosmic-standby') && icons.some(icon => icon.visible && (!icon.drawn || moving(icon)))) frame = requestAnimationFrame(draw);
   }
 
   const observer = new IntersectionObserver(entries => {
@@ -80,6 +81,7 @@ export function animateIcons(entries: IconEntry[]) {
     icon.app.addEventListener('pointerleave', update);
   }
   document.addEventListener('visibilitychange', update);
+  document.addEventListener('cosmic-standby-change', update);
   reduced.addEventListener('change', update);
   window.addEventListener('pagehide', stop);
   window.addEventListener('pageshow', update);
