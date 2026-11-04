@@ -13,10 +13,11 @@
     <header><a href="../../">← 返回总网关</a><span>INNTORQUE / 固件维护</span></header>
     <section class="title"><h1>Bootloader</h1><p>N32G455REL7 · J-Link / SWD · 浏览器直接烧录</p></section>
     <section class="card">
-      <div class="card-heading"><h2>当前发布镜像</h2><span id="image-state">正在核对镜像</span></div>
-      <dl><div><dt>版本日期</dt><dd id="release">—</dd></div><div><dt>镜像大小</dt><dd id="image-size">—</dd></div><div><dt>烧录范围</dt><dd>仅 Bootloader · 32 KiB 分区</dd></div></dl>
+      <div class="card-heading"><h2 id="image-title">当前发布镜像</h2><span id="image-state">正在核对镜像</span></div>
+      <dl><div><dt id="release-label">版本日期</dt><dd id="release">—</dd></div><div><dt>镜像大小</dt><dd id="image-size">—</dd></div><div><dt>烧录范围</dt><dd>仅 Bootloader · 32 KiB 分区</dd></div></dl>
       <p class="digest">SHA-256 <code id="image-hash">—</code></p>
-      <p class="links"><a href="./firmware/boot.bin" download>下载 BIN</a><a href="./firmware/boot.hex" download>下载 HEX</a><a href="./guide/">操作说明</a></p>
+      <div class="actions links"><button id="choose-image" class="secondary">选择外部镜像</button><button id="default-image" class="secondary" disabled>恢复默认镜像</button><input id="image-file" type="file" accept=".bin,.hex" hidden><a href="./firmware/boot.bin" download>下载默认 BIN</a><a href="./firmware/boot.hex" download>下载默认 HEX</a><a href="./guide/">操作说明</a></div>
+      <p id="image-detail" class="hint" role="status">可选择本机 BIN / HEX 临时使用，不上传服务器；刷新后恢复默认镜像。</p>
     </section>
     <section class="card">
       <div class="card-heading"><h2>设备</h2><span id="device-state">不连接</span></div>

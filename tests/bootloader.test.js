@@ -5,9 +5,68 @@ import {JLink} from '../gateway/ui/bootloader/jlink.ts';
 import {Swd,frames,decode,put,request} from '../gateway/ui/bootloader/swd.ts';
 import {BASE,BOOT_SIZE,FLASH_SIZE,Bootloader,identify,identity,replacement,validateImage,sha256} from '../gateway/ui/bootloader/n32.ts';
 import {VirtualJLink} from './fixtures/jlink.js';
+import {externalImage,parseHex} from '../gateway/ui/bootloader/image.ts';
 const firmware = new URL('../gateway/ui/bootloader/public/firmware/',import.meta.url);
 const image = new Uint8Array(await readFile(new URL('boot.bin',firmware))),manifest = JSON.parse(await readFile(new URL('manifest.json',firmware),'utf8'));
 async function target() {const device = new VirtualJLink(),probe = new JLink(device);await probe.open();const core = new Swd(probe);await core.init();return {device,probe,core};}
+function hexRecord(type,address,data = []) {
+  const bytes = [data.length,address >>> 8,address & 255,type,...data];
+  bytes.push(-bytes.reduce((sum,value) => sum + value,0) & 255);
+  return ':' + bytes.map(value => value.toString(16).padStart(2,'0')).join('');
+}
+const upperHex = hexRecord(4,0,[8,0]),endHex = hexRecord(1,0);
+
+test('external BIN is independent of the published hash and retains source identity',async () => {
+  const file = image.slice();file[256] ^= 1;new DataView(file.buffer).setUint32(0,0x20023000,true);
+  const selected = await externalImage('本机镜像.BIN',file);
+  assert.deepEqual(selected.image,file);assert.notEqual(selected.manifest.sha256,manifest.sha256);
+  assert.deepEqual(selected.manifest.source,{name:'本机镜像.BIN',format:'bin',sha256:await sha256(file)});
+  await validateImage(selected.image,selected.manifest);
+  const unaligned = file.slice(0,-1),padded = await externalImage('tail.bin',unaligned);
+  assert.equal(padded.image.length,file.length);assert.equal(padded.image.at(-1),255);
+  assert.deepEqual(padded.image.subarray(0,-1),unaligned);
+});
+
+test('external HEX uses absolute addresses, checksums and erased gap/word padding',async () => {
+  const file = new Uint8Array(await readFile(new URL('boot.hex',firmware))),selected = await externalImage('external.hex',file);
+  assert.deepEqual(selected.image,image);assert.equal(selected.manifest.hexSha256,manifest.hexSha256);
+  const vectors = image.slice(0,8);new DataView(vectors.buffer).setUint32(4,BASE + 257,true);
+  const sparse = [upperHex,hexRecord(0,0,[...vectors]),hexRecord(0,260,[7]),endHex].join('\r\n');
+  const decoded = parseHex(sparse);
+  assert.equal(decoded.length,264);assert.deepEqual(decoded.subarray(0,8),vectors);
+  assert.ok(decoded.slice(8,260).every(value => value === 255));assert.equal(decoded[260],7);assert.equal(decoded[263],255);
+  await externalImage('sparse.hex',new TextEncoder().encode(sparse));
+  const edge = parseHex([upperHex,hexRecord(0,0,[...image.slice(0,8)]),hexRecord(0,BOOT_SIZE - 1,[7]),endHex].join('\n'));
+  assert.equal(edge.length,BOOT_SIZE);assert.equal(edge.at(-1),7);
+});
+
+test('external files reject bad formats, vectors, oversized images and unsafe HEX records',async () => {
+  await assert.rejects(externalImage('wrong.elf',image),/BIN 或 HEX/);
+  for (const length of [0,255,BOOT_SIZE + 1]) await assert.rejects(externalImage('bad.bin',new Uint8Array(length)),/长度/);
+  await assert.rejects(externalImage('huge.hex',new Uint8Array(1024 * 1024 + 1)),/过大/);
+  for (const stack of [0x20000000,0x20024008,0x20023004,0x08001000]) {
+    const bad = image.slice();new DataView(bad.buffer).setUint32(0,stack,true);
+    await assert.rejects(externalImage('stack.bin',bad),/栈顶/);
+  }
+  for (const reset of [BASE + image.length + 1,BASE,0x08008001]) {
+    const bad = image.slice();new DataView(bad.buffer).setUint32(4,reset,true);
+    await assert.rejects(externalImage('reset.bin',bad),/复位向量/);
+  }
+  const vectors = hexRecord(0,0,[...image.slice(0,8)]);
+  const failures = [
+    [upperHex,vectors],
+    [upperHex,hexRecord(0,8,[0]),endHex],
+    [upperHex,vectors,endHex,vectors],
+    [upperHex,vectors,hexRecord(0,0,[255]),endHex],
+    [upperHex,vectors,hexRecord(0,BOOT_SIZE,[0]),endHex],
+    [hexRecord(4,0,[8,1]),vectors,endHex],
+    [upperHex,vectors.slice(0,-2) + '00',endHex],
+    [upperHex,':01000000000000',endHex],
+    [upperHex,hexRecord(4,0,[0]),endHex],
+    [upperHex,':gg',endHex],
+  ];
+  for (const records of failures) assert.throws(() => parseHex(records.join('\n')),/HEX/);
+});
 
 test('published Bootloader has exact digest, vectors and bounded replacement',async () => {
   await validateImage(image,manifest);

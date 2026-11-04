@@ -16,12 +16,13 @@ export function identity(cpuid: number,device: number): ChipIdentity {
 }
 export async function validateImage(image: DataBytes,manifest: BootManifest) {
   if (manifest.schema !== 1 || manifest.target !== 'N32G455REL7' || manifest.base !== BASE || manifest.bootSize !== BOOT_SIZE ||
-      manifest.flashSize !== FLASH_SIZE || manifest.pageSize !== PAGE || manifest.stack !== 0x20024000)
-    throw new Error('发布清单的目标芯片或分区不符');
+      manifest.flashSize !== FLASH_SIZE || manifest.pageSize !== PAGE || manifest.stack <= 0x20000000 ||
+      manifest.stack > 0x20024000 || manifest.stack % 8)
+    throw new Error('镜像信息的目标芯片、分区或栈顶不符');
   if (image.length < 256 || image.length > BOOT_SIZE || image.length !== manifest.bytes || image.length % 4)
     throw new Error('Bootloader 镜像长度无效');
   const vectors = new DataView(image.buffer,image.byteOffset,image.byteLength),reset = vectors.getUint32(4,true);
-  if (vectors.getUint32(0,true) !== 0x20024000 || !(reset & 1) || reset < BASE || reset >= BASE + image.length)
+  if (vectors.getUint32(0,true) !== manifest.stack || !(reset & 1) || reset < BASE || reset >= BASE + image.length)
     throw new Error('Bootloader 栈顶或复位向量无效');
   if (await sha256(image) !== manifest.sha256) throw new Error('Bootloader SHA-256 不符；请重新加载网页');
 }
@@ -79,7 +80,7 @@ export class Bootloader {
     await this.core.write32(CONTROL,control | 0x80);
   }
   async flash(image: DataBytes,manifest: BootManifest,persist: (record: BackupRecord) => Promise<void>) {
-    this.update('校验发布镜像',0);
+    this.update('校验待烧录镜像',0);
     await validateImage(image,manifest);
     const {chip,before} = await this.backup(value => this.update('读取全片备份',0.02 + value * 0.2)),{expected,pages} = replacement(before,image);
     const record: BackupRecord = {id:new Date().toISOString(),chip,manifest,before,backupSha256:await sha256(before),stage:'backup',programmed:false,verified:false};
@@ -98,7 +99,7 @@ export class Bootloader {
     }
   }
   async flashDirect(image: DataBytes,manifest: BootManifest) {
-    this.update('校验发布镜像',0);await validateImage(image,manifest);
+    this.update('校验待烧录镜像',0);await validateImage(image,manifest);
     this.update('识别芯片并暂停',0.01);const chip = await identify(this.core);await this.core.halt();
     const expected = new Uint8Array(BOOT_SIZE).fill(255);expected.set(image);
     const pages = Array.from({length:BOOT_SIZE / PAGE},(_,index) => BASE + index * PAGE);

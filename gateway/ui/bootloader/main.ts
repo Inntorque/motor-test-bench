@@ -2,6 +2,7 @@ import type {DataBytes, BootManifest, BackupRecord} from './types.ts';
 import type {Swd} from './swd.ts';
 import {Connection} from './connection.ts';
 import {Bootloader,validateImage,sha256} from './n32.ts';
+import {externalImage} from './image.ts';
 
 interface Elements {
   'connection-mode': HTMLSelectElement; 'choose-device': HTMLButtonElement;
@@ -10,11 +11,14 @@ interface Elements {
   progress: HTMLProgressElement; 'progress-label': HTMLElement; stage: HTMLElement;
   'device-state': HTMLElement; 'connection-detail': HTMLElement; identity: HTMLElement;
   log: HTMLElement; saved: HTMLElement; release: HTMLElement; 'image-size': HTMLElement;
-  'image-hash': HTMLElement; 'image-state': HTMLElement;
+  'image-hash': HTMLElement; 'image-state': HTMLElement; 'image-title': HTMLElement;
+  'release-label': HTMLElement; 'image-detail': HTMLElement; 'image-file': HTMLInputElement;
+  'choose-image': HTMLButtonElement; 'default-image': HTMLButtonElement;
 }
 const $ = <K extends keyof Elements>(id: K) => document.getElementById(id) as Elements[K];
 const events: {time: string; message: string}[] = [];
 let core: Swd | undefined,engine: Bootloader | undefined,manifest: BootManifest,image: DataBytes,lastRecord: BackupRecord | undefined;
+let published: {image: DataBytes; manifest: BootManifest} | undefined;
 let busy = false,halted = false,choosing = false,choice = 0;
 let connectionState = 'off',lastConnectionError = '';
 const connection = new Connection(navigator.usb,state => {
@@ -49,11 +53,33 @@ function update(message: string,value?: number) {
   }
 }
 function buttons() {
+  $('choose-image').disabled = $('image-file').disabled = busy;
+  $('default-image').disabled = busy || !!image && !manifest.source;
   $('connection-mode').disabled = busy;
   $('choose-device').disabled = busy || choosing || $('connection-mode').value !== 'on';
   $('flash').disabled = $('flash-direct').disabled = $('backup').disabled = busy || !core || !image || halted;
   $('resume').disabled = busy || !core || !halted || !!engine?.started;
   $('download-backup').disabled = !lastRecord?.before;
+}
+function selectImage(selected: {image: DataBytes; manifest: BootManifest}) {
+  ({image,manifest} = selected);
+  const source = manifest.source;
+  $('image-title').textContent = source ? '当前外部镜像' : '当前发布镜像';
+  $('release-label').textContent = source ? '文件名称' : '版本日期';
+  $('release').textContent = source?.name || manifest.release;
+  $('image-size').textContent = `${image.length.toLocaleString()} B`;$('image-hash').textContent = manifest.sha256;
+  $('image-state').textContent = source ? '外部镜像格式与向量校验通过' : '镜像校验通过';
+  $('image-detail').dataset.error = 'false';
+  $('image-detail').textContent = source ? `${source.format.toUpperCase()} · 仅当前页面临时使用，不上传服务器；内容由所选文件提供，等待手动烧录。` : '可选择本机 BIN / HEX 临时使用，不上传服务器；刷新后恢复默认镜像。';
+}
+async function loadPublished() {
+  if (!published) {
+    const [metadata,binary] = await Promise.all([fetch('./firmware/manifest.json',{cache:'no-store'}),fetch('./firmware/boot.bin',{cache:'no-store'})]);
+    if (!metadata.ok || !binary.ok) throw new Error('发布镜像加载失败');
+    const data = new Uint8Array(await binary.arrayBuffer()),description = await metadata.json();await validateImage(data,description);
+    published = {image:data,manifest:description};
+  }
+  selectImage(published);
 }
 async function database(): Promise<IDBDatabase> {
   return new Promise((resolve,reject) => {
@@ -106,6 +132,24 @@ $('connection-mode').onchange = () => {
   else chooseDevice();
 };
 $('choose-device').onclick = chooseDevice;
+$('choose-image').onclick = () => {$('image-file').value = '';$('image-file').click();};
+$('image-file').onchange = () => {
+  const file = $('image-file').files?.[0];if (!file || busy) return;
+  action(async () => {
+    try {
+      if (file.size > 1024 * 1024) throw new Error('镜像文件过大；Boot 分区仅 32 KiB');
+      const selected = await externalImage(file.name,new Uint8Array(await file.arrayBuffer()));
+      selectImage(selected);update('外部镜像已就绪；等待手动烧录');
+      log(`已选择外部镜像：${file.name} · ${manifest.bytes} B · SHA-256 ${manifest.sha256}；未操作设备`);
+    } catch (error) {
+      $('image-detail').textContent = `未切换镜像：${error.message}；${image ? '继续保留当前镜像' : '尚无可用镜像'}`;
+      $('image-detail').dataset.error = 'true';throw error;
+    }
+  });
+};
+$('default-image').onclick = () => action(async () => {
+  await loadPublished();update('已恢复默认镜像；等待手动烧录');log('已恢复默认发布镜像；未操作设备');
+});
 $('backup').onclick = () => action(async () => {
   engine = new Bootloader(core!,update);halted = true;
   const {chip,before} = await engine!.backup();
@@ -115,7 +159,7 @@ $('backup').onclick = () => action(async () => {
 $('flash').onclick = () => action(async () => {
   engine = new Bootloader(core!,update);halted = true;
   try {
-    log('开始：校验镜像 → 暂停 → 全片备份 → 仅烧写 Boot → 全片回读 → 复位');
+    log(`开始：${manifest.source?.name || '默认发布镜像'} → 校验镜像 → 暂停 → 全片备份 → 仅烧写 Boot → 全片回读 → 复位`);
     const record = await engine.flash(image,manifest,persist);halted = false;
     log(`完成：${manifest.bytes} B Bootloader；全片回读一致；备份 SHA-256 ${record.backupSha256}`);
   } catch (error) {
@@ -126,7 +170,7 @@ $('flash').onclick = () => action(async () => {
 $('flash-direct').onclick = () => action(async () => {
   engine = new Bootloader(core!,update);halted = true;
   try {
-    log('直接烧录（不备份）：校验镜像 → 暂停 → 擦除 32 KiB Boot 分区并烧录 → Boot 分区回读 → 复位');
+    log(`直接烧录（不备份）：${manifest.source?.name || '默认发布镜像'} → 校验镜像 → 暂停 → 擦除 32 KiB Boot 分区并烧录 → Boot 分区回读 → 复位`);
     await engine.flashDirect(image,manifest);halted = false;
     log(`完成：${manifest.bytes} B Bootloader；32 KiB Boot 分区回读一致；未创建备份`);
   } catch (error) {
@@ -146,11 +190,7 @@ navigator.usb?.addEventListener('disconnect',event => {
 });
 navigator.usb?.addEventListener('connect',event => connection.deviceChanged(event.device));
 await action(async () => {
-  const [metadata,binary] = await Promise.all([fetch('./firmware/manifest.json',{cache:'no-store'}),fetch('./firmware/boot.bin',{cache:'no-store'})]);
-  if (!metadata.ok || !binary.ok) throw new Error('发布镜像加载失败');
-  const data = new Uint8Array(await binary.arrayBuffer()),description = await metadata.json();await validateImage(data,description);
-  manifest = description;image = data;$('release').textContent = manifest.release;$('image-size').textContent = `${image.length.toLocaleString()} B`;
-  $('image-hash').textContent = manifest.sha256;$('image-state').textContent = '镜像校验通过';update('网页已就绪；连接状态见设备区');log('发布镜像校验通过；默认不连接，等待选择连接');
+  await loadPublished();update('网页已就绪；连接状态见设备区');log('发布镜像校验通过；默认不连接，等待选择连接');
 });
 try {
   const db = await database();

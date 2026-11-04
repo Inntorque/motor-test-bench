@@ -4,6 +4,9 @@ import {readFile,mkdir} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
 import {chromium} from 'playwright';
 const root = process.cwd(),output = resolve(root,'.runtime/bootloader-ui-tests');await mkdir(output,{recursive:true});
+const boot = await readFile(resolve(root,'gateway/ui/bootloader/public/firmware/boot.bin'));
+const external = Buffer.from(boot);external[256] ^= 1;external.writeUInt32LE(0x20023000,0);
+const bootHex = await readFile(resolve(root,'gateway/ui/bootloader/public/firmware/boot.hex'));
 const fixture = (await readFile(resolve(root,'tests/fixtures/jlink.js'),'utf8')).replace('export class VirtualJLink','class VirtualJLink') + `
 window.__jlink = new VirtualJLink();window.__usbRequests = 0;
 window.__usbDevices = [window.__jlink];window.__usbQueries = 0;window.__usbListeners = {};window.__newJlink = () => new VirtualJLink();
@@ -45,6 +48,12 @@ try {
   await page.getByRole('status').filter({hasText:'网页已就绪'}).waitFor();
   assert.deepEqual(await page.evaluate(() => ({requests:window.__usbRequests,opened:window.__jlink.opened,writes:window.__jlink.writes.length})),{requests:0,opened:false,writes:0});
   await page.screenshot({path:resolve(output,'bootloader.png'),fullPage:true});
+  assert.equal(await page.locator('#default-image').isDisabled(),true);
+  const publishedHash = await page.locator('#image-hash').textContent();
+  await page.locator('#image-file').setInputFiles({name:'bad.bin',mimeType:'application/octet-stream',buffer:Buffer.alloc(256)});
+  await page.locator('#image-detail').filter({hasText:'未切换镜像'}).waitFor();
+  assert.equal(await page.locator('#image-hash').textContent(),publishedHash);
+  assert.equal(await page.evaluate(() => window.__usbRequests),0);
   assert.equal(await page.locator('#connection-mode').inputValue(),'off');
   await page.evaluate(() => {
     window.__requestDevice = navigator.usb.requestDevice;
@@ -86,14 +95,27 @@ try {
   const pending = page.waitForEvent('download');await page.getByRole('button',{name:'导出最近全片备份',exact:true}).click();
   const download = await pending,payload = await readFile(await download.path());assert.equal(payload.length,524288);assert.ok(payload.every((value,index) => value === index % 251));
   await page.getByRole('button',{name:'恢复运行（仅读取后）',exact:true}).click();await page.getByRole('status').filter({hasText:'已恢复原程序运行'}).waitFor();
+  const chooserPending = page.waitForEvent('filechooser');await page.locator('#choose-image').click();
+  await (await chooserPending).setFiles({name:'custom-boot.bin',mimeType:'application/octet-stream',buffer:external});
+  await page.locator('#image-title').filter({hasText:'当前外部镜像'}).waitFor();
+  assert.equal(await page.locator('#release').textContent(),'custom-boot.bin');
+  assert.notEqual(await page.locator('#image-hash').textContent(),publishedHash);
+  assert.equal(await page.evaluate(() => window.__jlink.erased.length),0);
+  await page.locator('#image-file').setInputFiles([]);
+  assert.equal(await page.locator('#release').textContent(),'custom-boot.bin','cancel preserves selection');
   await page.evaluate(() => {window.__progress = [];});
   await page.getByRole('button',{name:'备份并烧录 Bootloader',exact:true}).click();
+  assert.equal(await page.locator('#choose-image').isDisabled(),true);assert.equal(await page.locator('#default-image').isDisabled(),true);
   await page.getByRole('status').filter({hasText:'烧录及回读校验完成'}).waitFor({timeout:30000});
   assert.deepEqual(await page.evaluate(() => ({pages:window.__jlink.erased.length,resets:window.__jlink.resets,preserved:window.__jlink.flash.slice(10592).every((value,index) => value === (10592 + index) % 251)})),{pages:6,resets:1,preserved:true});
   completeProgress(await page.evaluate(() => window.__progress));
+  assert.deepEqual(await page.evaluate(size => Array.from(window.__jlink.flash.slice(0,size)),external.length),[...external]);
   await page.screenshot({path:resolve(output,'bootloader-complete.png'),fullPage:true});
 
   const saved = await page.locator('#saved').textContent();
+  await page.locator('#image-file').setInputFiles({name:'external-boot.hex',mimeType:'text/plain',buffer:bootHex});
+  await page.locator('#release').filter({hasText:'external-boot.hex'}).waitFor();
+  assert.equal(await page.locator('#image-hash').textContent(),publishedHash);
   await page.evaluate(() => {
     window.__progress = [];
     Object.defineProperty(window,'indexedDB',{configurable:true,value:{open(){throw new Error('storage unavailable for direct flash');}}});
@@ -107,7 +129,14 @@ try {
   const logPending = page.waitForEvent('download');await page.getByRole('button',{name:'导出操作日志',exact:true}).click();
   const directLog = JSON.parse(await readFile(await (await logPending).path(),'utf8'));
   assert.equal(directLog.record.mode,'direct');assert.equal(directLog.record.backup,false);assert.equal(directLog.record.stage,'complete');assert.equal(directLog.record.before,undefined);
+  assert.equal(directLog.record.manifest.source.name,'external-boot.hex');assert.equal(directLog.record.manifest.source.format,'hex');
+  assert.deepEqual(await page.evaluate(size => Array.from(window.__jlink.flash.slice(0,size)),boot.length),[...boot]);
   await page.screenshot({path:resolve(output,'bootloader-direct-complete.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth),390);
+  await page.screenshot({path:resolve(output,'bootloader-external-mobile.png'),fullPage:true});await page.setViewportSize({width:1440,height:1050});
+  await page.locator('#default-image').click();await page.locator('#image-title').filter({hasText:'当前发布镜像'}).waitFor();
+  assert.equal(await page.locator('#default-image').isDisabled(),true);assert.equal(await page.locator('#image-hash').textContent(),publishedHash);
   await page.evaluate(() => {
     window.__progress = [];const read = window.__jlink.readMemory.bind(window.__jlink);
     window.__jlink.readMemory = address => {const value = read(address);return address === 0x08000064 && window.__jlink.erased.length > 22 ? value ^ 1 : value;};
@@ -121,6 +150,7 @@ try {
   assert.equal(await page.locator('#flash-direct').isDisabled(),true);
   page.once('dialog',dialog => dialog.accept());
   await page.reload();await page.getByRole('status').filter({hasText:'网页已就绪'}).waitFor();
+  assert.equal(await page.locator('#image-title').textContent(),'当前发布镜像','external images are not persisted');
   await page.locator('#saved').filter({hasText:'complete'}).waitFor();assert.equal(await page.locator('#download-backup').isEnabled(),true);
   assert.equal(await page.evaluate(() => window.__usbRequests),0,'reload must not reconnect or flash');
   await page.evaluate(() => {window.__jlink.badId = true;});
@@ -131,6 +161,15 @@ try {
   assert.equal(await page.evaluate(() => window.__jlink.opened),false);
   await page.route('**/firmware/boot.bin',route => route.fulfill({body:Buffer.alloc(10592),contentType:'application/octet-stream'}));
   await page.reload();await page.getByRole('status').filter({hasText:'复位向量无效'}).waitFor();assert.equal(await page.locator('#flash').isDisabled(),true);
+  await page.locator('#image-file').setInputFiles({name:'custom-boot.bin',mimeType:'application/octet-stream',buffer:external});
+  await page.locator('#release').filter({hasText:'custom-boot.bin'}).waitFor();
+  await page.locator('#connection-mode').selectOption('on');await page.locator('#device-state').filter({hasText:'已连接'}).waitFor();
+  assert.equal(await page.locator('#flash').isEnabled(),true,'external files work without a valid default image');
+  await page.locator('#default-image').click();await page.locator('#stage').filter({hasText:'复位向量无效'}).waitFor();
+  assert.equal(await page.locator('#release').textContent(),'custom-boot.bin','failed restore preserves external image');
+  await page.unroute('**/firmware/boot.bin');await page.locator('#default-image').click();
+  await page.locator('#image-title').filter({hasText:'当前发布镜像'}).waitFor();
+  assert.equal(await page.locator('#image-hash').textContent(),publishedHash);
   assert.deepEqual(errors,[]);assert.deepEqual(backend,[]);
-  console.log(JSON.stringify({passed:true,apps:4,initialUsbAccess:0,autoIdentifyRetry:true,replugReconnect:true,offStopsScanning:true,singleAuthorization:true,retryLogDeduplicated:true,backupBytes:payload.length,bootPages:6,directBootPages:16,directWithoutStorage:true,directPreservesApp:true,singleOverallProgress:true,failedProgressPreserved:true,untouchedBytesPreserved:true,verifiedBeforeReset:true,backupSurvivesReload:true,wrongMcuAndImageRejected:true,pageErrors:errors,backendRequests:backend},null,2));
+  console.log(JSON.stringify({passed:true,apps:4,initialUsbAccess:0,autoIdentifyRetry:true,replugReconnect:true,offStopsScanning:true,singleAuthorization:true,retryLogDeduplicated:true,backupBytes:payload.length,bootPages:6,directBootPages:16,directWithoutStorage:true,directPreservesApp:true,singleOverallProgress:true,failedProgressPreserved:true,untouchedBytesPreserved:true,verifiedBeforeReset:true,backupSurvivesReload:true,wrongMcuAndImageRejected:true,externalBinBackupFlash:true,externalHexDirectFlash:true,defaultOptional:true,restoreDefault:true,failedSelectionPreservesImage:true,pageErrors:errors,backendRequests:backend},null,2));
 } finally {await browser?.close();await new Promise(done => server.close(done));}
