@@ -22,6 +22,18 @@ const base = process.env.BROWSER_SITE_URL || `http://127.0.0.1:${server.address(
 const catalog = JSON.parse(await readFile(resolve(root,'site/catalog.json'),'utf8'));
 assert.equal(catalog.runtime,'browser');assert.equal(catalog.serviceUrl,undefined);
 assert.equal(catalog.apps.length,5);assert.equal(catalog.apps.every(app => app.runtime === 'browser' && !app.port),true);
+
+async function waitForState(page,path,predicate) {
+  const deadline = Date.now() + 10000;
+  let value;
+  while (Date.now() < deadline) {
+    value = await page.evaluate(async path => (await fetch(path)).json(),path);
+    if (predicate(value)) return value;
+    await page.waitForTimeout(50);
+  }
+  throw new Error(`Browser state did not reach expected condition at ${page.url()} ${path}: ${JSON.stringify(value)}`);
+}
+
 let browser;
 try {
   browser = await chromium.launch({headless:true,...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
@@ -68,15 +80,6 @@ try {
       const data = await response.json();if (!response.ok) throw new Error(data.error);return data;
     },{path,body});
   }
-  async function waitForState(path,predicate) {
-    const deadline = Date.now() + 10000;
-    while (Date.now() < deadline) {
-      const value = await control.evaluate(async path => (await fetch(path)).json(),path);
-      if (predicate(value)) return value;
-      await control.waitForTimeout(50);
-    }
-    throw new Error('Browser state did not reach expected condition: ' + path);
-  }
   const connected = await command('/motor-current/connect');assert.equal(connected.connected,true);
   assert.equal(await control.evaluate(() => window.__serialFixture.board.commands.filter(command => command.opcode === 6).length),0,'connecting must not start the motor');
   const motor = (await command('/test-subjects/create',{kind:'motor',name:'Browser fixture motor'})).item;
@@ -85,7 +88,7 @@ try {
   await command('/test-subjects/select',{motorId:motor.id,driverBoardId:driver.id,testSetupId:setup.id});
   const recording = (await command('/recordings/start',{name:'Worker end-to-end test'})).current;
   await command('/motor-current/start',{mode:'maximum_output',busLimitA:20,busVoltageV:24});
-  await waitForState('/api/v1/motor-current/status',value => value.run.phase === 'running' && value.snapshot?.feedback?.iq_reference_a === 27);
+  await waitForState(control,'/api/v1/motor-current/status',value => value.run.phase === 'running' && value.snapshot?.feedback?.iq_reference_a === 27);
   const active = await control.evaluate(async () => (await fetch('/api/v1/motor-current/status')).json());
   assert.equal(active.snapshot.motor.output_on,true,JSON.stringify({run:active.run,error:active.error,snapshot:active.snapshot?.motor,commands:await control.evaluate(() => window.__serialFixture.board.commands.map(command => command.opcode))}));assert.equal(active.snapshot.feedback.iq_a,26.8);assert.equal(active.snapshot.feedback.id_a,-.4);
   assert.equal(await control.evaluate(() => window.__serialFixture.board.commands.filter(command => command.opcode === 6).length),1);
@@ -99,7 +102,7 @@ try {
   const download = await downloaded;await download.saveAs(resolve(output,'worker-test.csv'));
   const csv = await readFile(resolve(output,'worker-test.csv'),'utf8');assert.ok(csv.includes('Browser fixture motor'));assert.ok(csv.includes('Browser fixture driver'));
   await command('/control/stop');
-  await waitForState('/api/v1/control/status',value => !value.stopping);
+  await waitForState(control,'/api/v1/control/status',value => !value.stopping);
   const stopped = await control.evaluate(async () => (await fetch('/api/v1/motor-current/status')).json());assert.equal(stopped.snapshot.motor.output_on,false);assert.equal(stopped.run.stopConfirmed,true);
   results.push({id:'dynamometer',virtualSerialOnly:true,workerCanRoundTrip:true,connectNeverStarts:true,maximumIqReference:27,actualIq:26.8,stopConfirmed:true,subjectLocked:true,indexedDbRecord:true,detachedAnchorCsvExport:true});
   await direct.close();
@@ -149,21 +152,23 @@ try {
     await dashboard.waitForFunction(() => window.__focSerial.actions.some(item => item.action === 6));
     assert.equal(await dashboard.evaluate(() => window.__focSerial.actions.find(item => item.action === 8).value),1200);
     if (model === '8513') {
-      await dashboard.waitForFunction(async () => (await (await fetch('/api/state?wave=phase')).json()).phase?.values[0] === 1.25);
+      const feedback = await waitForState(dashboard,'/api/state?wave=phase',value => value.phase?.values[0] === 1.25);
+      assert.deepEqual(feedback.phase.values,[1.25,-.5,-.75]);
     }
     await dashboard.locator('#stop').click();
     await dashboard.waitForFunction(() => !document.querySelector('#run').disabled);
     if (model !== '7010') {
       await dashboard.locator('#control-mode').selectOption('dyno');
       await dashboard.locator('#run').click();
-      await dashboard.waitForFunction(async () => (await (await fetch('/api/state')).json()).capture);
+      await waitForState(dashboard,'/api/state',value => value.data?.state === 17 && value.capture);
       await dashboard.locator('#stop').click();
       await dashboard.waitForFunction(() => !document.querySelector('#run').disabled);
-      await dashboard.waitForFunction(() => window.__focSerial.actions.some(item => item.action === 22));
+      await waitForState(dashboard,'/api/state',value => value.logs.some(line => line.includes('测功诊断记录完成')));
       const saved = dashboard.waitForEvent('download');
       await dashboard.locator('#export-dyno').click();
       const report = JSON.parse(await readFile(await (await saved).path(),'utf8'));
       assert.equal(report.board.run_id,9);
+      assert.equal(report.frozen.run_id,9);
       assert.ok(report.rows.length > 0);
     }
     await dashboard.locator('#disconnect').click();
