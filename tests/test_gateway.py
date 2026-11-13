@@ -169,6 +169,7 @@ class GatewayArchiveTests(unittest.TestCase):
 
     def test_other_app_is_not_interrupted(self):
         active = ({'id': 'dynamometer', 'name': '测功机'}, {'version': 'old'})
+        self.manager.catalog['apps'].append(self.app)
         with patch.object(self.manager, 'active', return_value=[active]), patch.object(services.subprocess, 'Popen') as spawn:
             with self.assertRaisesRegex(RuntimeError, '仍在运行'):
                 self.manager.open(self.app['id'], self.app['version'])
@@ -217,7 +218,7 @@ class GatewaySourceTests(unittest.TestCase):
 
 
 class GatewayIntegrationTests(unittest.TestCase):
-    def test_three_original_http_apps_without_device_io(self):
+    def test_local_http_apps_without_device_io(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             for path in ROOT.glob('*.py'):

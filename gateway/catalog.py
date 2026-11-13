@@ -31,6 +31,11 @@ def digest(data):
 
 
 def engine_files(app_id, root=ROOT):
+    if app_id.startswith('foc-'):
+        ui = root / 'gateway/ui'
+        files = [path for folder in (ui / app_id, ui / 'foc-shared') for path in folder.rglob('*') if path.is_file()]
+        files.extend(root / 'browser' / name for name in ('foc.ts', 'foc-protocol.ts'))
+        return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(files)}
     if app_id == 'bootloader':
         base = root / 'gateway/ui/bootloader'
         return {path.relative_to(base).as_posix(): path.read_bytes() for path in sorted(base.rglob('*')) if path.is_file()}

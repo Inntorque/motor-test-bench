@@ -26,11 +26,14 @@ body { margin: 0; }
   padding: 50px 24px;
 }
 .apps {
-  display: grid;
-  grid-template-columns: repeat(4, 140px);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 924px;
   gap: 56px;
 }
 .app {
+  width: 140px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -61,6 +64,8 @@ body { margin: 0; }
 .torque { background: linear-gradient(145deg, #f8eee3, #ecdecd); }
 .sg { background: linear-gradient(145deg, #edf3f7, #d8e5ee); }
 .motor7010 { background: linear-gradient(145deg, #eef4ee, #dce8df); }
+.motor5014 { background: linear-gradient(145deg, #edf3f7, #d8e5ee); }
+.motor8513 { background: linear-gradient(145deg, #f0edf7, #e4dcee); }
 .bootloader { background: linear-gradient(145deg, #eef0f6, #dfe4ef); }
 .app-name { font-size: 13px; line-height: 1.6; white-space: nowrap; }
 .app:hover .app-icon {
@@ -68,11 +73,11 @@ body { margin: 0; }
 }
 .app:focus-visible { outline: 2px solid #8fa8b6; outline-offset: 10px; border-radius: 15px; }
 @media (max-width: 800px) {
-  .apps { grid-template-columns: repeat(2, 140px); }
+  .apps { max-width: 336px; }
 }
 @media (max-width: 600px) {
-  .apps { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; width: 100%; max-width: 300px; }
-  .app { gap: 15px; }
+  .apps { gap: 24px; width: 100%; max-width: 300px; }
+  .app { width: calc((100% - 24px) / 2); gap: 15px; }
   .app-icon { width: 90.2px; height: 90.2px; border-radius: 23.1px; }
   .app-icon img, .app-icon canvas, .app-icon svg { width: 71.5px; height: 71.5px; }
   .app-name { font-size: 11px; }

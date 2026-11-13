@@ -1,4 +1,6 @@
-export type AppId = 'dynamometer' | 'sg-6010hb' | 'rm-7010';
+export type FocAppId = 'foc-7010' | 'foc-5014' | 'foc-8513';
+export type AppId = 'dynamometer' | 'sg-6010hb' | 'rm-7010' | FocAppId;
+export function isFocApp(app: AppId): app is FocAppId {return app.startsWith('foc-');}
 export type IoMethod = 'ports' | 'can-config' | 'serial-open' | 'serial-close' | 'serial-write' | 'usb-open' | 'usb-close' | 'usb-send';
 export interface IoArguments {
   device?: string; baudRate?: number; dataBits?: number; stopBits?: number;

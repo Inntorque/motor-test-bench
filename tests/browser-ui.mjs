@@ -21,7 +21,7 @@ await new Promise(done => server.listen(0,'127.0.0.1',done));
 const base = process.env.BROWSER_SITE_URL || `http://127.0.0.1:${server.address().port}/`;
 const catalog = JSON.parse(await readFile(resolve(root,'site/catalog.json'),'utf8'));
 assert.equal(catalog.runtime,'browser');assert.equal(catalog.serviceUrl,undefined);
-assert.equal(catalog.apps.length,4);assert.equal(catalog.apps.every(app => app.runtime === 'browser' && !app.port),true);
+assert.equal(catalog.apps.length,5);assert.equal(catalog.apps.every(app => app.runtime === 'browser' && !app.port),true);
 let browser;
 try {
   browser = await chromium.launch({headless:true,...(process.env.CHROME_PATH ? {executablePath:process.env.CHROME_PATH} : {})});
@@ -29,18 +29,18 @@ try {
   const page = await context.newPage(), errors = [], apiNetwork = [], serviceNetwork = [];
   page.on('pageerror',error => errors.push(error.message));
   page.on('request',request => {const url = new URL(request.url());if (url.pathname.startsWith('/api/')) apiNetwork.push(request.url());if (['5181','5173','8892','8888'].includes(url.port)) serviceNetwork.push(request.url());});
-  for (const id of ['dynamometer','sg-6010hb','rm-7010']) {
+  for (const id of ['dynamometer','foc-7010','foc-5014','foc-8513']) {
     await page.goto(`${base}apps/${id}/`);
     await page.getByRole('status').filter({hasText:'网页已就绪'}).first().waitFor();
     await page.waitForTimeout(1200);
     assert.equal(await page.getByText('暂时无法打开此 APP',{exact:true}).count(),0);
     const status = await page.evaluate(async id => {
-      const response = await fetch(id === 'dynamometer' ? '/api/v1/health' : '/api/status');
+      const response = await fetch(id === 'dynamometer' ? '/api/v1/health' : '/api/state');
       return {ok:response.ok,data:await response.json()};
     },id);
     assert.equal(status.ok,true);
     if (id === 'dynamometer') {assert.equal(status.data.runtime,'browser');assert.equal(status.data.channels['current-motor'].connected,false);assert.equal(status.data.channels['torque-sensor'].connected,false);await page.getByRole('heading',{name:'扭矩工作台',exact:true}).waitFor();}
-    else {assert.equal(status.data.connected,false);assert.equal(status.data.params.every(param => param.value === null),true);}
+    else {assert.equal(status.data.connected,false);assert.equal(status.data.data,null);}
     await page.screenshot({path:resolve(output,`${id}.png`),fullPage:false});
     results.push({id,openedWithoutService:true,disconnectedMeasurements:true});
   }
@@ -121,6 +121,66 @@ try {
   assert.equal(canableState.ports.ports[0].canInterface,'slcan');assert.equal(canableState.commands.some(op => [4,5,6,7].includes(op)),false);
   results.push({id:'dynamometer',adapter:'CANable2/SLCAN',virtualSerialOnly:true,readonlyConnected:true,authorizationNeverOpens:true});
   await canable.close();
+  const focFixture = await readFile(resolve(root,'tests/fixtures/foc-serial.js'),'utf8');
+  for (const model of ['7010','5014','8513']) {
+    const foc = await browser.newContext();
+    await foc.addInitScript({content:`window.__focTest = {model:${JSON.stringify(model)}};\n` + focFixture});
+    const dashboard = await foc.newPage();
+    dashboard.on('pageerror',error => errors.push(error.message));
+    dashboard.on('request',request => {if (new URL(request.url()).pathname.startsWith('/api/')) apiNetwork.push(request.url());});
+    await dashboard.goto(`${base}apps/foc-${model}/`);
+    await dashboard.getByRole('status').filter({hasText:'网页已就绪'}).first().waitFor();
+    assert.equal(await dashboard.evaluate(() => window.__focSerial.opens),0);
+    await dashboard.getByRole('button',{name:'授权串口',exact:true}).click();
+    assert.equal(await dashboard.evaluate(() => window.__focSerial.opens),0);
+    await dashboard.locator('#connect').click();
+    await dashboard.locator('#connection').filter({hasText:'已连接'}).waitFor();
+    assert.ok((await dashboard.locator('#channel').inputValue()).startsWith('serial-'));
+    assert.equal(await dashboard.locator('#angle').textContent(),'90.0');
+    assert.equal(await dashboard.evaluate(() => window.__focSerial.actions.every(item => [0,1,21].includes(item.action))),true);
+    const command = (action,value) => dashboard.evaluate(async ({action,value}) => {
+      const {token} = await (await fetch('/api/meta')).json();
+      const response = await fetch('/api/command',{method:'POST',headers:{'X-Control-Token':token},body:JSON.stringify({action,value})});
+      return {ok:response.ok,result:await response.json()};
+    },{action,value});
+    assert.equal((await command(8,50)).ok,false);
+    await dashboard.locator('#target').fill('1.2');
+    await dashboard.locator('#run').click();
+    await dashboard.waitForFunction(() => window.__focSerial.actions.some(item => item.action === 6));
+    assert.equal(await dashboard.evaluate(() => window.__focSerial.actions.find(item => item.action === 8).value),1200);
+    if (model === '8513') {
+      await dashboard.waitForFunction(async () => (await (await fetch('/api/state?wave=phase')).json()).phase?.values[0] === 1.25);
+    }
+    await dashboard.locator('#stop').click();
+    await dashboard.waitForFunction(() => !document.querySelector('#run').disabled);
+    if (model !== '7010') {
+      await dashboard.locator('#control-mode').selectOption('dyno');
+      await dashboard.locator('#run').click();
+      await dashboard.waitForFunction(async () => (await (await fetch('/api/state')).json()).capture);
+      await dashboard.locator('#stop').click();
+      await dashboard.waitForFunction(() => !document.querySelector('#run').disabled);
+      await dashboard.waitForFunction(() => window.__focSerial.actions.some(item => item.action === 22));
+      const saved = dashboard.waitForEvent('download');
+      await dashboard.locator('#export-dyno').click();
+      const report = JSON.parse(await readFile(await (await saved).path(),'utf8'));
+      assert.equal(report.board.run_id,9);
+      assert.ok(report.rows.length > 0);
+    }
+    await dashboard.locator('#disconnect').click();
+    await dashboard.locator('#connection').filter({hasText:'未连接'}).waitFor();
+    results.push({id:`foc-${model}`,virtualSerialOnly:true,identityChecked:true,feedbackAndStartStop:true});
+    await foc.close();
+  }
+  const mismatch = await browser.newContext();
+  await mismatch.addInitScript({content:"window.__focTest = {model:'7010',wrongModel:'5014'};\n" + focFixture});
+  const wrong = await mismatch.newPage();
+  await wrong.goto(`${base}apps/foc-7010/`);
+  await wrong.getByRole('status').filter({hasText:'网页已就绪'}).first().waitFor();
+  await wrong.getByRole('button',{name:'授权串口',exact:true}).click();
+  await wrong.locator('#connect').click();
+  await wrong.locator('#error').filter({hasText:'设备身份与 7010 不匹配'}).waitFor();
+  assert.deepEqual(await wrong.evaluate(() => window.__focSerial.actions.map(item => item.action)),[0]);
+  await mismatch.close();
   assert.deepEqual(errors,[]);assert.deepEqual(apiNetwork,[]);assert.deepEqual(serviceNetwork,[]);
   console.log(JSON.stringify({passed:true,apps:results,pageErrors:errors,httpApiRequests:apiNetwork,localhostServiceRequests:serviceNetwork},null,2));
 } finally {await browser?.close();await new Promise(done => server.close(done));}

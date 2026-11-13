@@ -13,8 +13,9 @@ const iconSize = 480;
 await mkdir(output, {recursive: true});
 const movingRegions = Object.entries({
   dynamometer: ['output-shaft', 'shaft-end-chamfer', 'shaft-keyway', 'shaft-index-mark'],
-  'sg-6010hb': ['radial-face-sectors', 'rotor-index-mark', 'inner-rotor-ring', 'output-shaft', 'shaft-end-chamfer', 'shaft-keyway', 'shaft-index-mark'],
-  'rm-7010': ['annular-face', 'face-vent-sectors'],
+  'foc-7010': ['annular-face', 'face-vent-sectors'],
+  'foc-5014': ['annular-face', 'face-vent-sectors'],
+  'foc-8513': ['annular-face', 'face-vent-sectors'],
 }).map(([id, names]) => {
   const {scene, camera} = createIconScene(id);
   const bounds = new Box3();
@@ -91,7 +92,7 @@ try {
     Object.defineProperty(document, 'hidden', {get: () => window.iconProbe.hidden});
   });
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  await page.waitForFunction(() => document.querySelectorAll('.is-animated').length === 4);
+  await page.waitForFunction(() => document.querySelectorAll('.is-animated').length === 5);
   const info = await page.evaluate(() => ({
     contexts: window.iconProbe.webgl.size,
     sizes: [...document.querySelectorAll('.app-icon canvas')].map(c => [c.width, c.height]),
@@ -99,12 +100,12 @@ try {
     names: [...document.querySelectorAll('.app-name')].map(n => n.textContent),
   }));
   assert.equal(info.contexts, 1);
-  assert.deepEqual(info.sizes, [[iconSize,iconSize], [iconSize,iconSize], [iconSize,iconSize]]);
+  assert.deepEqual(info.sizes, Array.from({length:4},() => [iconSize,iconSize]));
   assert.equal(info.pixels, true);
-  assert.deepEqual(info.names, ['测功机', 'SG-6010HB', '7010 上位机', 'Bootloader']);
+  assert.deepEqual(info.names, ['测功机', '7010 上位机', '5014 上位机', '8513 上位机', 'Bootloader']);
   const alignment = await checkCentered(page);
   const images = await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => c.toDataURL()));
-  assert.equal(new Set(images).size, 3, 'shared renderer must preserve three distinct motors');
+  assert.equal(new Set(images).size, 4, 'shared renderer must preserve four distinct motors');
   const idle = await page.evaluate(() => window.iconProbe.frames);
   await page.waitForTimeout(400);
   assert.equal(await page.evaluate(() => window.iconProbe.frames), idle, 'idle motors must not keep drawing');
@@ -115,7 +116,7 @@ try {
   }
 
   const rates = [];
-  for (let index = 0; index < 3; index++) {
+  for (let index = 0; index < movingRegions.length; index++) {
     const before = await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => c.toDataURL()));
     await page.evaluate(() => {
       window.iconProbe.pixels = [...document.querySelectorAll('.app-icon canvas')].map(c => c.getContext('2d').getImageData(0, 0, c.width, c.height).data);
@@ -137,7 +138,7 @@ try {
     await checkCentered(page);
     await page.screenshot({path: resolve(output, `gateway-hover-${index}.png`)});
     const after = await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => c.toDataURL()));
-    for (let other = 0; other < 3; other++) if (other !== index) assert.equal(after[other], before[other], 'other APPs must stay frozen');
+    for (let other = 0; other < movingRegions.length; other++) if (other !== index) assert.equal(after[other], before[other], 'other APPs must stay frozen');
     const changedOutside = await page.evaluate(({index, region}) => {
       const initial = window.iconProbe.pixels[index];
       const canvas = document.querySelectorAll('.app-icon canvas')[index];
@@ -160,7 +161,7 @@ try {
     assert.equal(await page.locator('.app-icon canvas').nth(index).evaluate(c => getComputedStyle(c).transform), 'none', 'pointer leave must restore normal size');
   }
 
-  const boot = page.locator('.app').nth(3),flow = boot.locator('.boot-data-flow');
+  const boot = page.getByRole('link',{name:'打开Bootloader',exact:true}),flow = boot.locator('.boot-data-flow');
   const motorImages = await page.locator('.app-icon canvas').evaluateAll(cs => cs.map(c => c.toDataURL()));
   await boot.hover();await page.waitForFunction(() => document.querySelector('.bootloader').classList.contains('is-flowing'));
   assert.deepEqual(await boot.locator('svg').evaluate(svg => [svg.getAttribute('width'),svg.getAttribute('height')]),['480','480']);

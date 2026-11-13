@@ -2,6 +2,8 @@ import type {MainToWorker, IoArguments, IoMethod, DeviceInput, DeviceIo} from '.
 import {BrowserStore} from './storage.ts';
 import {Bench} from './bench.ts';
 import {LegacyApp} from './legacy.ts';
+import {FocApp} from './foc.ts';
+import {isFocApp} from './messages.ts';
 import {jsonValue} from './bytes.ts';
 type Engine = Pick<Bench, 'initialize' | 'request'> & Partial<Pick<Bench, 'device' | 'channels' | 'sensor' | 'epoch'>> & {ioError?: (device: string, error: string) => void};
 let engine: Engine,ready: Promise<void>;
@@ -22,7 +24,9 @@ self.addEventListener('message',(event: MessageEvent<MainToWorker>) => {
   if (message.kind === 'init') {
     ready = (async () => {
       const store = await new BrowserStore(message.app).open();
-      engine = message.app === 'dynamometer' ? new Bench(io,store,emit) : new LegacyApp(message.app,io,store,emit);
+      if (message.app === 'dynamometer') engine = new Bench(io,store,emit);
+      else if (isFocApp(message.app)) engine = new FocApp(message.app,io,store,emit);
+      else engine = new LegacyApp(message.app,io,store,emit);
       await engine.initialize(); postMessage({kind:'ready'});
     })();
     ready.catch(error => postMessage({kind:'fatal',error:error.message}));

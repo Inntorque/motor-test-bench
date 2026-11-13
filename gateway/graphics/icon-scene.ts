@@ -47,12 +47,12 @@ export function createIconScene(id) {
   const transform = new THREE.Matrix4();
   const point = new THREE.Vector3();
   model.traverse(mesh => {
-    if (!mesh.isMesh) return;
+    if (!(mesh instanceof THREE.Mesh)) return;
     const positions = mesh.geometry.getAttribute('position');
-    const count = mesh.isInstancedMesh ? mesh.count : 1;
+    const count = mesh instanceof THREE.InstancedMesh ? mesh.count : 1;
     for (let i = 0; i < count; i++) {
       transform.multiplyMatrices(camera.matrixWorldInverse, mesh.matrixWorld);
-      if (mesh.isInstancedMesh) {
+      if (mesh instanceof THREE.InstancedMesh) {
         mesh.getMatrixAt(i, instance);
         transform.multiply(instance);
       }

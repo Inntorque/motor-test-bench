@@ -37,13 +37,13 @@ try {
   page.on('request',request => {const url = new URL(request.url());if (url.pathname.startsWith('/api/') || ['5173','5181','8892','8888'].includes(url.port)) backend.push(url.href);});
   await page.goto(base);await page.getByRole('link',{name:'打开Bootloader',exact:true}).waitFor();
   const layout = await page.locator('.apps .app').evaluateAll(links => links.map(link => {const r = link.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width};}));
-  assert.equal(layout.length,4);assert.equal(new Set(layout.map(item => item.y)).size,1);
-  assert.ok(Math.abs((layout[0].x + layout[3].x + layout[3].width) / 2 - 720) < 1);
+  assert.equal(layout.length,5);assert.equal(new Set(layout.map(item => item.y)).size,1);
+  assert.ok(Math.abs((layout[0].x + layout.at(-1).x + layout.at(-1).width) / 2 - 720) < 1);
   await page.screenshot({path:resolve(output,'gateway.png')});
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth),390);
   const rows = await page.locator('.apps .app').evaluateAll(links => links.map(link => link.getBoundingClientRect().y));
-  assert.equal(new Set(rows).size,2);await page.screenshot({path:resolve(output,'gateway-mobile.png')});
+  assert.equal(new Set(rows).size,3);await page.screenshot({path:resolve(output,'gateway-mobile.png')});
   await page.setViewportSize({width:1440,height:1050});await page.getByRole('link',{name:'打开Bootloader',exact:true}).click();
   await page.getByRole('status').filter({hasText:'网页已就绪'}).waitFor();
   assert.deepEqual(await page.evaluate(() => ({requests:window.__usbRequests,opened:window.__jlink.opened,writes:window.__jlink.writes.length})),{requests:0,opened:false,writes:0});
@@ -171,5 +171,5 @@ try {
   await page.locator('#image-title').filter({hasText:'当前发布镜像'}).waitFor();
   assert.equal(await page.locator('#image-hash').textContent(),publishedHash);
   assert.deepEqual(errors,[]);assert.deepEqual(backend,[]);
-  console.log(JSON.stringify({passed:true,apps:4,initialUsbAccess:0,autoIdentifyRetry:true,replugReconnect:true,offStopsScanning:true,singleAuthorization:true,retryLogDeduplicated:true,backupBytes:payload.length,bootPages:6,directBootPages:16,directWithoutStorage:true,directPreservesApp:true,singleOverallProgress:true,failedProgressPreserved:true,untouchedBytesPreserved:true,verifiedBeforeReset:true,backupSurvivesReload:true,wrongMcuAndImageRejected:true,externalBinBackupFlash:true,externalHexDirectFlash:true,defaultOptional:true,restoreDefault:true,failedSelectionPreservesImage:true,pageErrors:errors,backendRequests:backend},null,2));
+  console.log(JSON.stringify({passed:true,apps:5,initialUsbAccess:0,autoIdentifyRetry:true,replugReconnect:true,offStopsScanning:true,singleAuthorization:true,retryLogDeduplicated:true,backupBytes:payload.length,bootPages:6,directBootPages:16,directWithoutStorage:true,directPreservesApp:true,singleOverallProgress:true,failedProgressPreserved:true,untouchedBytesPreserved:true,verifiedBeforeReset:true,backupSurvivesReload:true,wrongMcuAndImageRejected:true,externalBinBackupFlash:true,externalHexDirectFlash:true,defaultOptional:true,restoreDefault:true,failedSelectionPreservesImage:true,pageErrors:errors,backendRequests:backend},null,2));
 } finally {await browser?.close();await new Promise(done => server.close(done));}

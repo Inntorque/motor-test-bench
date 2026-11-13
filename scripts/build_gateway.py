@@ -47,7 +47,11 @@ def build(destination):
     for name in ['styles.css', 'inntorque-logo.png']:
         shutil.copy2(source / name, destination / name)
     shutil.copy2(icon_bundle, destination / 'icon-motion.js')
-    shutil.copytree(source / 'icons', destination / 'icons', dirs_exist_ok=True)
+    catalog = config()
+    (destination / 'icons').mkdir()
+    for app in catalog['apps']:
+        icon = f'{app["id"]}.svg'
+        shutil.copy2(source / 'icons' / icon, destination / 'icons' / icon)
     home_bundle = ROOT / '.runtime/gateway-home-bundle/home.js'
     for chunk in home_bundle.parent.iterdir():
         if chunk.is_file() and chunk.name != 'home.js':
@@ -60,10 +64,10 @@ def build(destination):
     for asset in ['styles.css', 'home.js']:
         page = page.replace('./' + asset, './' + asset + '?v=' + version)
     (destination / 'index.html').write_text(page, encoding='utf-8')
-    catalog = config()
+    shutil.copytree(ROOT / '.runtime/foc-scene', destination / 'foc-shared')
+    scene_version = digest((destination / 'foc-shared/scene.js').read_bytes())[:16]
     for app in catalog['apps']:
-        if not (source / 'icons' / f'{app["id"]}.svg').is_file():
-            raise ValueError('Missing application icon: ' + app['id'])
+        foc = app['id'].startswith('foc-')
         ui = ROOT / ('.runtime/bootloader-ui' if app['id'] == 'bootloader' else 'dist' if app['id'] == 'dynamometer' else 'gateway/ui/' + app['id'])
         files = {path.relative_to(ui).as_posix(): path.read_bytes()
                  for path in sorted(ui.rglob('*')) if path.is_file()}
@@ -84,7 +88,7 @@ def build(destination):
         shutil.copytree(ui, page_root)
         index = page_root / 'index.html'
         page = index.read_text(encoding='utf-8')
-        if app['id'] not in ('dynamometer', 'bootloader'):
+        if app['id'] not in ('dynamometer', 'bootloader') and not foc:
             data = legacy[app['id']]
             heartbeat_start = page.index('  try {\n    var aliveSrc = ')
             heartbeat_end = page.index('\n  pollControl();', heartbeat_start)
@@ -101,15 +105,25 @@ def build(destination):
             page = page.replace('编译当前工程并升级设备', '浏览器不运行本机固件工具链')
             page = page.replace('执行前会先发送停机命令并释放网页的 CAN 适配器；Makefile 会递增固件版本、编译 A/B 槽并更新设备。', '固件编译和升级由独立维护工程完成；本网页仅直接连接设备进行控制、读取和测试。')
             page = page.replace('$("btn_ota_onekey").disabled = otaBusy;', '$("btn_ota_onekey").disabled = true;')
-        if not app.get('browserOnly'):
+        if not app.get('browserOnly') or foc:
             script = f'<script src="../../browser/bootstrap.js?v={native_version}" data-app="{app["id"]}"></script>'
             page, count = re.subn(r'(<head\b[^>]*>)', lambda match: match[1]+'\n'+script, page, count=1, flags=re.I)
             if count != 1:
                 raise ValueError('Missing page head: ' + app['id'])
         if re.search(r'__(?:CONTROL_TOKEN|COMMAND_EPOCH|MUTATING_ROUTES|TUNE_CATALOG)__', page):
             raise ValueError('Incomplete standalone browser page: ' + app['id'])
-        index.write_text(page, encoding='utf-8')
         runtime_version = metadata['engine'] if app.get('browserOnly') else native_version
+        if foc:
+            runtime_version += native_version + scene_version
+            asset_version = digest(runtime_version.encode())[:16]
+            for asset in ('app.js', 'style.css'):
+                page = page.replace(f'="./{asset}"', f'="./{asset}?v={asset_version}"')
+            entry = page_root / 'app.js'
+            module = entry.read_text(encoding='utf-8')
+            module = module.replace('../../foc-shared/scene.js', f'../../foc-shared/scene.js?v={scene_version}')
+            module = module.replace('./waveform.js', f'./waveform.js?v={asset_version}')
+            entry.write_text(module, encoding='utf-8')
+        index.write_text(page, encoding='utf-8')
         app.update(runtime='browser', entry=f'apps/{app["id"]}/',
                    browserVersion=digest(page.encode()+runtime_version.encode())[:16])
         app.pop('port', None)

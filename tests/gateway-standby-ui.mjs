@@ -93,7 +93,7 @@ try {
   const fallback=await unsupported.newPage();await fallback.goto(base);await enter(fallback).click();
   await fallback.getByRole('status').filter({hasText:'当前浏览器暂时无法显示粒子场'}).waitFor();
   await leave(fallback).click();assert.equal(await fallback.locator('dialog').evaluate(d=>d.open),false);await unsupported.close();
-  for(const id of ['dynamometer','sg-6010hb','rm-7010','bootloader']) {
+  for(const id of ['dynamometer','foc-7010','foc-5014','foc-8513','bootloader']) {
     const html=await readFile(resolve(root,'apps',id,'index.html'),'utf8');assert.equal(html.includes('cosmic-standby'),false,'standby must only be installed on the gateway');
   }
   assert.deepEqual(result.errors,[]);await writeFile(resolve(output,'validation.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));

@@ -17,9 +17,9 @@ const server=createServer(async(req,res)=>{
 });
 await new Promise(done=>server.listen(0,'127.0.0.1',done));
 const base=`http://127.0.0.1:${server.address().port}/`,browser=await chromium.launch({headless:true,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})});
-const errors=[],result={baseline,visuals:[],animation:[],worker:{}};
+const errors=[],result={baseline,visuals:[],worker:{}};
 try {
-  for(const id of ['dynamometer','sg-6010hb','rm-7010','bootloader']) {
+  for(const id of ['dynamometer','foc-7010','foc-5014','foc-8513','bootloader']) {
     const context=await browser.newContext({viewport:{width:1366,height:900}});
     await context.addInitScript(()=>{
       const NativeDate=Date,fixed=Date.parse('2026-11-03T06:00:00Z');
@@ -58,24 +58,6 @@ try {
       } else result.visuals.push({id,unchanged:true,rasterDifference:{changedPixels:0,maxChannelDelta:0}});
     } else {
       result.visuals.push({id,unchanged:false});
-    }
-    if(['sg-6010hb','rm-7010'].includes(id)) {
-      const canvas=page.locator('#curves');await canvas.scrollIntoViewIfNeeded();await page.waitForTimeout(250);
-      const original=await canvas.evaluate(el=>el.toDataURL());
-      const count=()=>page.evaluate(()=>window.__rafCount);
-      let start=await count();await page.waitForTimeout(400);const visible=await count()-start;assert.ok(visible>5);
-      await page.evaluate(()=>{const spacer=document.createElement('div');spacer.id='latency-spacer';spacer.style.height='2500px';document.body.append(spacer);window.scrollTo({top:document.body.scrollHeight,behavior:'instant'});});
-      await page.waitForFunction(()=>document.getElementById('curves').getBoundingClientRect().bottom<0);
-      await page.waitForTimeout(250);start=await count();await page.waitForTimeout(400);const offscreen=await count()-start;
-      if(!baseline)assert.equal(offscreen,0,'offscreen waveform must stop requesting animation frames');
-      await canvas.scrollIntoViewIfNeeded();await page.waitForTimeout(250);
-      assert.equal(await canvas.evaluate(el=>el.toDataURL()),original,'the fixed-clock waveform must resume without changing pixels');
-      await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));});
-      await page.waitForTimeout(100);start=await count();await page.waitForTimeout(400);const hidden=await count()-start;
-      if(!baseline)assert.equal(hidden,0,'hidden waveform must stop requesting animation frames');
-      await page.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:false});document.dispatchEvent(new Event('visibilitychange'));});
-      start=await count();await page.waitForTimeout(300);assert.ok(await count()-start>5);
-      result.animation.push({id,visibleRequestsIn400ms:visible,offscreenRequestsIn400ms:offscreen,hiddenRequestsIn400ms:hidden,resumedIdentically:true});
     }
     await context.close();
   }

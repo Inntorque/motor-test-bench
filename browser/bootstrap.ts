@@ -1,8 +1,10 @@
 import type {AppId, WorkerToMain} from './messages.ts';
 import {DeviceAccess} from './hardware.ts';
 import {DeviceEvent} from './events.ts';
+import {isFocApp} from './messages.ts';
 const script = document.currentScript as HTMLScriptElement;
 const app = script.dataset.app as AppId;
+const foc = isFocApp(app);
 window.INNTORQUE_BROWSER_DIRECT = true;
 const workerUrl = new URL('worker.js',script.src);
 workerUrl.search = new URL(script.src).search;
@@ -17,22 +19,38 @@ const css = document.createElement('style');
 css.textContent = '#inntorque-browser-access{position:relative;z-index:20;display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:8px 16px;background:#fff;border-bottom:1px solid #e1e8ed;color:#425466;font:13px system-ui,sans-serif}#inntorque-browser-access button,#inntorque-browser-access select,#inntorque-browser-access input{font:inherit;color:inherit;padding:5px 8px;border:1px solid #cfd9e2;border-radius:6px;background:#fff}#inntorque-browser-access a{color:#436b82;text-decoration:none}#inntorque-browser-access [role=status]{margin-left:auto;font-size:12px}';
 document.head.append(css);
 const status = bar.querySelector('[role=status]'), select = bar.querySelector('select'), nodeInput = bar.querySelector('input'); nodeInput.value = String(node);
+if (foc) {
+  select.parentElement.remove();
+  nodeInput.parentElement.remove();
+}
 bar.querySelector<HTMLButtonElement>('[data-serial]')!.title = 'CANable2（SLCAN）、ZQWL 与 USB-RS485 均使用串口授权';
 bar.querySelector<HTMLButtonElement>('[data-usb]')!.title = '仅 gs_usb / candleLight；CANable2 串口固件请使用“授权串口”';
 select.onchange = () => {canDevice = select.value;}; nodeInput.onchange = () => {node = Number(nodeInput.value);};
 const access = new DeviceAccess((message,transfer) => worker.postMessage(message,transfer || []),() => {
-  const previous = select.value;
-  select.replaceChildren(new Option('自动选择',''),...access.ports().map(port => new Option(port.description,port.port)));
-  if ([...select.options].some(option => option.value === previous)) select.value = previous;
+  refreshPorts();
   window.dispatchEvent(new Event('inntorque-ports-changed'));
 });
+function refreshPorts() {
+  const target = foc ? document.querySelector<HTMLSelectElement>('#channel') : select;
+  if (!target) return;
+  const previous = target.value;
+  const ports = access.ports().filter(port => !foc || port.canInterface);
+  target.replaceChildren(new Option('自动选择',''),...ports.map(port => new Option(port.description,port.port)));
+  if (ports.some(port => port.port === previous)) target.value = previous;
+}
 for (const [selector,authorize] of [['[data-serial]',() => access.authorizeSerial()],['[data-usb]',() => access.authorizeUsb()]] as const) {
   bar.querySelector<HTMLButtonElement>(selector)!.onclick = async () => {
-    try {const id = await authorize();status.textContent = '已授权，请选择对应接口并点击连接/重连';if (access.ports().find(port => port.port === id)?.canInterface) {canDevice = id;select.value = id;}}
+    try {
+      const id = await authorize();status.textContent = '已授权，请选择对应接口并点击连接';
+      if (access.ports().find(port => port.port === id)?.canInterface) {
+        if (foc) document.querySelector<HTMLSelectElement>('#channel').value = id;
+        else {canDevice = id;select.value = id;}
+      }
+    }
     catch (error) {status.textContent = error.name === 'NotFoundError' ? '未选择设备；CANable2 / ZQWL 请使用“授权串口”' : error.message;}
   };
 }
-const mount = () => document.body.prepend(bar);
+const mount = () => {document.body.prepend(bar);refreshPorts();};
 if (document.body) mount(); else document.addEventListener('DOMContentLoaded',mount,{once:true});
 worker.addEventListener('message',async event => {
   const message = event.data as WorkerToMain;
@@ -114,7 +132,7 @@ document.addEventListener('click',event => {
 window.addEventListener('beforeunload',event => {if (bar.dataset.active === 'true') {event.preventDefault();event.returnValue = '';}});
 worker.postMessage({kind:'init',app});
 void access.initialize().catch(error => {status.textContent = error.message;});
-if (app !== 'dynamometer') {
+if (app !== 'dynamometer' && !foc) {
   const recordings = document.createElement('select');recordings.setAttribute('aria-label','运行记录');recordings.innerHTML = '<option value="">运行记录</option>';
   const refresh = async () => {
     const {records} = await (await fetch('/api/browser-recordings')).json(), previous = recordings.value;

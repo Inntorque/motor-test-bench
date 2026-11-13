@@ -171,11 +171,16 @@ export const motorIconViews = {
   dynamometer: [-5, 3.2, 6],
   'sg-6010hb': [7, 2.6, 3.8],
   'rm-7010': [3, 3.6, 5],
+  'foc-7010': [3, 3.6, 5],
+  'foc-5014': [3, 3.6, 5],
+  'foc-8513': [3, 3.6, 5],
 };
 
 export function createMotorIconModel(id) {
   const m = materials();
-  const icon = ({dynamometer, 'sg-6010hb': sg6010, 'rm-7010': rm7010})[id](m);
+  if (id === 'foc-5014') m.green.color.set('#62879f');
+  if (id === 'foc-8513') m.green.color.set('#8d7d9f');
+  const icon = id === 'dynamometer' ? dynamometer(m) : id === 'sg-6010hb' ? sg6010(m) : rm7010(m);
   const {model} = icon;
   const bounds = new THREE.Box3().setFromObject(model);
   model.position.y -= bounds.min.y;
