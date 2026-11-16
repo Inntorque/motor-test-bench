@@ -363,11 +363,14 @@ function PlotView(props) {
 }
 const Plot = React.memo(PlotView);
 
+type WorkbenchPort = {port: string; description: string; kind?: string; canInterface?: string | null};
+
 interface SupplyPanelProps {
   supply: typeof SUPPLIES[number]; device: WorkbenchDevice; config: ReturnType<typeof loadConfig>;
   setConfig: (config: ReturnType<typeof loadConfig>) => void;
   point: ReturnType<typeof supplyPoint>; setPoint: (point: ReturnType<typeof supplyPoint>) => void;
-  ports: {port: string; description: string}[]; bridgeReady: boolean; busy: boolean;
+  ports: WorkbenchPort[]; bridgeReady: boolean; busy: boolean;
+  onAuthorizePort: (id: string) => void;
   onRefreshPorts: () => void; onConnect: (id: string) => void; onDisconnect: (id: string) => void;
   onRead: (id: string) => void; onSet: (id: string) => void; onOutput: (id: string, on: boolean) => void;
   onLimits: (id: string) => void; token: React.RefObject<string>;
@@ -375,7 +378,7 @@ interface SupplyPanelProps {
 }
 const SupplyPanel = React.memo(function SupplyPanel({
   supply, device, config, setConfig, point, setPoint, ports, bridgeReady,
-  busy, onRefreshPorts, onConnect, onDisconnect, onRead, onSet, onOutput, onLimits, token, onDeviceState, onEvent,
+  busy, onRefreshPorts, onAuthorizePort, onConnect, onDisconnect, onRead, onSet, onOutput, onLimits, token, onDeviceState, onEvent,
 }: SupplyPanelProps) {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(`motor-bench:${supply.id}:collapsed`) === "true"; }
@@ -394,6 +397,7 @@ const SupplyPanel = React.memo(function SupplyPanel({
   const outputOn = Boolean(device?.snapshot?.status & 0x80);
   const mayBeOn=outputOn||device?.outputUncertain||(!device?.connected&&Boolean(device?.config?.device));
   const locked = device?.connected || busy;
+  const serialSelected = BROWSER_DIRECT ? ports.some((port) => port.port === config.device) : Boolean(config.device);
   const patchConfig = (patch) => setConfig({ ...config, ...patch });
   const patchPoint = (patch) => setPoint({ ...point, ...patch });
   const voltageScale = 10 ** Number(config.voltageDecimals || 0);
@@ -451,7 +455,7 @@ const SupplyPanel = React.memo(function SupplyPanel({
             {motorSupply && <label>电源型号 / 协议<span>万瑞达 RU-36-6060 / RU 系列 · Modbus RTU</span></label>}
             <label>传输方式<select value={config.transport} disabled={locked} onChange={(e) => patchConfig({ transport: e.target.value })}><option value="serial">{ru ? "串口 RS485 / RS232" : "串口 RS485"}</option>{!BROWSER_DIRECT && <option value="tcp">网口 RTU 透明透传</option>}</select></label>
             {config.transport === "serial" ? <>
-              <label>串口<select value={config.device} disabled={locked} onChange={(e) => patchConfig({ device: e.target.value })}><option value="">选择串口</option>{ports.map((port) => <option key={port.port} value={port.port}>{port.port} · {port.description}</option>)}</select></label>
+              <label>串口<select value={serialSelected ? config.device : ""} disabled={locked} onChange={(e) => patchConfig({ device: e.target.value })}><option value="">选择串口</option>{ports.map((port) => <option key={port.port} value={port.port}>{BROWSER_DIRECT ? port.description : `${port.port} · ${port.description}`}</option>)}</select></label>
               <label>波特率<select value={config.baud} disabled={locked} onChange={(e) => patchConfig({ baud: e.target.value })}>{(ru ? [9600,1200,2400,4800,14400,19200,38400,43000,57600,76800,115200,128000] : [9600,19200,38400,115200,4800,2400,1200,57600]).map((baud) => <option key={baud} value={baud}>{baud}</option>)}</select></label>
               <label>校验<select value={config.parity} disabled={locked || ru} onChange={(e) => patchConfig({ parity: e.target.value })}><option value="N">无校验 N</option><option value="E">偶校验 E</option><option value="O">奇校验 O</option></select></label>
               <label>停止位<select value={config.stopbits} disabled={locked || ru} onChange={(e) => patchConfig({ stopbits: e.target.value })}><option value="1">1</option><option value="2">2</option></select></label>
@@ -467,8 +471,10 @@ const SupplyPanel = React.memo(function SupplyPanel({
           </div>
           <div className="hw-connection-actions">
             {!device?.connected ? <>
-              <button className="button primary" disabled={!bridgeReady || busy || (config.transport === "serial" ? !config.device : !config.host || !config.tcpPort)} onClick={() => onConnect(supply.id)}>{busy ? "正在验证设备…" : "连接并验证"}</button>
-              {config.transport === "serial" && <button className="button" disabled={!bridgeReady || busy} onClick={onRefreshPorts}>刷新串口</button>}
+              <button className="button primary" disabled={!bridgeReady || busy || (config.transport === "serial" ? !serialSelected : !config.host || !config.tcpPort)} onClick={() => onConnect(supply.id)}>{busy ? "正在验证设备…" : "连接并验证"}</button>
+              {config.transport === "serial" && (BROWSER_DIRECT
+                ? <button className="button" disabled={!bridgeReady || busy} onClick={() => onAuthorizePort(supply.id)}>授权并绑定{supply.title}</button>
+                : <button className="button" disabled={!bridgeReady || busy} onClick={onRefreshPorts}>刷新串口</button>)}
             </> : <>
               <button className="button" disabled={busy} onClick={() => onRead(supply.id)}>立即读取</button>
               <button className="button" disabled={busy || outputOn} title={outputOn ? "先关闭电源输出，再断开通讯" : "断开通讯不会改变电源输出状态"} onClick={() => onDisconnect(supply.id)}>断开通讯</button>
@@ -492,9 +498,10 @@ const SupplyPanel = React.memo(function SupplyPanel({
   );
 });
 
-function SensorPanel({ displayRate, device, config, setConfig, ports, bridgeReady, busy, onRefreshPorts, onConnect, onDisconnect, onRead }) {
+function SensorPanel({ displayRate, device, config, setConfig, ports, bridgeReady, busy, onRefreshPorts, onAuthorizePort, onConnect, onDisconnect, onRead }) {
   const snapshot = device?.connected ? device.snapshot : null;
   const sensorPorts = ports.filter((port) => !/can|slcan/i.test(`${port.port} ${port.description || ""}`));
+  const serialSelected = sensorPorts.some((port) => port.port === config.device);
   const locked = Boolean(device?.connected || busy);
   const patchConfig = (patch) => setConfig({ ...config, ...patch });
 
@@ -515,7 +522,7 @@ function SensorPanel({ displayRate, device, config, setConfig, ports, bridgeRead
         <div className="hw-form-grid">
           <label>接收协议<select value={config.protocol || "modbus"} disabled={locked} onChange={(e) => patchConfig({ protocol: e.target.value, baud: e.target.value === "modbus" ? "19200" : "115200", stopbits: e.target.value === "modbus" ? "2" : "1" })}><option value="hex6">HEX 6 字节主动接收（模式 0）</option><option value="hex8">HEX 8 字节主动接收（模式 3）</option><option value="modbus">Modbus RTU 只读查询（模式 1）</option></select></label>
 
-          <label>USB-RS485 串口<select value={config.device} disabled={locked} onChange={(e) => patchConfig({ device: e.target.value })}><option value="">选择传感器串口</option>{sensorPorts.map((port) => <option key={port.port} value={port.port}>{port.port} · {port.description}</option>)}</select></label>
+          <label>USB-RS485 串口<select value={serialSelected ? config.device : ""} disabled={locked} onChange={(e) => patchConfig({ device: e.target.value })}><option value="">选择传感器串口</option>{sensorPorts.map((port) => <option key={port.port} value={port.port}>{BROWSER_DIRECT ? port.description : `${port.port} · ${port.description}`}</option>)}</select></label>
           <label>波特率<select value={config.baud} disabled={locked} onChange={(e) => patchConfig({ baud: e.target.value })}>{(config.protocol === "modbus" ? [19200, 14400, 9600, 4800, 2400, 1200] : [115200, 57600, 38400, 19200, 14400, 9600]).map((baud) => <option key={baud} value={baud}>{baud}</option>)}</select></label>
           {config.protocol === "modbus" && <label>Modbus 地址<input type="number" min="1" max="120" step="1" value={config.address} disabled={locked} onChange={(e) => patchConfig({ address: e.target.value })} /></label>}
           <label>停止位<select value={config.stopbits} disabled={locked} onChange={(e) => patchConfig({ stopbits: e.target.value })}><option value="2">2（Modbus 说明默认）</option><option value="1">1（参数表默认）</option></select></label>
@@ -524,8 +531,10 @@ function SensorPanel({ displayRate, device, config, setConfig, ports, bridgeRead
         <p className="hw-readback">串口格式为 8N（8 数据位、无校验）；手册奇偶校验记法有歧义，当前不自动猜测。</p>
         <div className="hw-connection-actions">
           {!device?.connected ? <>
-            <button className="button primary" disabled={!bridgeReady || busy || !sensorPorts.some((port) => port.port === config.device)} onClick={onConnect}>{busy ? "正在只读验证…" : "连接并验证"}</button>
-            <button className="button" disabled={!bridgeReady || busy} onClick={onRefreshPorts}>刷新串口</button>
+            <button className="button primary" disabled={!bridgeReady || busy || !serialSelected} onClick={onConnect}>{busy ? "正在只读验证…" : "连接并验证"}</button>
+            {BROWSER_DIRECT
+              ? <button className="button" disabled={!bridgeReady || busy} onClick={() => onAuthorizePort('torque-sensor')}>授权并绑定扭矩传感器</button>
+              : <button className="button" disabled={!bridgeReady || busy} onClick={onRefreshPorts}>刷新串口</button>}
           </> : <>
             <button className="button" disabled={busy} onClick={onRead}>立即读取</button>
             <button className="button" disabled={busy} onClick={onDisconnect}>断开通讯</button>
@@ -648,7 +657,10 @@ export default function App() {
   const [historyMetric, setHistoryMetric] = useState("torque");
   const [showEvents, setShowEvents] = useState(false);
   const [bridgeReady, setBridgeReady] = useState(false);
-  const [ports, setPorts] = useState([]);
+  const [ports, setPorts] = useState<WorkbenchPort[]>([]);
+  const rs485Ports = useMemo(() => BROWSER_DIRECT
+    ? ports.filter((port) => port.kind === 'serial' && !port.canInterface)
+    : ports, [ports]);
   const [connectingAll, setConnectingAll] = useState(false);
   const [connectionReport, setConnectionReport] = useState([]);
   const connectionSweep = useRef(false);
@@ -899,6 +911,19 @@ export default function App() {
     } catch {
       setPorts([]);
       if (showToast) setToast(BROWSER_DIRECT ? "无法读取串口，请检查浏览器授权与初始化状态" : "无法读取串口列表，请确认本机通信桥已启动");
+    }
+  }
+
+  async function authorizeRs485(id: string) {
+    try {
+      const port = await window.inntorqueSelectRs485();
+      const assignments = {...configsRef.current,'torque-sensor':sensorConfig};
+      if (Object.entries(assignments).some(([key,config]) => key !== id && config.device === port))
+        throw new Error('该串口已绑定到其他设备，请选择对应的转接器');
+      if (id === 'torque-sensor') setSensorConfig(previous => ({...previous,device:port}));
+      else setConfigs(previous => ({...previous,[id]:{...previous[id],device:port}}));
+    } catch (error) {
+      if (error.name !== 'NotFoundError') setToast(error.message);
     }
   }
 
@@ -1414,6 +1439,7 @@ export default function App() {
   const actions = useLiveActions({
     addEvent, connectSupply, disconnectSupply, readSupply, setSupplyValues, setSupplyOutput,
     refreshPorts: () => refreshPorts(true),
+    authorizeRs485,
     limits: (id, limits) => runAction(id, "limits", limits, "电机电源最大限幅已应用"),
     updateDevice,
     showSupplies: () => document.getElementById("supply-controls")?.scrollIntoView({ behavior: "smooth", block: "start" }),
@@ -1603,7 +1629,9 @@ export default function App() {
             <summary>{connectingAll ? "正在连接…" : connectionReport.length ? "连接结果" : "连接说明"}</summary>
             <div className="connection-report" role="status" aria-live="polite">
               {connectionReport.map((line, index) => <p key={index}>{line}</p>)}
-              {!connectionReport.length && <p>自动发现设备，按本机记住的 USB 标识恢复连接；首次使用的电源需指定供电对象。双电源与传感器在下方配置，电机可在电流环面板独立连接与步进控制。</p>}
+              {!connectionReport.length && <p>{BROWSER_DIRECT
+                ? "在下方为两台电源和扭矩传感器分别授权并绑定 RS485。驱动板上电后，选择 CAN 适配器和节点再连接。"
+                : "自动发现设备，按本机记住的 USB 标识恢复连接；首次使用的电源需指定供电对象。双电源与传感器在下方配置，电机可在电流环面板独立连接与步进控制。"}</p>}
             </div>
           </details>
         </section>
@@ -1654,10 +1682,11 @@ export default function App() {
                   device={devices[supply.id]}
                   config={configs[supply.id]}
                   point={setpoints[supply.id]}
-                  ports={ports}
+                  ports={rs485Ports}
                   bridgeReady={bridgeReady}
                   busy={busy[supply.id]}
                   onRefreshPorts={actions.refreshPorts}
+                  onAuthorizePort={actions.authorizeRs485}
                   onConnect={actions.connectSupply}
                   onDisconnect={actions.disconnectSupply}
                   onRead={actions.readSupply}
@@ -1671,10 +1700,11 @@ export default function App() {
                 device={devices["torque-sensor"]}
                 config={sensorConfig}
                 setConfig={setSensorConfig}
-                ports={ports}
+                ports={rs485Ports}
                 bridgeReady={bridgeReady}
                 busy={sensorBusy}
                 onRefreshPorts={actions.refreshPorts}
+                onAuthorizePort={actions.authorizeRs485}
                 onConnect={connectTorqueSensor}
                 onDisconnect={disconnectTorqueSensor}
                 onRead={() => runTorqueSensorAction("read")}

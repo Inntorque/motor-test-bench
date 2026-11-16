@@ -177,15 +177,21 @@ export class Bench {
     this.connection = {running:true,report:[],candidates:[]};
     void (async () => {
       try {
+        const ports = await this.io.call('ports',{});
+        const rs485 = ports.filter(port => port.kind === 'serial' && !canInterface(port));
         for (const key of ['motor-supply','brake-supply','torque-sensor','current-motor']) {
           const channel = key === 'current-motor' ? this.motor : key === 'torque-sensor' ? this.sensor : this.channels[key];
-          if (channel.status().connected) { this.connection.report.push(`${key}：已连接`); continue; }
+          const label = {'motor-supply':'电机电源','brake-supply':'制动电源','torque-sensor':'动态扭矩传感器','current-motor':'电机驱动板'}[key];
+          if (channel.status().connected) { this.connection.report.push(`${label}：已连接`); continue; }
           try {
             const config = key === 'current-motor' ? await this.motorConfig(hints[key]) : hints[key];
-            if (!config?.device) throw new Error('请在连接配置中指定已授权的串口');
-            await channel.connect(config); this.connection.report.push(`${key}：已连接`);
-          } catch (error) { this.connection.report.push(`${key}：${error.message}`); }
+            if (key !== 'current-motor' && !rs485.some(port => port.port === config?.device))
+              throw new Error(rs485.length ? '请在设备的通信参数中绑定对应串口' : '未发现已授权的 USB-RS485，请在设备的通信参数中授权并绑定');
+            await channel.connect(config); this.connection.report.push(`${label}：已连接`);
+          } catch (error) { this.connection.report.push(`${label}：${error.message}`); }
         }
+      } catch (error) {
+        this.connection.report.push(`无法读取设备接口：${error.message}`);
       } finally { this.connection.running = false; this.publish(); }
     })();
     return this.connection;

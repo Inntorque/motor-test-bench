@@ -6,6 +6,29 @@ import {CAN,OP,O,schema,IsoTp,packet,unpack,objects,values,tlv} from '../browser
 import {concat,crc32,pack,view,sleep,hex} from '../browser/bytes.ts';
 import {zqwlFrame} from '../browser/transports.ts';
 
+test('an unpowered drive releases its CAN port and can reconnect once powered',async t => {
+  const board = new VirtualBoard(), io = board.call.bind(board);
+  let powered = false, open = false;
+  board.call = async (method,args) => {
+    if (method === 'serial-open') {assert.equal(open,false);open = true;}
+    if (method === 'serial-close') {assert.equal(open,true);open = false;}
+    if (method === 'serial-write' && args.data[0] === 0x5a && !powered) return;
+    return io(method,args);
+  };
+  const device = new MotorDevice(board);
+  t.after(() => device.close());
+  const config = {device:'virtual-test-only',node:1,interface:'zqwl',baud:500000};
+  await assert.rejects(device.connect(config),/节点 1 未回应 MBP\/1 握手/);
+  assert.equal(open,false);
+  assert.equal(board.listeners.size,0);
+  assert.equal(device.pending.size,0);
+  powered = true;
+  const timer = setInterval(() => board.publish(),50);
+  t.after(() => clearInterval(timer));
+  const status = await device.connect(config);
+  assert.equal(status.motor.output_on,false);
+  assert.deepEqual(board.commands.map(({opcode}) => opcode),[OP.identify,OP.read_state]);
+});
 
 test('browser USB-CAN -> ISO-TP -> MBP client identifies, prepares, starts maximum Iq, reads frozen data and confirms STOP',async t => {
   const board = new VirtualBoard(), events = [], device = new MotorDevice(board,(kind,data) => events.push([kind,data]));

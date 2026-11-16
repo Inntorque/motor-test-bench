@@ -110,15 +110,36 @@ export class MotorDevice {
       } finally { clearTimeout(timer); this.pending.delete(request); }
     });
   }
-  async connect(config) {
-    if (!this.bus || this.bus.closed || this.error) {
+  private connectQueue = new SerialQueue();
+  connect(config) {return this.connectQueue.run(() => this.identifyConnection(config));}
+
+  private async identifyConnection(config) {
+    const opening = !this.bus || this.bus.closed || !!this.error;
+    if (opening) {
       if (this.bus) await this.bus.close();
       this.node = Number(config.node ?? 1);
       if (!Number.isInteger(this.node) || this.node < 1 || this.node > 63) throw new Error('MBP 节点必须为 1–63');
+      this.identity = {}; this.state = {}; this.sample = {}; this.stateAt = this.sampleAt = 0;
+      this.bootId = 0n; this.bootTag = undefined; this.wire = undefined;
+      this.stateUtc = this.sampleUtc = undefined;
+      this.maximum = this.lastFaultEvent = undefined;
+      this.assembler = new SampleAssembler();
       this.bus = new CanTransport(this.io,(id,data) => this.receive(id,data));
       this.channels = [0,1].map(channel => new IsoTp(data => this.bus.send((channel ? CAN.diagnostic_request : CAN.request) + this.node,data),data => this.response(channel,data),channel ? 256 : 1024));
-      await this.bus.open(config);
     }
+    try {
+      if (opening) await this.bus.open(config);
+      return await this.identify();
+    } catch (error) {
+      if (!opening) throw error;
+      const message = error.message === 'ISO-TP flow control timeout'
+        ? `USB-CAN 已打开，节点 ${this.node} 未回应 MBP/1 握手。请确认驱动板已上电，并核对 CAN 接线和节点。`
+        : error.message;
+      try {await this.close();} finally {this.error = message;}
+      throw new Error(message,{cause:error});
+    }
+  }
+  private async identify() {
     this.error = '';
     const identity = await this.request(OP.identify);
     const required = [O.device_uid,O.boot_id,...(this.wire[0] === schema.wire[0] ? [O.control_modes,O.feedback_fields,O.dq_current_convention] : [])];

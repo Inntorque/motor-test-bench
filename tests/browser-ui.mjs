@@ -62,6 +62,26 @@ try {
     const href = await page.getByRole('link',{name:`打开${app.name}`,exact:true}).getAttribute('href');
     assert.equal(new URL(href,base).searchParams.get('v'),app.browserVersion);
   }
+  const bindings = await browser.newContext();
+  await bindings.addInitScript(() => {
+    const rs485 = {getInfo:() => ({usbVendorId:0x345f,usbProductId:0x3020})};
+    const can = {getInfo:() => ({usbVendorId:0x3562,usbProductId:0x0101})};
+    window.bindingPort = rs485;
+    Object.defineProperty(navigator,'serial',{value:{
+      getPorts:async () => [can], requestPort:async () => window.bindingPort, addEventListener() {},
+    }});
+  });
+  const bindingPage = await bindings.newPage();
+  await bindingPage.goto(`${base}apps/dynamometer/`);
+  await bindingPage.getByRole('status').filter({hasText:'网页已就绪'}).first().waitFor();
+  const motorSupply = bindingPage.getByRole('region',{name:'电机电源控制',exact:true});
+  const selector = motorSupply.getByRole('combobox',{name:'串口',exact:true});
+  assert.equal(await selector.locator('option').count(),1,'CAN is excluded from RS485 choices');
+  await motorSupply.getByRole('button',{name:'授权并绑定电机电源'}).click();
+  await selector.locator('option:checked').filter({hasText:'345f:3020'}).waitFor({state:'attached'});
+  assert.match(await selector.inputValue(),/^serial-/);
+  assert.equal(await motorSupply.getByRole('button',{name:'连接并验证'}).isEnabled(),true);
+  await bindings.close();
   const direct = await browser.newContext({viewport:{width:1440,height:1000}});
   await direct.addInitScript({content:fixture});
   const control = await direct.newPage();

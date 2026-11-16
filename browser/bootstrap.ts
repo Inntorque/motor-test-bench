@@ -30,6 +30,13 @@ const access = new DeviceAccess((message,transfer) => worker.postMessage(message
   refreshPorts();
   window.dispatchEvent(new Event('inntorque-ports-changed'));
 });
+if (app === 'dynamometer') {
+  window.inntorqueSelectRs485 = async () => {
+    const id = await access.authorizeSerial();
+    if (access.ports().find(port => port.port === id)?.canInterface) throw new Error('请选择 USB-RS485 转接器');
+    return id;
+  };
+}
 function refreshPorts() {
   const target = foc ? document.querySelector<HTMLSelectElement>('#channel') : select;
   if (!target) return;
