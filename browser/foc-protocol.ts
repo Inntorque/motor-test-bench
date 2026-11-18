@@ -71,11 +71,14 @@ export class FocLink {
   readonly node: number;
   readonly profile: FocProfile;
 
-  constructor(io: DeviceIo, node: number, profile: FocProfile) {
+  constructor(io: DeviceIo, node: number, profile: FocProfile, sharedBus?: CanTransport) {
     this.node = node;
     this.profile = profile;
-    this.bus = new CanTransport(io,(id,data) => this.receive?.(id,data));
+    this.bus = sharedBus || new CanTransport(io,(id,data) => this.receive?.(id,data));
+    if (sharedBus) this.sequence = crypto.getRandomValues(new Uint8Array(1))[0] % 254;
   }
+
+  receiveFrame(id: number, data: Uint8Array) { this.receive?.(id,data); }
 
   fail(error: Error) {this.reject?.(error);}
 

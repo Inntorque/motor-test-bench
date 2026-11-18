@@ -28,14 +28,12 @@
     "browser/**/*.ts",
     "web/src/**/*.ts",
     "web/src/**/*.tsx",
-    "gateway/**/*.ts",
     "types/**/*.d.ts"
   ],
   "exclude": [
     "node_modules",
     "site",
     "dist",
-    ".runtime",
-    "gateway/hosts"
+    ".runtime"
   ]
 }

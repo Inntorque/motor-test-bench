@@ -5,18 +5,24 @@ import {LoadTrial} from '../web/src/loadTrial.ts';
 test('safe defaults and torque units, reject blanks and unmeasured targets',()=>{
   assert.equal(torqueSweepError(TORQUE_SWEEP_DEFAULTS),'');
   const request=torqueSweepRequest(TORQUE_SWEEP_DEFAULTS);
-  assert.equal(request.motorMode,'maximum_output');assert.equal(request.negativeIdMinA,0);assert.equal(request.maxPhaseA,0);
-  assert.equal(torqueSweepRequest({...TORQUE_SWEEP_DEFAULTS,motorMode:'full_current'}).motorMode,'full_current');
+  assert.equal(request.motorMode,'dyno');assert.equal(request.targetA,0);
+  assert.equal('negativeIdMinA' in request,false);assert.equal('maxPhaseA' in request,false);
+  assert.equal(torqueSweepRequest({...TORQUE_SWEEP_DEFAULTS,motorMode:'full_current'}).motorMode,'dyno');
+  assert.equal(torqueSweepRequest({...TORQUE_SWEEP_DEFAULTS,motorMode:'current_loop',targetA:'1.25'}).targetA,1.25);
+  for(const targetA of ['', '10', '-5.38', 'NaN'])assert.ok(torqueSweepError({...TORQUE_SWEEP_DEFAULTS,motorMode:'current_loop',targetA}));
+  assert.equal(torqueSweepError({...TORQUE_SWEEP_DEFAULTS,motorMode:'current_loop',targetA:'-5.37'},{},{currentLoopMinA:-6,currentLoopMaxA:8}),'');
   assert.equal(request.mode,'torque_sweep');assert.equal(request.brake.startNm,0);
   assert.equal(torqueSweepError({...TORQUE_SWEEP_DEFAULTS,startNm:'0'},{minTargetNm:0}),'');
   assert.ok(torqueSweepError({...TORQUE_SWEEP_DEFAULTS,startNm:'-0.1'}));
   assert.equal('rampS' in request,false);assert.equal('durationS' in request,false);
-  assert.deepEqual(Object.keys(TORQUE_SWEEP_DEFAULTS),['startNm','stepNm','intervalS']);
+  assert.deepEqual(Object.keys(TORQUE_SWEEP_DEFAULTS),['startNm','stepNm']);
   assert.equal('currentA' in request.brake,false);
   assert.equal(request.brake.maxNm,99.9);
-  for(const override of [{startNm:''},{startNm:'100'},{intervalS:'Infinity'},{stepNm:'.001'}])assert.ok(torqueSweepError({...TORQUE_SWEEP_DEFAULTS,...override}));
+  assert.equal(torqueSweepRequest(TORQUE_SWEEP_DEFAULTS,{maxTargetNm:2.7}).brake.maxNm,2.7);
+  assert.ok(torqueSweepError({...TORQUE_SWEEP_DEFAULTS,startNm:'2.8'},{maxTargetNm:2.7}));
+  for(const override of [{startNm:''},{startNm:'100'},{stepNm:'.001'}])assert.ok(torqueSweepError({...TORQUE_SWEEP_DEFAULTS,...override}));
   // Ignore obsolete saved motor settings; they cannot alter the new request.
-  assert.deepEqual(torqueSweepRequest({...TORQUE_SWEEP_DEFAULTS,rampS:'5',durationS:'10'}),request);
+  assert.deepEqual(torqueSweepRequest({...TORQUE_SWEEP_DEFAULTS,rampS:'5',durationS:'10',intervalS:'0.001'}),request);
 });
 test('load button discards earlier spinup from characteristic curve; frozen chart keeps exact cutoff',()=>{
   const trace=new LoadTrial({id:'a',running:true,startedAt:1000});

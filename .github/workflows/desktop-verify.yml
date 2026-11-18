@@ -1,0 +1,75 @@
+name: Desktop verification
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - run: npm ci
+      - run: npm run desktop:setup
+      - run: npm test
+      - run: go -C desktop/launcher test -v ./...
+      - run: go -C desktop/launcher vet ./...
+      - run: npm run protocol:check
+        env:
+          CC: gcc
+      - run: npm run build
+      - run: npx playwright install chromium
+      - run: npm run test:ui
+      - run: npm run review:upload
+      - if: runner.os == 'Linux'
+        name: Desktop checks with Chromium sandbox
+        run: |
+          sudo chown root:root desktop/node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 desktop/node_modules/electron/dist/chrome-sandbox
+          xvfb-run -a npm run test:desktop
+      - if: runner.os == 'Windows'
+        run: npm run test:desktop
+      - name: Create isolated verification key (never a production signing key)
+        shell: bash
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import path from "node:path"; import {generateKeyPairSync} from "node:crypto"; const {privateKey,publicKey}=generateKeyPairSync("ed25519"); fs.writeFileSync(path.join(process.env.RUNNER_TEMP,"verification-private.pem"),privateKey.export({type:"pkcs8",format:"pem"}),{mode:0o600}); fs.writeFileSync("desktop/release-public-key.pem",publicKey.export({type:"spki",format:"pem"}));'
+      - name: Build portable verification package
+        run: node scripts/release.mjs
+        env:
+          INNTORQUE_SIGNING_KEY_FILE: ${{ runner.temp }}/verification-private.pem
+      - if: runner.os == 'Linux'
+        name: Verify real portable update and rollback
+        run: xvfb-run -a npm run test:portable
+        env:
+          CHROME_DEVEL_SANDBOX: ${{ github.workspace }}/desktop/node_modules/electron/dist/chrome-sandbox
+      - if: runner.os == 'Windows'
+        run: npm run test:portable
+      - name: Remove verification key
+        if: always()
+        shell: bash
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import path from "node:path"; fs.rmSync(path.join(process.env.RUNNER_TEMP,"verification-private.pem"),{force:true});'

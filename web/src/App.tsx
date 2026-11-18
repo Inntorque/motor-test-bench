@@ -1,11 +1,14 @@
 import type {ApiOptions} from './apiClient.ts';
 import type {DeviceMap, WorkbenchDevice} from './types.ts';
 import {apiFetch} from './apiClient.ts';
-import {sensorFrameBatch,subscribeSensorFrames} from './deviceStore.ts';
+import {sensorFrameBatch,subscribeSensorFrames,subscribeDevices} from './deviceStore.ts';
 import {useChartVisibility} from './useChartVisibility.ts';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { appendSamples, plotColumns } from "./livePerformance.ts";
 import { useLiveActions } from "./useLiveActions.ts";
+import AutoSaveStatus from "./AutoSaveStatus.tsx";
+import DesktopDevices from "./DesktopDevices.tsx";
+import ControlDialog from "./ControlDialog.tsx";
 import MotorCurrentPanel from "./MotorCurrentPanel.tsx";
 import CoupledCurrentPanel from "./CoupledCurrentPanel.tsx";
 import BrakeCurrentPanel from "./BrakeCurrentPanel.tsx";
@@ -25,31 +28,32 @@ import {
 } from "./records.ts";
 import { toCsv, formatDuration, shaftPowerKw as calculateShaftPowerKw, motorTemperatureC, motorTargetCurrentA, motorLiveCurrents, characteristicAxisMax } from "./model.ts";
 const BROWSER_DIRECT = Boolean(globalThis.INNTORQUE_BROWSER_DIRECT);
+const DESKTOP = Boolean(globalThis.window?.inntorqueDesktop);
 
 const MAX_SAMPLES = 1500;
 const SENSOR_POLL_MS = 50;
 const LIVE_SAMPLE_LIMIT = 60000;
 const CHANNELS = [
   {
-    key: "motorConnected",
+    key: "motorConnected", id: "current-motor",
     name: "电机驱动板",
     icon: "motor",
     detail: "MBP/1 · 电机 Iq 电流环",
   },
   {
-    key: "sensorConnected",
+    key: "sensorConnected", id: "torque-sensor",
     name: "动态扭矩传感器",
     icon: "sensor",
     detail: "独立 RS485 · 只读测量",
   },
   {
-    key: "supplyConnected",
+    key: "supplyConnected", id: "brake-supply",
     name: "制动电源",
     icon: "power",
     detail: "Modbus RTU · 制动负载",
   },
   {
-    key: "motorSupplyConnected",
+    key: "motorSupplyConnected", id: "motor-supply",
     name: "电机电源",
     icon: "power",
     detail: "万瑞达 RU · Modbus RTU",
@@ -339,14 +343,13 @@ function PlotDrawing({
       </svg>
       {empty && (
         <div className="plot-empty">
-          <span>暂无真实采集数据</span>
-          <p>接入并读取实际设备后，这里显示扭矩、转速、计算轴功率和制动电流曲线；未接入的量保持为空。</p>
+          <span>等待读数</span>
           <button
             className="button primary"
             onClick={onConnect}
           >
             <Icon name="settings" size={16} />
-            前往电源控制
+            {DESKTOP ? "设备设置" : "前往电源控制"}
           </button>
         </div>
       )}
@@ -369,7 +372,7 @@ interface SupplyPanelProps {
   supply: typeof SUPPLIES[number]; device: WorkbenchDevice; config: ReturnType<typeof loadConfig>;
   setConfig: (config: ReturnType<typeof loadConfig>) => void;
   point: ReturnType<typeof supplyPoint>; setPoint: (point: ReturnType<typeof supplyPoint>) => void;
-  ports: WorkbenchPort[]; bridgeReady: boolean; busy: boolean;
+  ports: WorkbenchPort[]; bridgeReady: boolean; busy: boolean; outputError?: string;
   onAuthorizePort: (id: string) => void;
   onRefreshPorts: () => void; onConnect: (id: string) => void; onDisconnect: (id: string) => void;
   onRead: (id: string) => void; onSet: (id: string) => void; onOutput: (id: string, on: boolean) => void;
@@ -378,10 +381,13 @@ interface SupplyPanelProps {
 }
 const SupplyPanel = React.memo(function SupplyPanel({
   supply, device, config, setConfig, point, setPoint, ports, bridgeReady,
-  busy, onRefreshPorts, onAuthorizePort, onConnect, onDisconnect, onRead, onSet, onOutput, onLimits, token, onDeviceState, onEvent,
+  busy, outputError, onRefreshPorts, onAuthorizePort, onConnect, onDisconnect, onRead, onSet, onOutput, onLimits, token, onDeviceState, onEvent,
 }: SupplyPanelProps) {
   const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem(`motor-bench:${supply.id}:collapsed`) === "true"; }
+    try {
+      const saved = localStorage.getItem(`motor-bench:${supply.id}:collapsed`);
+      return saved === null ? Boolean(window.inntorqueDesktop) : saved === "true";
+    }
     catch { return false; }
   });
   const values = snapshotValues(device);
@@ -408,6 +414,7 @@ const SupplyPanel = React.memo(function SupplyPanel({
           {!withinLimits && <p className="hw-inline-error">设定值超过电源额定范围或工作台最大限幅。</p>}
           {device?.snapshot?.protection && <p className="hw-readback">设备保护读回：OVP {device.snapshot.protection.voltage} V（{device.snapshot.protection.ovpEnabled ? "已启用" : "未启用"}） / OCP {device.snapshot.protection.current} A（{device.snapshot.protection.ocpEnabled ? "已启用" : "未启用"}）</p>}
           {device?.snapshot?.ruStatus && <p className="hw-readback">{device.snapshot.ruStatus.cc ? "恒流 CC" : device.snapshot.ruStatus.cv ? "恒压 CV" : "CC/CV 未激活"} · OVP {device.snapshot.ruStatus.ovp ? "触发" : "未触发"} · OCP {device.snapshot.ruStatus.ocp ? "触发" : "未触发"} · OTP {device.snapshot.ruStatus.otp ? "触发" : "未触发"}</p>}
+          {outputError && <p className="hw-inline-error" role="alert">{outputError}</p>}
           <div className="hw-output-actions">
             {!motorSupply && <button className="button" disabled={!device?.connected || busy || !validPoint || !withinLimits || !registerSafe} onClick={() => onSet(supply.id)}>设置制动电流</button>}
             <button className={`button ${mayBeOn?'danger':'primary'}`} disabled={!mayBeOn&&(!device?.connected || busy || !validPoint || !withinLimits || !registerSafe || (!motorSupply && !brakeApplied))} onClick={() => onOutput(supply.id, !mayBeOn)}>{mayBeOn?`关闭${supply.title}`:`开启${supply.title}`}</button>
@@ -472,7 +479,7 @@ const SupplyPanel = React.memo(function SupplyPanel({
           <div className="hw-connection-actions">
             {!device?.connected ? <>
               <button className="button primary" disabled={!bridgeReady || busy || (config.transport === "serial" ? !serialSelected : !config.host || !config.tcpPort)} onClick={() => onConnect(supply.id)}>{busy ? "正在验证设备…" : "连接并验证"}</button>
-              {config.transport === "serial" && (BROWSER_DIRECT
+              {config.transport === "serial" && (BROWSER_DIRECT && !DESKTOP
                 ? <button className="button" disabled={!bridgeReady || busy} onClick={() => onAuthorizePort(supply.id)}>授权并绑定{supply.title}</button>
                 : <button className="button" disabled={!bridgeReady || busy} onClick={onRefreshPorts}>刷新串口</button>)}
             </> : <>
@@ -507,7 +514,7 @@ function SensorPanel({ displayRate, device, config, setConfig, ports, bridgeRead
 
   return (
     <section className="hw-supply-card hw-sensor-panel" aria-label="动态扭矩传感器连接">
-      <details className="hw-sensor-details" open={!device?.connected}>
+      <details className="hw-sensor-details" open={!window.inntorqueDesktop && !device?.connected}>
       <summary className="hw-supply-head">
         <span className="hw-device-icon"><Icon name="sensor" size={21} /></span>
         <div className="hw-supply-title"><h2>动态扭矩传感器</h2><p>{config.protocol === "hex6" ? "HEX 6 字节" : config.protocol === "hex8" ? "HEX 8 字节" : "Modbus RTU"} · RS485 · 只读采集</p></div>
@@ -532,7 +539,7 @@ function SensorPanel({ displayRate, device, config, setConfig, ports, bridgeRead
         <div className="hw-connection-actions">
           {!device?.connected ? <>
             <button className="button primary" disabled={!bridgeReady || busy || !serialSelected} onClick={onConnect}>{busy ? "正在只读验证…" : "连接并验证"}</button>
-            {BROWSER_DIRECT
+            {BROWSER_DIRECT && !DESKTOP
               ? <button className="button" disabled={!bridgeReady || busy} onClick={() => onAuthorizePort('torque-sensor')}>授权并绑定扭矩传感器</button>
               : <button className="button" disabled={!bridgeReady || busy} onClick={onRefreshPorts}>刷新串口</button>}
           </> : <>
@@ -626,6 +633,8 @@ export default function App() {
   const viewRef = useRef(view);
   viewRef.current = view;
   const [settings, setSettings] = useState(false);
+  const [desktopPane, setDesktopPane] = useState("chart");
+  const [controlsVisible, setControlsVisible] = useState(false);
   const [metric, setMetric] = useState("torque");
   const [characteristicView, setCharacteristicView] = useState(false);
   const [windowSeconds, setWindowSeconds] = useState(30);
@@ -657,6 +666,9 @@ export default function App() {
   const [historyMetric, setHistoryMetric] = useState("torque");
   const [showEvents, setShowEvents] = useState(false);
   const [bridgeReady, setBridgeReady] = useState(false);
+  const [motorSupplyOutputError, setMotorSupplyOutputError] = useState("");
+  const motorSupplyOutputRecovery = useRef<{on: boolean; after: number} | null>(null);
+  const deviceFeedRevision = useRef(0);
   const [ports, setPorts] = useState<WorkbenchPort[]>([]);
   const rs485Ports = useMemo(() => BROWSER_DIRECT
     ? ports.filter((port) => port.kind === 'serial' && !port.canInterface)
@@ -846,6 +858,12 @@ export default function App() {
         outputUncertain:payload?.outputUncertain??previous[id]?.outputUncertain??false,
       },
     };
+    const recovery = motorSupplyOutputRecovery.current;
+    if (id === 'motor-supply' && recovery && connected && snapshot?.receivedAt > recovery.after &&
+        Boolean(snapshot.status & 128) === recovery.on) {
+      motorSupplyOutputRecovery.current = null;
+      setMotorSupplyOutputError('');
+    }
     devicesRef.current = next;
     setDevices(next);
     syncBenchState(next);
@@ -907,10 +925,10 @@ export default function App() {
     try {
       const result = await fetchJson("/api/ports");
       setPorts(result.ports || []);
-      if (showToast) setToast(result.ports?.length ? `发现 ${result.ports.length} 个串口` : (BROWSER_DIRECT ? "请先点击顶部授权串口，再选择设备" : "未发现串口；也可配置 RTU 透明 TCP 网关"));
+      if (showToast) setToast(result.ports?.length ? `发现 ${result.ports.length} 个串口` : (DESKTOP ? "未发现设备接口，请检查 USB 连接" : BROWSER_DIRECT ? "请先点击顶部授权串口，再选择设备" : "未发现串口；也可配置 RTU 透明 TCP 网关"));
     } catch {
       setPorts([]);
-      if (showToast) setToast(BROWSER_DIRECT ? "无法读取串口，请检查浏览器授权与初始化状态" : "无法读取串口列表，请确认本机通信桥已启动");
+      if (showToast) setToast(DESKTOP ? "无法读取设备列表，请检查设备连接与系统权限" : BROWSER_DIRECT ? "无法读取串口，请检查浏览器授权与初始化状态" : "无法读取串口列表，请确认本机通信桥已启动");
     }
   }
 
@@ -1044,10 +1062,11 @@ export default function App() {
     let active = true, syncing = false;
     async function syncHardware() {
       if (syncing) return;
+      const revision = deviceFeedRevision.current;
       syncing = true;
       try {
         const health = await fetchJson("/api/health", {signal: AbortSignal.timeout(3000)});
-        if (!active || health.app !== "motor-test-bench-hardware") return;
+        if (!active || revision !== deviceFeedRevision.current || health.app !== "motor-test-bench-hardware") return;
         token.current = health.token || "";
         setBridgeReady(true);
         for (const supply of SUPPLIES) {
@@ -1082,7 +1101,7 @@ export default function App() {
         });
         if (sensorStatus.connected && !sensorWasConnected) void runTorqueSensorAction("read", { quiet: true });
       } catch {
-        if (!active) return;
+        if (!active || revision !== deviceFeedRevision.current) return;
         token.current = "";
         setBridgeReady(false);
         for (const supply of SUPPLIES) updateDevice(supply.id, { connected: false });
@@ -1090,6 +1109,19 @@ export default function App() {
         updateDevice("current-motor", { connected: false });
       } finally { syncing = false; }
     }
+    const unsubscribeDevices = subscribeDevices(packet => {
+      deviceFeedRevision.current++;
+      const online = packet.streamOnline !== false;
+      const health = packet.routes?.['/api/health'];
+      if (health?.token) token.current = health.token;
+      setBridgeReady(online);
+      for (const channel of CHANNELS) {
+        const device = packet.devices?.[channel.id];
+        if (device) updateDevice(channel.id, online ? device : {...device,connected:false,error:'设备状态流已中断，等待恢复'});
+      }
+      const connection = packet.routes?.['/api/connections/status'];
+      if (connection) setConnectionReport(connection.report || []);
+    });
     void syncHardware();
     void refreshPorts(false);
     const timer = window.setInterval(() => {
@@ -1199,16 +1231,18 @@ export default function App() {
       }
     }, SENSOR_POLL_MS);
     return () => { active = false; window.clearInterval(timer); window.clearInterval(sensorTimer);
-      unsubscribeFrames();window.clearTimeout(receiveTimer); window.clearInterval(motorTimer); window.clearInterval(displayRateTimer); cancelAnimationFrame(frameRequest); };
+      unsubscribeDevices();unsubscribeFrames();window.clearTimeout(receiveTimer); window.clearInterval(motorTimer); window.clearInterval(displayRateTimer); cancelAnimationFrame(frameRequest); };
 
   }, []);
 
   async function runAction(id, action, payload: {on?: boolean; [field: string]: unknown} = {}, successText = "操作完成") {
     const stopping=action==='output'&&payload.on===false;
+    const motorSupplyOutput = id === 'motor-supply' && action === 'output';
     if (!token.current || (!stopping&&inFlight.current.has(id))) return;
     const generation=(supplyGeneration.current[id]||0)+1;
     supplyGeneration.current[id]=generation;
     inFlight.current.add(id);
+    if (motorSupplyOutput) {setMotorSupplyOutputError("");motorSupplyOutputRecovery.current=null;}
     setBusy((previous) => ({ ...previous, [id]: true }));
     try {
       // Queue the user's operation behind the current read instead of dropping the click.
@@ -1240,6 +1274,10 @@ export default function App() {
       setToast(successText);
     } catch (error) {
       if(generation!==supplyGeneration.current[id])return;
+      if (motorSupplyOutput) {
+        if (error.message === '电源输出状态读回与指令不一致') motorSupplyOutputRecovery.current={on:payload.on,after:Date.now()/1000};
+        setMotorSupplyOutputError(error.message);addEvent(`电机电源操作：${error.message}`);return;
+      }
       if (error.payload && typeof error.payload.connected === "boolean") updateDevice(id, error.payload);
       else updateDevice(id, { connected: false, error: error.message });
       setDevices((previous) => ({ ...previous, [id]: { ...previous[id], error: error.message } }));
@@ -1378,7 +1416,7 @@ export default function App() {
     anchor.download = `${prefix}_${eventsOnly ? "EVENTS_" : ""}${record.range}Nm_${new Date(record.startedAt).toISOString().replaceAll(":", "-")}.csv`;
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setToast(`${prefix === "HARDWARE" ? "真实采集" : "历史演示"} CSV 已交给浏览器下载`);
+    setToast(`${prefix === "HARDWARE" ? "真实采集" : "历史演示"} CSV 已导出`);
   };
 
   useEffect(() => {
@@ -1388,7 +1426,7 @@ export default function App() {
   }, [toast]);
   useEffect(() => {
     const warn = (event) => {
-      if (recording.current || saving || unsavedIds.current.size > 0) { event.preventDefault(); event.returnValue = ""; }
+      if (!DESKTOP && (recording.current || saving || unsavedIds.current.size > 0)) { event.preventDefault(); event.returnValue = ""; }
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
@@ -1417,18 +1455,23 @@ export default function App() {
     if (!run.id)return;
     if (run.running && trial.current?.run.id!==run.id) {
       trial.current=new LoadTrial(run);
-      setFrozen(null);setFrozenRun(null);setCharacteristicView(true);
+      setFrozen(null);setFrozenRun(null);setCharacteristicView(Boolean(run.loadStartedAt));
+      if (!run.loadStartedAt) setMetric("speed");
     }
     if (trial.current?.run.id!==run.id)return;
+    if (run.loadStartedAt && !trial.current.run.loadStartedAt) {
+      setFrozen(null);setFrozenRun(null);setCharacteristicView(true);
+    }
     const wasRunning=trial.current.run.running;
     const previousCutoff=trial.current.run.measurementEndedAt;
     trial.current.update(run);
     setTrialRun(run);
-    if ((run.measurementEndedAt&&!previousCutoff)||(wasRunning && !run.running)) {
+    if ((run.measurementEndedAt&&!previousCutoff)||(wasRunning && !run.running)||run.postStopZero || run.postStopTailState!==trialRun?.postStopTailState) {
       const measured=trial.current.snapshot();
       // Keep an empty completed trace for delayed final batches; never replace
       // a stopped trial with live readings while waiting for those samples.
       setFrozen(measured);setFrozenRun(run);
+      if(!previousCutoff && run.stallEndpoint && run.stopConfirmation?.confirmed)setCharacteristicView(true);
     }
   }
   function resumeChart() {
@@ -1442,9 +1485,8 @@ export default function App() {
     authorizeRs485,
     limits: (id, limits) => runAction(id, "limits", limits, "电机电源最大限幅已应用"),
     updateDevice,
-    showSupplies: () => document.getElementById("supply-controls")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    showSupplies: () => DESKTOP ? setSettings(true) : document.getElementById("supply-controls")?.scrollIntoView({ behavior: "smooth", block: "start" }),
     motorState: payload => updateDevice("current-motor", payload),
-    coupledStart: () => {setCharacteristicView(true);},
     coupledState,
   });
   const supplyActions = useMemo(() => Object.fromEntries(SUPPLIES.map(({id}) => [id, {
@@ -1462,15 +1504,119 @@ export default function App() {
   const duration = backendSession?.running ? backendSession.elapsedS || 0 : activeRecord ? Math.max(0, state.t - activeRecord.engineOrigin) : 0;
   const disconnectedChannels = CHANNELS.filter((channel) => !state[channel.key]);
   const canRecord = recordServiceOnline && Object.values(devices).some(device=>device.connected && device.snapshot);
-  const metricHasData = useMemo(() => samples.some(item => Number.isFinite(item[metric])), [samples, metric]);
+  const metricHasData = useMemo(() => curveSamples.some(item => Number.isFinite(item[metric])), [curveSamples, metric]);
   const historyValues = useMemo(() => selected ? selected.samples.map((item) => item[historyMetric]).filter(Number.isFinite) : [], [selected, historyMetric]);
   const historySamples = useMemo(() => view === 'records' && selected ? relativeSamples(selected.samples) : [], [view, selected]);
   const historyPeak = useMemo(() => historyValues.reduce((peak, value) => Math.max(peak, Math.abs(value)), 0), [historyValues]);
   const historyUnit = { torque: "N·m", speed: "rpm", shaftPowerKw: "kW", current: "A" }[historyMetric];
   const display = (value, digits) => value == null ? "—" : value.toFixed(digits);
 
+  const connectionControls = (
+    <section className="connection-notice" aria-label="一键连接">
+      <div className="connection-summary" role={disconnectedChannels.length ? "alert" : "status"}>
+        <p className={disconnectedChannels.length ? "connection-summary-missing" : "connection-summary-ready"}>
+          <strong>{disconnectedChannels.length
+            ? `${disconnectedChannels.map((ch) => ch.name).join("、")}未连接`
+            : "全部接口已连接"}</strong>
+        </p>
+        <p>
+          {disconnectedChannels.length > 0 && <>
+            {!state.sensorConnected ? "扭矩和转速不可用；" : "对应设备反馈不可用；"}
+            {state.loadEnabled === true ? <strong>制动电源输出仍开启。</strong> : "未连接的接口不参与控制。"}
+            {activeRecord && "记录继续，未连接设备的读数留空。"}
+          </>}
+          连接不自动开启输出。
+        </p>
+      </div>
+      <div className="connection-actions">
+        <button className="button primary" onClick={connectAll}
+          disabled={!bridgeReady || connectingAll || sensorBusy || Object.values(busy).some(Boolean) || devices["current-motor"]?.run?.running}>
+          {connectingAll ? "正在轮询连接…" : "一键连接全部接口"}
+        </button>
+        {!DESKTOP && <button className="button small" onClick={() => setSettings(true)}>接口设置</button>}
+      </div>
+      <details className="connection-details" open={connectingAll || connectionReport.length > 0}>
+        <summary>{connectingAll ? "正在连接…" : connectionReport.length ? "连接结果" : "连接说明"}</summary>
+        <div className="connection-report" role="status" aria-live="polite">
+          {CHANNELS.map(channel => {
+            const device=devices[channel.id], line=connectionReport.find(line=>line.startsWith(channel.name+'：'));
+            const detail=device?.error || (line&&!/已连接|已自动识别/.test(line)?line.slice(channel.name.length+1):'未连接');
+            return <p key={channel.id}>{channel.name}：{device?.connected?'已连接':detail}</p>;
+          })}
+          {connectionReport.filter(line=>!CHANNELS.some(channel=>line.startsWith(channel.name+'：'))).map((line,index)=><p key={`scan-${index}`}>{line}</p>)}
+          {!connectionReport.length && <p>{DESKTOP
+            ? "应用自动列出本机设备接口。一键连接会自动识别两台电源和扭矩传感器。驱动板上电后发起 CAN 识别。"
+            : BROWSER_DIRECT
+            ? "首次使用时，在顶部逐个授权 USB 转接器。一键连接会自动识别两台电源和扭矩传感器。驱动板上电后发起 CAN 识别。"
+            : "自动发现设备，按本机记住的 USB 标识恢复连接；首次使用的电源需指定供电对象。双电源与传感器在下方配置，电机可在电流环面板独立连接与步进控制。"}</p>}
+        </div>
+      </details>
+    </section>
+  );
+  const supplyControls = (
+    <div className="hw-supply-grid" id="supply-controls">
+      {SUPPLIES.map((supply) => (
+        <SupplyPanel
+          key={supply.id}
+          supply={supply}
+          token={token}
+          {...supplyActions[supply.id]}
+          onEvent={actions.addEvent}
+          device={devices[supply.id]}
+          config={configs[supply.id]}
+          point={setpoints[supply.id]}
+          ports={rs485Ports}
+          bridgeReady={bridgeReady}
+          busy={busy[supply.id]}
+          outputError={supply.id === 'motor-supply' ? motorSupplyOutputError : undefined}
+          onRefreshPorts={actions.refreshPorts}
+          onAuthorizePort={actions.authorizeRs485}
+          onConnect={actions.connectSupply}
+          onDisconnect={actions.disconnectSupply}
+          onRead={actions.readSupply}
+          onSet={actions.setSupplyValues}
+          onOutput={actions.setSupplyOutput}
+          onLimits={actions.limits}
+        />
+      ))}
+      <SensorPanel
+        displayRate={displayRate}
+        device={devices["torque-sensor"]}
+        config={sensorConfig}
+        setConfig={setSensorConfig}
+        ports={rs485Ports}
+        bridgeReady={bridgeReady}
+        busy={sensorBusy}
+        onRefreshPorts={actions.refreshPorts}
+        onAuthorizePort={actions.authorizeRs485}
+        onConnect={connectTorqueSensor}
+        onDisconnect={disconnectTorqueSensor}
+        onRead={() => runTorqueSensorAction("read")}
+      />
+    </div>
+  );
+  const rangeControl = (
+    <label className="profile-select">
+      <span>设备量程</span>
+      <select
+        aria-label="设备量程配置"
+        value={state.range}
+        onChange={(e) => changeRange(e.target.value)}
+        disabled={rangeLocked}
+        title={
+          rangeLocked
+            ? "停止电机、关闭制动输出并结束记录后可切换"
+            : "设置扭矩传感器量程"
+        }
+      >
+        <option value="50">50 N·m 配置</option>
+        <option value="100">100 N·m 配置</option>
+      </select>
+    </label>
+  );
+
   return (
-    <div className="app-shell hardware-app">
+    <div className={`app-shell hardware-app desktop-view-${view}`} data-pane={desktopPane} data-controls={controlsVisible}>
       <aside className="sidebar">
         <a
           className="brand"
@@ -1490,6 +1636,9 @@ export default function App() {
             Inntorque<span>TEST & MEASUREMENT</span>
           </div>
         </a>
+        {DESKTOP && <AutoSaveStatus onOpen={() => {
+          void window.inntorqueDesktop.openDataFolder().catch(error => setToast(`无法打开数据目录：${error.message}`));
+        }}/>}
         <div className="nav-label">工作空间</div>
         <nav aria-label="主导航">
           <button
@@ -1510,10 +1659,23 @@ export default function App() {
             <Icon name="bench" />专项测试
           </button>
         </nav>
+        {DESKTOP && <div className="desktop-toolbar">
+          <TestSubjectPicker />
+          {view === "bench" && <select aria-label="工作区视图" value={controlsVisible?'controls':desktopPane}
+            onChange={event=>{
+              const pane=event.target.value;
+              setControlsVisible(pane==='controls');
+              setDesktopPane(pane==='controls'?'chart':pane);
+            }}>
+            <option value="chart">测量曲线</option>
+            <option value="diagnostics">反馈与事件</option>
+            <option value="controls">试验控制</option>
+          </select>}
+        </div>}
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setSettings(true)}>
             <Icon name="settings" />
-            设备与连接
+            {DESKTOP ? `设备设置 · ${CHANNELS.length - disconnectedChannels.length}/${CHANNELS.length}` : "设备与连接"}
           </button>
           <div className="version">
             <span>INTERFACE PREVIEW</span>
@@ -1535,24 +1697,8 @@ export default function App() {
             </p>
           </div>
           <div className="header-actions">
-            <TestSubjectPicker />
-            <label className="profile-select">
-              <span>设备量程</span>
-              <select
-                aria-label="设备量程配置"
-                value={state.range}
-                onChange={(e) => changeRange(e.target.value)}
-                disabled={rangeLocked}
-                title={
-                  rangeLocked
-                    ? "停止电机、关闭制动输出并结束记录后可切换"
-                    : "设置扭矩传感器量程"
-                }
-              >
-                <option value="50">50 N·m 配置</option>
-                <option value="100">100 N·m 配置</option>
-              </select>
-            </label>
+            {!DESKTOP && <TestSubjectPicker />}
+            {!DESKTOP && rangeControl}
             <button
               className="button settings-button"
               onClick={() => setSettings(true)}
@@ -1562,7 +1708,7 @@ export default function App() {
             </button>
           </div>
         </header>
-        <div className={`simulation-banner hardware-banner ${bridgeReady ? "ready" : ""}`}>
+        {!DESKTOP && <div className={`simulation-banner hardware-banner ${bridgeReady ? "ready" : ""}`}>
           <div>
             <Icon name="info" size={17} />
             <strong>{bridgeReady ? "真实设备模式" : BROWSER_DIRECT ? "设备执行器未就绪" : "通信桥未启动"}</strong>
@@ -1572,8 +1718,8 @@ export default function App() {
             查看接口状态
             <Icon name="info" size={15} />
           </button>
-        </div>
-        <section className="bench-status" aria-label="当前设备运行状态">
+        </div>}
+        {!DESKTOP && <section className="bench-status" aria-label="当前设备运行状态">
           <div className="bench-status-items">
             <span>
               <strong>电机</strong>
@@ -1601,40 +1747,8 @@ export default function App() {
             <Icon name="stop" size={15} />
             关闭制动输出
           </button>
-        </section>
-        <section className="connection-notice" aria-label="一键连接">
-          <div className="connection-summary" role={disconnectedChannels.length ? "alert" : "status"}>
-            <p className={disconnectedChannels.length ? "connection-summary-missing" : "connection-summary-ready"}>
-              <strong>{disconnectedChannels.length
-                ? `${disconnectedChannels.map((ch) => ch.name).join("、")}未连接`
-                : "全部接口已连接"}</strong>
-            </p>
-            <p>
-              {disconnectedChannels.length > 0 && <>
-                {!state.sensorConnected ? "扭矩和转速不可用；" : "对应设备反馈不可用；"}
-                {state.loadEnabled === true ? <strong>制动电源输出仍开启。</strong> : "未连接的接口不参与控制。"}
-                {activeRecord && "记录继续，未连接设备的读数留空。"}
-              </>}
-              连接不自动开启输出。
-            </p>
-          </div>
-          <div className="connection-actions">
-            <button className="button primary" onClick={connectAll}
-              disabled={!bridgeReady || connectingAll || sensorBusy || Object.values(busy).some(Boolean) || devices["current-motor"]?.run?.running}>
-              {connectingAll ? "正在轮询连接…" : "一键连接全部接口"}
-            </button>
-            <button className="button small" onClick={() => setSettings(true)}>接口设置</button>
-          </div>
-          <details className="connection-details" open={connectingAll || connectionReport.length > 0}>
-            <summary>{connectingAll ? "正在连接…" : connectionReport.length ? "连接结果" : "连接说明"}</summary>
-            <div className="connection-report" role="status" aria-live="polite">
-              {connectionReport.map((line, index) => <p key={index}>{line}</p>)}
-              {!connectionReport.length && <p>{BROWSER_DIRECT
-                ? "在下方为两台电源和扭矩传感器分别授权并绑定 RS485。驱动板上电后，选择 CAN 适配器和节点再连接。"
-                : "自动发现设备，按本机记住的 USB 标识恢复连接；首次使用的电源需指定供电对象。双电源与传感器在下方配置，电机可在电流环面板独立连接与步进控制。"}</p>}
-            </div>
-          </details>
-        </section>
+        </section>}
+        {!DESKTOP && connectionControls}
         {storageError && (
           <div role="alert" className="storage-error">
             {storageError}
@@ -1648,7 +1762,7 @@ export default function App() {
 
         {view === "bench" ? (
           <>
-            <section className="connections" aria-label="设备真实连接状态">
+            {!DESKTOP && <section className="connections" aria-label="设备真实连接状态">
               {CHANNELS.map((ch) => (
                 <button
                   key={ch.key}
@@ -1670,46 +1784,8 @@ export default function App() {
                   </span>
                 </button>
               ))}
-            </section>
-            <div className="hw-supply-grid" id="supply-controls">
-              {SUPPLIES.map((supply) => (
-                <SupplyPanel
-                  key={supply.id}
-                  supply={supply}
-                  token={token}
-                  {...supplyActions[supply.id]}
-                  onEvent={actions.addEvent}
-                  device={devices[supply.id]}
-                  config={configs[supply.id]}
-                  point={setpoints[supply.id]}
-                  ports={rs485Ports}
-                  bridgeReady={bridgeReady}
-                  busy={busy[supply.id]}
-                  onRefreshPorts={actions.refreshPorts}
-                  onAuthorizePort={actions.authorizeRs485}
-                  onConnect={actions.connectSupply}
-                  onDisconnect={actions.disconnectSupply}
-                  onRead={actions.readSupply}
-                  onSet={actions.setSupplyValues}
-                  onOutput={actions.setSupplyOutput}
-                  onLimits={actions.limits}
-                />
-              ))}
-              <SensorPanel
-                displayRate={displayRate}
-                device={devices["torque-sensor"]}
-                config={sensorConfig}
-                setConfig={setSensorConfig}
-                ports={rs485Ports}
-                bridgeReady={bridgeReady}
-                busy={sensorBusy}
-                onRefreshPorts={actions.refreshPorts}
-                onAuthorizePort={actions.authorizeRs485}
-                onConnect={connectTorqueSensor}
-                onDisconnect={disconnectTorqueSensor}
-                onRead={() => runTorqueSensorAction("read")}
-              />
-            </div>
+            </section>}
+            {!DESKTOP && supplyControls}
             <div className="workspace-grid">
               <section className="measurement-area" aria-label="测量与记录">
                 <div className="readings">
@@ -1736,11 +1812,6 @@ export default function App() {
                       />
                     </div>
                     <div className="reading-foot">
-                      <span>
-                        {state.sensorConnected
-                          ? "输出端 · 真实传感器读数"
-                          : "传感器未连接 · 数据不可用"}
-                      </span>
                       <span>量程 {state.range} N·m</span>
                     </div>
                   </article>
@@ -1753,24 +1824,14 @@ export default function App() {
                       <span>{display(sample.speed, 0)}</span>
                       <small>rpm</small>
                     </div>
-                    <div className="reading-foot">
-                      <span>减速箱输出端</span>
-                    </div>
-                    <div className="secondary-line">
-                      {state.sensorConnected
-                        ? "来自扭矩传感器 · 实时读回"
-                        : "传感器未连接 · 无转速读数"}
-                    </div>
                   </article>
                   <article className="reading">
                     <div className="reading-label"><span>输出轴功率</span><Icon name="power" size={18} /></div>
                     <div className="value"><span>{display(Number.isFinite(sample.shaftPowerKw) ? sample.shaftPowerKw * 1000 : null, 1)}</span><small>W</small></div>
-                    <div className="reading-foot"><span>{Number.isFinite(sample.shaftPowerKw) ? `${sample.shaftPowerKw.toFixed(6)} kW` : "传感器未连接 · 无功率读数"}</span></div>
-                    <div className="secondary-line">手册公式：P = |T × n| / 9550</div>
                   </article>
-                  <article className="reading current-reading" aria-label="电机目标与实时电流">
+                  <article className="reading current-reading" aria-label="驱动 Iq">
                     <div className="reading-label">
-                      <span>电机电流</span>
+                      <span>驱动 Iq</span>
                       <Icon name="power" size={18} />
                     </div>
                     <div className="current-line current-iq">
@@ -1784,38 +1845,29 @@ export default function App() {
                         <span>{['A', 'B', 'C'][index]} 相</span><strong>{display(liveCurrents[key], 3)} <small>A</small></strong>
                       </div>)}
                     </div>
-                    <div className="reading-foot">
-                      <span className={state.loadEnabled ? "running-text" : ""}>
-                        {!state.motorConnected ? "电机未连接"
-                          : state.motorEnabled ? "电机输出已开启" : "电机输出已关闭"}
-                      </span>
-                    </div>
-                    <div className="secondary-line">
-                      {liveCurrents.iq == null || [liveCurrents.ia, liveCurrents.ib, liveCurrents.ic].some(value => value == null)
-                        ? "— 表示反馈缺失或已过期" : "三相为瞬时采样值"}
-                    </div>
                   </article>
                   <article className="reading" aria-label="电机温度读数">
                     <div className="reading-label"><span>电机温度</span></div>
                     <div className="value"><span>{display(motorTemperature, 1)}</span><small>°C</small></div>
-                    <div className="reading-foot"><span>{!state.motorConnected ? "电机未连接 · 无温度读数"
+                    <div className="reading-foot"><span>{!state.motorConnected ? null
                       : devices["current-motor"]?.snapshot?.ntc?.fault ? "NTC 故障"
                       : motorTemperature == null ? "温度无效或已过期"
                       : devices["current-motor"]?.snapshot?.ntc?.tripped_latched || (Number.isFinite(devices["current-motor"]?.snapshot?.ntc?.limit_c) && motorTemperature >= devices["current-motor"].snapshot.ntc.limit_c) ? "过温保护"
-                      : devices["current-motor"]?.snapshot?.ntc?.over ? "温度偏高 · 暂不可重新启动" : "NTC 实时反馈"}</span></div>
+                      : devices["current-motor"]?.snapshot?.ntc?.over ? "温度偏高 · 暂不可重新启动" : null}</span></div>
                   </article>
                 </div>
                 <section className="panel chart-panel">
                   <div className="panel-heading">
                     <div>
                       <h2>{characteristicView ? "扭矩特性曲线" : "实时曲线"}</h2>
-                      <span className="panel-caption">
-                        {frozen
-                          ? (frozenRun ? `试验曲线已保留 · ${frozenRun.reason || '试验结束'}` : "视图已暂停 · 采集仍在继续")
-                          : fullTrial ? "本次固定负载试验全过程 · 实测数据" : "真实设备读回 · 未接入的通道保留空值"}
-                      </span>
+                      {frozen && <span className="panel-caption">{frozenRun ? "试验已结束" : "显示已暂停"}</span>}
                     </div>
                     <div className="chart-tools">
+                      <button className="button small" aria-pressed={characteristicView}
+                        onClick={() => setCharacteristicView(!characteristicView)}>
+                        {characteristicView ? "查看时间曲线" : "查看扭矩特性曲线"}
+                      </button>
+                      {!characteristicView && <>
                       <select
                         aria-label="曲线时间范围"
                         value={windowSeconds}
@@ -1834,13 +1886,8 @@ export default function App() {
                         <Icon name={frozen ? "play" : "pause"} size={15} />
                         {frozen ? "恢复实时" : "暂停曲线"}
                       </button>
+                      </>}
                     </div>
-                  </div>
-                  <div className="chart-subhead">
-                    <button className="button small" aria-pressed={characteristicView}
-                      onClick={() => setCharacteristicView(!characteristicView)}>
-                      {characteristicView ? "查看时间曲线" : "查看扭矩特性曲线"}
-                    </button>
                   </div>
                   {!characteristicView && <>
                   <div className="chart-subhead">
@@ -1849,7 +1896,7 @@ export default function App() {
                         ["torque", "扭矩", "N·m"],
                         ["speed", "转速", "rpm"],
                         ["shaftPowerKw", "轴功率", "kW"],
-                        ["current", "目标电流", "A"],
+                        ["current", "目标 Iq", "A"],
                       ].map(([key, name, unit]) => (
                         <button
                           key={key}
@@ -1881,24 +1928,10 @@ export default function App() {
                     empty={!metricHasData && !frozen}
                     onConnect={actions.showSupplies}
                   />
-                  <div className="chart-footer">
-                    <span>
-                      <span className={`legend-line ${metric}`} />
-                      {metric === "torque"
-                        ? "减速箱输出扭矩"
-                        : metric === "speed"
-                          ? "输出端转速"
-                          : metric === "shaftPowerKw"
-                            ? "计算轴功率幅值 · |T×n|/9550"
-                            : "电机控制器已应答的目标 Iq"}
-                    </span>
-                    <span>时间 / mm:ss · 断开处保留缺口</span>
-                  </div>
                   </>}
-                  {characteristicView && <TorqueCharacteristics samples={curveSamples} windowSeconds={fullTrial?Infinity:windowSeconds}
-                    loadRun={frozenRun || (trialRun?.running?trialRun:null)} />}
+                  {characteristicView && <TorqueCharacteristics loadRun={frozenRun || (trialRun?.running?trialRun:null)} />}
                 </section>
-                <section
+                {!DESKTOP && <section
                   className={`panel recording-panel ${activeRecord ? "is-recording" : ""}`}
                   aria-label="试验记录操作"
                 >
@@ -1957,6 +1990,8 @@ export default function App() {
                       导出 CSV
                     </button>
                   </div>
+                  <details className="record-details" open={!DESKTOP}>
+                    <summary hidden={!DESKTOP}>记录说明与完整导出</summary>
                   {lastFullRecord && !activeRecord && <div className="hw-output-actions">
                     <button className="button" onClick={()=>downloadFull(lastFullRecord,'timeline.jsonl')}>导出完整字段 JSONL</button>
                     <button className="button" onClick={()=>downloadFull(lastFullRecord,'report.json')}>导出统计报告</button>
@@ -1972,7 +2007,16 @@ export default function App() {
                         ? "连接并读取至少一个真实设备后，才可开始记录完整参数。"
                         : '点击开始记录，同时开启完整参数与后台专用记录；未开始时不记录。停止记录后同步结束保存，导出 CSV 为完整时间序列。'}
                   </div>
-                </section>
+                  </details>
+                </section>}
+                <div className="measurement-diagnostics">
+                {DESKTOP && <section className="panel desktop-current-feedback" aria-label="电流详细反馈">
+                  <h2>电机电流反馈</h2>
+                  <dl>{[['iq', '实时 Iq'], ['ia', 'A 相'], ['ib', 'B 相'], ['ic', 'C 相']].map(([key, label]) =>
+                    <div key={key}><dt>{label}</dt><dd>{display(liveCurrents[key], 3)} A</dd></div>)}</dl>
+                  <p>三相为瞬时采样值；— 表示反馈缺失或已过期。</p>
+                </section>}
+
                 <EncoderCompareView sensor={devices['torque-sensor']} motor={devices['current-motor']}/>
                 <section className="event-section">
                   <button
@@ -2009,23 +2053,28 @@ export default function App() {
                     </ol>
                   )}
                 </section>
+                </div>
               </section>
               <aside className="control-area" aria-label="试验控制">
                 <CoupledCurrentPanel token={token} bridgeReady={bridgeReady}
-                  curveHeld={Boolean(frozenRun && !trialRun?.running)}
                   sensorConnected={Boolean(devices['torque-sensor']?.connected)}
+                  missingDevices={disconnectedChannels.map(channel=>channel.name).join("、")}
                   outputSpeedRpm={devices['torque-sensor']?.connected && Number.isFinite(devices['torque-sensor']?.snapshot?.speed)
                     && Date.now()/1000-devices['torque-sensor'].snapshot.receivedAt<=1.5
                     ?Math.abs(devices['torque-sensor'].snapshot.speed):null}
                   motorSupplyOn={Boolean(devices['motor-supply']?.connected && (devices['motor-supply']?.snapshot?.status & 128))}
                   onMotorState={actions.motorState} onBrakeState={supplyActions['brake-supply'].onDeviceState}
-                  onEvent={actions.addEvent} onStart={actions.coupledStart} onRunState={actions.coupledState} />
+                  onEvent={actions.addEvent} onRunState={actions.coupledState} />
+                {DESKTOP?<ControlDialog label="电机独立控制">
+                  <MotorCurrentPanel token={token} bridgeReady={bridgeReady} onState={actions.motorState} onEvent={actions.addEvent}/>
+                </ControlDialog>:<>
                 <details className="motor-single-controls">
                   <summary>电机单独控制 / 详细反馈</summary>
                 <MotorCurrentPanel token={token} bridgeReady={bridgeReady}
                   onState={actions.motorState} onEvent={actions.addEvent} />
                 </details>
-                <div className="control-hint"><Icon name="info" size={17} /><p>扭矩和转速必须来自真实传感器。制动电源的 V/A 设置与输出状态由设备应答确认。</p></div>
+                </>}
+                {!DESKTOP&&<div className="control-hint"><Icon name="info" size={17} /><p>扭矩和转速必须来自真实传感器。制动电源的 V/A 设置与输出状态由设备应答确认。</p></div>}
               </aside>
             </div>
           </>
@@ -2176,7 +2225,7 @@ export default function App() {
                       ["torque", "扭矩", "N·m"],
                       ["speed", "转速", "rpm"],
                       ["shaftPowerKw", "轴功率", "kW"],
-                      ["current", "目标电流", "A"],
+                      ["current", "目标 Iq", "A"],
                     ].map(([key, name, unit]) => (
                       <button
                         key={key}
@@ -2277,7 +2326,12 @@ export default function App() {
           <span>未接入设备的读数保持空值</span>
         </footer>
       </main>
-      {settings && (
+      {DESKTOP && <DesktopDevices open={settings} onClose={() => setSettings(false)}>
+        {rangeControl}
+        {connectionControls}
+        {supplyControls}
+      </DesktopDevices>}
+      {!DESKTOP && settings && (
         <Settings
           onClose={() => setSettings(false)}
           state={state}

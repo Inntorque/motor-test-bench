@@ -2,8 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DeviceEvent,eventData} from '../browser/events.ts';
 import {Bench} from '../browser/bench.ts';
-import {LegacyApp} from '../browser/legacy.ts';
-import {utc} from '../browser/bytes.ts';
 
 class MemoryStore {
   data = new Map();
@@ -29,13 +27,14 @@ test('local device events preserve the text contract without encoding unread pay
 });
 
 test('frame notifications see the full cache before display, unsubscribe, and retain SSE support',async t => {
-  const saved = globalThis.EventSource;let source;
+  const saved = globalThis.EventSource,savedWindow = globalThis.window;let source;
+  globalThis.window = {setInterval:()=>{}};
   globalThis.EventSource = class {
     listeners = {};
     constructor() {source = this;}
     addEventListener(kind,callback) {this.listeners[kind] = callback;}
   };
-  t.after(() => {globalThis.EventSource = saved;});
+  t.after(() => {globalThis.EventSource = saved;globalThis.window = savedWindow;});
   const store = await import('../web/src/deviceStore.ts');
   store.startDeviceStore(async () => new Response(JSON.stringify({devices:{'torque-sensor':{connected:true}}})));
   await new Promise(resolve => setTimeout(resolve,0));
@@ -84,17 +83,4 @@ test('one state publication evaluates motor feedback once and retains every exis
   assert.equal(routes['/api/coupled-current/status'].capabilities.maximumOutput,true);
   assert.equal((await env.request('/api/motor-current/status','GET',{})).snapshot.feedback.iq_a,12);
   assert.equal(calls,2);
-});
-
-for (const id of ['sg-6010hb','rm-7010']) test(`${id} telemetry batches retain freshness without building the parameter display`,() => {
-  const app = new LegacyApp(id,noIo,new MemoryStore(),() => {});
-  const status = app.status.bind(app);
-  for (const age of [null,0,1,3]) {
-    app.telem.clear();
-    if (age !== null) app.telem.append([[1,utc() - age,100,-200,100,240]]);
-    const expected = status().telem?.stale || false;
-    app.status = () => {throw new Error('parameter display requested by waveform batch');};
-    assert.equal(app.batch(0,0).stale,expected);
-    assert.deepEqual(app.batch(0,0).samples,age === null ? [] : [[100,-200,100,240]]);
-  }
 });

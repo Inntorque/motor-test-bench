@@ -1,36 +1,13 @@
-# Local dependencies and generated output
 node_modules/
 dist/
 site/
-build/
-.venv/
-__pycache__/
-*.py[cod]
-/tmp/
-/output/
-
-# Measurement sessions and local configuration
-/recordings/
+.runtime/
+artifacts/
 *.log
 .env
 .env.*
 !.env.example
-
-# OS metadata
 .DS_Store
 Thumbs.db
-
-# Launcher process state
-/.runtime/
-
-# Per-machine paths and CAN adapter selection
-/workbench.local.json
-/gateway.local.json
-/runtime/
-/LAN-ACCESS.txt
-/局域网访问说明.txt
-/vendor/xige_foc/logs/
-/vendor/xige_foc/motor_profile.txt
-
-# Local firmware deliveries and source snapshots
-/artifacts/
+*.key
+*-private.pem

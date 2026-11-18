@@ -12,3 +12,5 @@ gateway/**/*.json text eol=lf
 
 *.ts text eol=lf
 *.tsx text eol=lf
+protocol/sdk/**/*.h text eol=lf
+desktop/release-public-key.pem text eol=lf

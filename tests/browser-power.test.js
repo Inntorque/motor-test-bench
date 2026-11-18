@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {Bench} from '../browser/bench.ts';
 import {PowerChannel} from '../browser/rs485.ts';
 import {concat,crc16,view} from '../browser/bytes.ts';
 class SupplyFixture {
@@ -34,7 +35,7 @@ test('RU browser connect is read-only and ON preserves the confirmed 24V/20A pan
   const result = await channel.output(true,{voltage:24,current:20});assert.equal(result.status,128);
   assert.deepEqual(io.writes,[{func:5,register:133,value:0xff00}],'ON must not overwrite the panel current register');
   await channel.output(false);assert.equal(channel.snapshot.status,0);assert.equal(channel.outputUncertain,false);
-  await assert.rejects(channel.output(true,{voltage:24,current:5}),/预设不匹配/);
+  await assert.rejects(channel.output(true,{voltage:24,current:5}),/读回 24 V \/ 20 A.*24 V \/ 5 A/);
   assert.equal(io.writes.filter(write => write.func === 16).length,0);await channel.disconnect();
 });
 
@@ -63,4 +64,122 @@ test('a mistaken duplicate port selection never closes the device already owned 
   const power = new PowerChannel('motor-supply',io);await assert.rejects(power.connect({device:'owned'}),/already in use/);
   const sensor = new TorqueSensor(io);await assert.rejects(sensor.connect({device:'owned',protocol:'hex6'}),/already in use/);
   assert.equal(closes,0);
+});
+
+
+test('one-key scan identifies shuffled RS485 ports, refuses ambiguous roles and reconnects during stop recovery',async t => {
+  const ru = new SupplyFixture(), ssj = new SupplyFixture('ssj'), duplicate = new SupplyFixture();
+  const devices = {brake:ssj,motor:ru,duplicate};
+  const opened = new Map(), stream = new Set(), port = name => ({port:name,description:name,kind:'serial',vid:0x345f,pid:0x3020});
+  const frame = Uint8Array.of(0,8,0x80,0);
+  const connectedPorts = [port('brake'),port('stream'),port('motor')];
+  let ports = connectedPorts, stopping = false;
+  const io = {
+    subscribe(name,callback) {
+      if (name !== 'stream') return devices[name].subscribe(name,callback);
+      stream.add(callback);return () => stream.delete(callback);
+    },
+    async call(method,args) {
+      if (method === 'ports') return ports;
+      if (method === 'can-config') return {};
+      const name = args.device;
+      if (method === 'serial-open') {
+        assert.equal(opened.has(name),false);
+        opened.set(name,args.baudRate);
+      } else if (method === 'serial-close') {
+        assert.equal(opened.delete(name),true);
+      } else if (method === 'serial-write') {
+        if (!stopping) assert.ok(args.data[1] >= 1 && args.data[1] <= 4);
+        if (name !== 'stream' && opened.get(name) === 9600) return devices[name].call(method,args);
+        if (name === 'stream') throw new Error('streaming sensor does not answer queries');
+      }
+    },
+  };
+  const timer = setInterval(() => {
+    if (opened.get('stream') === 115200) for (const callback of stream) callback(concat(frame,crc16(frame)));
+  },20);
+  t.after(() => clearInterval(timer));
+  const scan = async journal => {
+    const values = new Map([['output-journal',journal]]);
+    const store = {get:async key => values.get(key),put:async (key,value) => {values.set(key,value);},entries:async () => []};
+    const bench = new Bench(io,store,() => {});
+    t.after(() => clearInterval(bench.sensor.frameTimer));
+    await bench.initialize();
+    bench.timers.forEach(clearInterval);
+    await bench.connectAll({'torque-sensor':{protocol:'modbus',baud:19200,stopbits:2}});
+    while (bench.connection.running) await new Promise(resolve => setTimeout(resolve,20));
+    return bench;
+  };
+  const connected = await scan();
+  assert.equal(connected.channels['motor-supply'].status().config.device,'motor');
+  assert.equal(connected.channels['brake-supply'].status().config.device,'brake');
+  assert.equal(connected.sensor.status().config.protocol,'hex6');
+  assert.equal(connected.sensor.status().config.device,'stream');
+  await connected.sensor.disconnect();
+  for (const channel of Object.values(connected.channels)) await channel.disconnect();
+  ports = [port('duplicate'),...ports];
+  const ambiguous = await scan();
+  assert.equal(ambiguous.channels['motor-supply'].status().connected,false);
+  assert.ok(ambiguous.connection.report.some(line => /电机电源.*多个匹配/.test(line)));
+  assert.equal(ambiguous.channels['brake-supply'].status().connected,true);
+  assert.deepEqual([ru.writes,ssj.writes,duplicate.writes],[[],[],[]]);
+  await ambiguous.sensor.disconnect();
+  for (const channel of Object.values(ambiguous.channels)) await channel.disconnect();
+  ports = connectedPorts;
+  const journal = {dirty:true,expected:['motor-supply','brake-supply'],motorMayBeOn:false};
+  ru.coils.set(133,true);
+  ssj.coils.set(133,true);
+  ssj.settings = [2400,0];
+  const recovery = await scan(journal);
+  assert.equal(recovery.channels['motor-supply'].status().config.device,'motor');
+  assert.equal(recovery.channels['brake-supply'].status().config.device,'brake');
+  assert.equal(recovery.connection.report.filter(line => line.includes('待停止确认')).length,0);
+  assert.deepEqual([ru.writes,ssj.writes],[[],[]]);
+  assert.equal(recovery.safety().blocked,true);
+  assert.deepEqual(await recovery.store.get('output-journal'),journal);
+
+  stopping = true;
+  recovery.beginStop('reconcile');
+  await recovery.stopTask;
+  assert.equal(recovery.safety().blocked,false,recovery.safety().errors.join("；"));
+  assert.equal((await recovery.store.get('output-journal')).dirty,false);
+  assert.equal(recovery.channels['motor-supply'].snapshot.status & 128,0);
+  assert.equal(recovery.channels['brake-supply'].snapshot.status & 128,0);
+  assert.deepEqual(ru.writes,[{func:5,register:133,value:0}]);
+  assert.deepEqual(ssj.writes,[{func:16,register:2016,words:[0]}]);
+  await recovery.sensor.disconnect();
+  for (const channel of Object.values(recovery.channels)) await channel.disconnect();
+  assert.equal(opened.size,0);
+});
+
+test('delayed output feedback is confirmed by reads without repeating the ON command',async()=>{
+  const io=new SupplyFixture(),channel=new PowerChannel('motor-supply',io);
+  await channel.connect({device:'fixture',protocol:'ru'});
+  const read=channel.readRaw.bind(channel);let delayed=0;
+  channel.readRaw=async()=>{const snapshot=await read();if(io.writes.length&&delayed++<2)return {...snapshot,status:0};return snapshot;};
+  await channel.output(true,{voltage:24,current:20});
+  assert.equal(channel.snapshot.status,128);assert.equal(io.writes.length,1);assert.equal(delayed,3);
+  channel.error='previous read timeout';await channel.read();assert.equal(channel.status().error,'');
+  await channel.output(false);await channel.disconnect();
+});
+
+test('a persistent output mismatch remains an error after bounded read-only confirmation',async()=>{
+  const io=new SupplyFixture(),channel=new PowerChannel('motor-supply',io);
+  await channel.connect({device:'fixture',protocol:'ru'});
+  const read=channel.readRaw.bind(channel);
+  channel.readRaw=async()=>({...await read(),status:0});
+  await assert.rejects(channel.output(true,{voltage:24,current:20}),/输出状态读回与指令不一致/);
+  assert.equal(io.writes.length,1);
+  channel.readRaw=read;await channel.output(false);await channel.disconnect();
+});
+
+test('STOP interrupts output-feedback waiting and never resends ON',async()=>{
+  const io=new SupplyFixture(),channel=new PowerChannel('motor-supply',io);
+  await channel.connect({device:'fixture',protocol:'ru'});
+  const read=channel.readRaw.bind(channel);let release,entered;
+  const started=new Promise(resolve=>{entered=resolve;});let blocked=false;
+  channel.readRaw=async()=>{const snapshot=await read();if(io.writes.length&&!blocked){blocked=true;entered();await new Promise(resolve=>{release=resolve;});return {...snapshot,status:0};}return snapshot;};
+  const enabling=channel.output(true,{voltage:24,current:20});await started;
+  const disabling=channel.output(false);release();await assert.rejects(enabling,/停止取消/);await disabling;
+  assert.deepEqual(io.writes.map(row=>row.value),[0xff00,0]);assert.equal(channel.outputUncertain,false);await channel.disconnect();
 });

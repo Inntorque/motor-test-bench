@@ -1,0 +1,257 @@
+.desktop-app {
+  height: 100%; overflow: hidden;
+  body { height: 100%; overflow: hidden; background: #e9edf2; }
+  #root { height: 100%; }
+  body > #inntorque-browser-access { display: none; }
+  .app-shell.hardware-app { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .hardware-app .sidebar {
+    position: static; flex: 0 0 38px; width: 100%; height: auto; padding: 0 14px;
+    display: flex; flex-direction: row; align-items: center; gap: 16px;
+    flex-wrap: nowrap; border: 0; border-bottom: 1px solid #cbd3dd; background: #f8fafc;
+  }
+  .hardware-app .sidebar .brand { display: flex; visibility: visible; margin: 0; padding: 0; flex-shrink: 0; }
+  .brand > div { display: block; font-size: 15px; letter-spacing: -.5px; }
+  .brand > div > span, .brand-mark, .nav-label, .version { display: none; }
+  .hardware-app .sidebar nav { display: flex; flex-wrap: nowrap; gap: 2px; height: 100%; align-items: stretch; }
+  .hardware-app .sidebar .nav-item {
+    display: flex; align-items: center; width: auto; margin: 0; padding: 0 11px; gap: 5px;
+    border-radius: 0; font-size: 12px; border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  .hardware-app .sidebar .nav-item.active { background: #e8f0fc; border-bottom-color: #2667bb; color: #174d91; }
+  .hardware-app .sidebar-bottom { margin: 0 0 0 auto; flex-shrink: 0; }
+  .hardware-app .sidebar-bottom .nav-item { height: 28px; padding: 0 8px; border: 1px solid #cbd3dd; border-radius: 4px; background: white; }
+  .nav-item svg { width: 16px; height: 16px; }
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; width: 100%; max-width: none; margin: 0; padding: 0; overflow: hidden; }
+  .page-header { flex: 0 0 auto; margin: 0; padding: 3px 10px; min-height: 36px; border-bottom: 1px solid #d5dce5; background: #fff; gap: 10px; }
+  .desktop-view-bench .page-header { display: none; }
+  .page-header > div:first-child { display: none; }
+  .header-actions { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+  .header-actions > .settings-button { display: none; }
+  .test-subject-picker { min-width: 0; }
+  .test-subject-picker > summary { padding: 3px 8px; min-height: 26px; }
+  .subject-popover { position: fixed; top: 44px; left: auto; right: 12px; width: min(600px, calc(100vw - 24px)); max-height: calc(100vh - 64px); z-index: 30; }
+  .desktop-toolbar { display: flex; align-items: center; gap: 6px; min-width: 0; margin-left: auto; }
+  .desktop-toolbar .test-subject-picker { max-width: 190px; }
+  .desktop-toolbar .test-subject-picker > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .desktop-toolbar > select { width: 100px; padding: 4px 6px; font: inherit; font-size: 12px; border: 1px solid #cbd3dd; border-radius: 4px; color: #174d91; background: white; }
+  .hardware-app .desktop-toolbar + .sidebar-bottom { margin-left: 0; }
+  .workspace-grid { display: grid; flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) 320px; align-items: stretch; gap: 8px; padding: 8px; overflow: hidden; }
+  .measurement-area { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; gap: 8px; }
+  .readings { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1.1fr 1fr; gap: 0; margin: 0; background: white; border: 1px solid #cfd8e3; border-radius: 5px; overflow: hidden; }
+  .reading { padding: 5px 10px; min-width: 0; border: 0; border-right: 1px solid #e3e8ef; border-radius: 0; box-shadow: none; background: white; }
+  .reading:last-child { border: 0; }
+  .reading-label { font-size: 12px; line-height: 1.2; gap: 4px; }
+  .reading-label svg { display: none; }
+  .reading .value { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; margin: 3px 0; }
+  .reading .value > span { font-size: clamp(20px, 2vw, 26px); line-height: 1; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .torque-reading .value { color: #2b3b53; }
+  .torque-reading .reading-label, .torque-reading .reading-foot, .torque-reading .value > small { color: #647389; }
+  .reading .value small { font-size: 11px; }
+  .reading-foot { margin: 0; font-size: 9px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; }
+  .reading-foot > span:first-child:not(:last-child), .reading .secondary-line, .range-track, .current-phases { display: none; }
+  .current-line { font-size: 11px; line-height: 1.1; margin-top: 2px; gap: 4px; flex-wrap: wrap; }
+  .current-line strong { font-size: 11px; }
+  .current-iq { margin-top: 3px; }
+  .current-iq strong { font-size: 17px; }
+  .panel { border-radius: 5px; box-shadow: none; }
+  .chart-panel { display: flex; flex-direction: column; min-height: 0; padding: 0; margin: 0; overflow: auto; border: 1px solid #cfd8e3; }
+  .panel-heading { margin: 0; padding: 6px 10px; flex-wrap: wrap; gap: 6px; }
+  .panel-heading h2 { font-size: 14px; }
+  .panel-caption { font-size: 10px; }
+  .chart-tools { flex-wrap: wrap; gap: 5px; }
+  .chart-subhead { padding: 3px 12px; margin: 0; gap: 5px; flex-wrap: wrap; }
+  .metric-tabs { flex-wrap: wrap; gap: 3px; }
+  .metric-tabs button { padding: 5px 7px; font-size: 11px; }
+  .chart-panel .plot-wrap { flex: 1 0 170px; height: auto; min-height: 170px; margin: 0 5px; }
+  .chart-panel .plot { width: 100%; height: 100%; min-height: 170px; max-height: none; }
+  .plot-empty > span { font-size: 15px; }
+  .chart-footer { padding: 6px 12px; font-size: 10px; flex-wrap: wrap; gap: 4px; }
+  .recording-panel { position: relative; padding: 8px 10px; margin: 0; border: 1px solid #cfd8e3; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+  .record-heading { margin: 0; gap: 6px; }
+  .record-heading h2 { font-size: 12px; }
+  .record-heading p { font-size: 10px; margin: 2px 0 0; }
+  .record-icon, .record-badge { display: none; }
+  .record-controls { display: flex; flex: 1; min-width: 0; margin: 0; gap: 5px; }
+  .record-controls input { flex: 1; width: 80px; min-width: 50px; padding: 6px 8px; font-size: 12px; }
+  .record-details { font-size: 11px; margin-left: auto; }
+  .record-details summary { cursor: pointer; color: #64748b; }
+  .record-details[open] { width: 100%; max-height: 170px; overflow: auto; }
+  .record-note { margin-top: 5px; font-size: 11px; }
+  .control-area { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; width: auto; overflow: auto; scrollbar-gutter: stable; order: 0; }
+  .control-area > * { width: 100%; margin: 0; flex-shrink: 0; }
+  .control-area .panel { padding: 12px; }
+  .control-area .panel-heading { padding: 0 0 8px; }
+  .control-area h3 { font-size: 13px; }
+  .control-area .hw-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .control-area input, .control-area select { min-width: 0; width: 100%; padding: 6px; }
+  .control-area .hw-form-grid label { font-size: 11px; }
+  .coupled-device { margin-top: 8px; padding: 8px; }
+  .control-area .coupled-load-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .coupled-device-title { flex-wrap: wrap; gap: 4px; }
+  .coupled-device-title > span { font-size: 10px; }
+  .hw-readback { font-size: 11px; overflow-wrap: anywhere; }
+  .coupled-stage-actions { position: sticky; top: 0; margin: 0; padding: 8px 0; background: white; border-top: 1px solid #e3e8ef; z-index: 1; }
+  .coupled-stage-actions .button { flex: 1 0 100%; }
+  .motor-single-controls { border: 1px solid #cfd8e3; border-radius: 5px; background: white; }
+  .motor-single-controls > summary { padding: 10px; font-size: 12px; }
+  .measurement-diagnostics { display: none; min-height: 0; overflow: auto; }
+  [data-pane=diagnostics] .measurement-area > .chart-panel { display: none; }
+  [data-pane=diagnostics] .measurement-diagnostics { display: block; grid-row: 2; }
+  .event-section { margin-top: 8px; }
+  .button { min-height: 28px; height: auto; padding: 6px 9px; font-size: 12px; border-radius: 4px; white-space: normal; }
+  .page-footer { display: none; }
+  .records-view, .specialized-tests { min-height: 0; overflow: auto; padding: 14px; }
+  .desktop-view-records .page-header > div:first-child, .desktop-view-specialized .page-header > div:first-child { display: block; }
+  .page-header h1 { font-size: 16px; }
+  .page-header .eyebrow, .page-header p { display: none; }
+  .special-layout { grid-template-columns: minmax(280px, .8fr) minmax(0, 1.2fr); }
+  .chart-panel:has(.torque-characteristics) { overflow: hidden; }
+  .chart-panel:has(.torque-characteristics) > .panel-heading { flex-shrink: 0; }
+  .torque-characteristics { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .characteristic-tools { flex-shrink: 0; padding: 4px 12px; gap: 8px; flex-wrap: wrap; }
+  .characteristic-axis-tools { gap: 4px 12px; }
+  .characteristic-axis-tools label { font-size: 10px; }
+  .characteristic-axis-tools input { width: 88px; min-width: 0; }
+  .characteristic-axis-tools input, .characteristic-axis-tools select { font: inherit; padding: 3px; }
+  .characteristic-range-warning { flex-shrink: 0; padding: 2px 12px; color: #ab3321; font-size: 10px; }
+  .characteristic-scroll { flex: 1; width: 100%; min-height: 0; overflow: hidden; }
+  .characteristic-scroll .motor-performance-chart { display: block; width: 100%; min-width: 0; height: 100%; min-height: 0; max-height: none; font-size: 12px; }
+  .motor-performance-chart .performance-axis-unit { font-size: 11px; }
+  .motor-performance-chart .performance-chart-title { font-size: 16px; }
+  .motor-performance-chart .performance-curve-label { font-size: 12px; }
+  .characteristic-expanded { inset: 12px; max-width: none; max-height: none; overflow: hidden; padding: 8px; }
+  .drawer { max-width: calc(100vw - 24px); }
+  .desktop-devices { width: min(1080px, calc(100vw - 32px)); max-width: none; height: min(800px, calc(100vh - 32px)); max-height: none; padding: 0; border: 1px solid #b9c6d7; border-radius: 7px; color: #26374d; box-shadow: 0 24px 80px #12213744; }
+  .desktop-devices[open] { display: flex; flex-direction: column; }
+  .desktop-devices::backdrop { background: #14243766; }
+  .desktop-device-heading { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #d5dce5; background: #f8fafc; }
+  .desktop-device-heading h2 { margin: 0; font-size: 17px; }
+  .desktop-device-heading p { margin: 4px 0 0; font-size: 12px; color: #64748b; }
+  .desktop-device-body { overflow: auto; padding: 12px 18px; min-height: 0; }
+  #inntorque-browser-access { padding: 10px 0; font-family: inherit; gap: 8px; z-index: auto; }
+  #inntorque-browser-access > span:first-child { display: none; }
+  .desktop-device-body > .profile-select { margin: 12px 0; }
+  .desktop-devices .connection-notice { margin: 10px 0; padding: 12px; }
+  .desktop-devices .hw-supply-grid { grid-template-columns: minmax(0, 1fr); }
+  .desktop-devices .hw-supply-summary { grid-template-columns: minmax(0, 1fr); }
+  .desktop-devices .hw-supply-head, .desktop-devices .hw-output-actions { flex-wrap: wrap; }
+  .desktop-devices .hw-supply-readings { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  @media (max-width: 1000px) {
+    .hardware-app .sidebar { gap: 6px; padding: 0 8px; }
+    .hardware-app .sidebar .brand { display: none; }
+    .hardware-app .sidebar .nav-item svg { display: none; }
+    .desktop-toolbar .test-subject-picker { max-width: 110px; }
+    .desktop-toolbar > select { width: 94px; }
+    .hardware-app .sidebar .nav-item { padding: 0 9px; }
+    .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+    .control-area { display: none; }
+    [data-controls=true] .control-area { display: flex; }
+    [data-controls=true] .workspace-grid { grid-template-columns: minmax(0, 1fr) 290px; }
+    [data-controls=true] .readings { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .special-layout { grid-template-columns: minmax(0, 1fr); }
+    .reading .value > span { font-size: 23px; }
+  }
+  @media (max-width: 800px) {
+    .brand > div { font-size: 14px; }
+    [data-controls=true] .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+    [data-controls=true] .measurement-area { display: none; }
+  }
+  @media (max-height: 620px) {
+    .measurement-area:has(.torque-characteristics) .reading { padding: 4px 8px; }
+    .measurement-area:has(.torque-characteristics) .reading .value { margin: 4px 0; }
+    .measurement-area:has(.torque-characteristics) .reading .value > span { font-size: 22px; }
+    .measurement-area:has(.torque-characteristics) .reading .reading-foot { display: none; }
+    .chart-panel:has(.torque-characteristics) .panel-heading { padding: 4px 10px; }
+    .chart-panel:has(.torque-characteristics) .button { padding: 3px 7px; min-height: 24px; }
+    .reading { padding: 6px 9px; }
+    .reading-foot { display: none; }
+    .record-heading { display: none; }
+    .panel-caption { display: none; }
+    .plot-empty > span { font-size: 12px; }
+    .plot-empty .button { margin-top: 4px; padding: 3px 8px; }
+    .chart-footer { padding: 3px 12px; }
+    .reading[aria-label="电机温度读数"] .reading-foot { display: flex; }
+    .chart-panel .plot-wrap, .chart-panel .plot { min-height: 100px; }
+    .chart-panel .plot-wrap { flex-basis: 100px; }
+  }
+  .desktop-current-feedback { padding: 14px; }
+  .desktop-current-feedback h2 { font-size: 14px; }
+  .desktop-current-feedback dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .desktop-current-feedback dt, .desktop-current-feedback p { font-size: 11px; color: #64748b; }
+  .desktop-current-feedback dd { margin: 4px 0; font-size: 20px; font-variant-numeric: tabular-nums; }
+}
+
+.desktop-app {
+  .auto-save-status { flex-shrink: 0; }
+  .desktop-data-folder { display: flex; align-items: center; gap: 5px; }
+  .auto-save-indicator { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: #b7791f; }
+  .save-ready .auto-save-indicator { background: #287351; }
+  .save-failed .auto-save-indicator { background: #ab3321; }
+  .auto-save-error { position: fixed; top: 44px; left: 12px; z-index: 40; max-width: min(480px, calc(100vw - 24px)); padding: 10px 12px; border: 1px solid #e3a497; border-radius: 4px; background: #fff0ee; color: #ab3321; font-size: 12px; overflow-wrap: anywhere; }
+  @media (max-width: 800px) {
+    .hardware-app .sidebar { gap: 4px; }
+    .hardware-app .sidebar .nav-item { padding: 0 6px; }
+    .hardware-app .sidebar .nav-item svg { display: none; }
+  }
+}
+
+.desktop-app {
+  .control-area { overflow: hidden; scrollbar-gutter: auto; gap: 6px; }
+  .control-area > .coupled-current-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+  .control-area .control-title { margin: 0; }
+  .control-area .control-title > div > span { display: none; }
+  .control-area .coupled-stage-actions { position: static; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; padding: 0; border: 0; gap: 5px; }
+  .control-area .coupled-stage-actions > .button:last-child:nth-child(3) { grid-column: 1 / -1; }
+  .control-area .hw-output-actions .button { min-height: 28px; padding: 5px 7px; font-size: 11px; }
+  .control-area .coupled-device { margin: 0; padding: 8px 0 0; }
+  .control-area .coupled-device-title > span { display: none; }
+  .control-area .coupled-mode { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+  .control-area .coupled-mode select { flex: 1; width: 0; padding: 5px; font-size: 12px; }
+  .control-area .coupled-motor-actions { display: flex; margin: 6px 0 0; gap: 6px; }
+  .control-area .coupled-motor-actions > .button { flex: 1; }
+  .control-area .hw-readback { margin: 3px 0; line-height: 1.4; }
+  .control-area .coupled-current-panel > p { margin: 0; }
+  .control-area .coupled-load-fields { margin-top: 5px; gap: 6px; }
+  .control-area .coupled-load-fields input { min-height: 28px; padding: 5px; }
+  .stage-progress { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 10px; margin: 8px 0 0; }
+  .stage-progress dt { color: #536479; font-size: 12px; }
+  .stage-progress dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .run-status { color: #275477; font-size: 13px; }
+  .bench-diagnostics { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; }
+  .bench-diagnostics dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .control-area .coupled-notices { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; align-items: center; }
+  .control-area .coupled-notices p { margin: 0; padding: 5px 6px; font-size: 11px; line-height: 16px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .control-area .coupled-notices .button { padding: 4px; font-size: 10px; }
+  .control-dialog { width: min(780px, calc(100vw - 32px)); max-width: none; max-height: calc(100vh - 32px); padding: 0; border: 1px solid #b9c6d7; border-radius: 7px; color: #26374d; }
+  .control-dialog[open] { display: flex; flex-direction: column; }
+  .control-dialog::backdrop { background: #14243766; }
+  .control-dialog > header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; padding: 12px 16px; border-bottom: 1px solid #d5dce5; }
+  .control-dialog h2 { margin: 0; font-size: 15px; }
+  .control-dialog-body { overflow: auto; padding: 14px 16px; min-height: 0; }
+  .control-dialog-body .hw-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .control-dialog-body .hw-form-grid input { min-width: 0; width: 100%; }
+  @media (max-height: 620px) {
+    .control-area > .coupled-current-panel { padding: 8px; gap: 4px; }
+    .control-area .control-title, .control-area .coupled-device-title { display: none; }
+    .control-area .coupled-device { padding-top: 4px; }
+    .control-area .hw-readback, .control-area .hw-form-grid label { font-size: 11px; }
+    .stage-progress { margin-top: 4px; }
+    .stage-progress dt,.stage-progress dd,.run-status { font-size: 12px; }
+    .control-area .coupled-motor-actions { margin-top: 4px; }
+  }
+  @media (max-width: 800px) {
+    .control-area > .coupled-current-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; column-gap: 12px; }
+    .control-area .coupled-current-panel > .control-title,
+    .control-area .coupled-stage-actions,
+    .control-area .coupled-notices,
+    .control-area .coupled-current-panel > p { grid-column: 1 / -1; }
+  }
+}
+
+.desktop-app .characteristic-table { overflow: auto; }
+.desktop-app .characteristic-table table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+.desktop-app .characteristic-table th, .desktop-app .characteristic-table td { padding: 6px; border-bottom: 1px solid #d5dce5; text-align: right; }
+
+.coupled-current-target { display:flex; align-items:end; gap:6px; }
+.coupled-current-target label { flex:1; min-width:0; font-size:12px; }
+.coupled-current-target input { width:100%; min-width:0; padding:4px 6px; }

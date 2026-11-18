@@ -54,3 +54,11 @@ test('load is measured shaft torque; stale PSU and stopped shaft never imply cal
   assert.equal(measuredBrakeLoad(data.map(p=>({...p,brakeSupplyReceivedAt:900}))).current,null);
   assert.equal(measuredBrakeLoad(data.map(p=>({...p,loadEnabled:false}))),null);
 });
+
+test('same timestamp distinct sensor frames preserve the final zero and reject duplicates or later data',()=>{
+  const trace=new LoadTrial({id:'same',running:true,startedAt:1000});
+  trace.append([point(1,{sequence:10,speed:40}),point(1,{sequence:11,speed:0}),point(1,{sequence:11,speed:99})]);
+  trace.update({id:'same',running:false,startedAt:1000,measurementEndedAt:1001});
+  trace.append([point(1,{sequence:12,speed:0}),point(1.001,{sequence:13,speed:0})]);
+  assert.deepEqual(trace.snapshot().map(p=>[p.sequence,p.speed]),[[10,40],[11,0],[12,0]]);
+});

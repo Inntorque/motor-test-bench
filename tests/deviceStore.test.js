@@ -25,3 +25,24 @@ test('STOP confirmation bypasses an earlier cached disabled state',async()=>{
     assert.ok(network.includes('/api/v1/control/status'));
   }finally{globalThis.window=savedWindow;globalThis.EventSource=savedSource;}
 });
+
+test('late refresh cannot overwrite a newer stream snapshot; silent expiry notifies subscribers',async()=>{
+  const savedWindow=globalThis.window,savedSource=globalThis.EventSource,savedNow=Date.now;
+  const {startDeviceStore,subscribeDevices,cachedResponse}=await import('../web/src/deviceStore.ts?ordering');
+  let source,finish,watchdog,time=10000;
+  globalThis.window={setInterval:fn=>{watchdog=fn;}};
+  globalThis.EventSource=class{constructor(){this.listeners={};source=this;}addEventListener(name,fn){this.listeners[name]=fn;}};
+  Date.now=()=>time;const seen=[];const unsubscribe=subscribeDevices(value=>seen.push(value));
+  try {
+    startDeviceStore(()=>new Promise(resolve=>{finish=resolve;}));
+    const current={devices:{'current-motor':{connected:true}},routes:{'/api/health':{ready:true}}};
+    source.listeners.state({data:JSON.stringify({data:current})});
+    finish(new Response(JSON.stringify({devices:{'current-motor':{connected:false}}})));
+    await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(seen.length,1);assert.equal(seen[0].devices['current-motor'].connected,true);
+    time+=1501;watchdog();assert.equal(seen.at(-1).streamOnline,false);assert.equal(cachedResponse('/api/health'),null);
+    source.listeners.state({data:JSON.stringify({data:current})});assert.notEqual(seen.at(-1).streamOnline,false);
+    assert.equal((await cachedResponse('/api/health').json()).ready,true);
+    source.listeners.error();assert.equal(seen.at(-1).streamOnline,false);
+  }finally{unsubscribe();Date.now=savedNow;globalThis.window=savedWindow;globalThis.EventSource=savedSource;}
+});

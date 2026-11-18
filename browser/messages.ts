@@ -1,19 +1,20 @@
 export type FocAppId = 'foc-7010' | 'foc-5014' | 'foc-8513';
-export type AppId = 'dynamometer' | 'sg-6010hb' | 'rm-7010' | FocAppId;
-export function isFocApp(app: AppId): app is FocAppId {return app.startsWith('foc-');}
-export type IoMethod = 'ports' | 'can-config' | 'serial-open' | 'serial-close' | 'serial-write' | 'usb-open' | 'usb-close' | 'usb-send';
+export type AppId = 'dynamometer';
+export type IoMethod = 'archive-write' | 'ports' | 'can-config' | 'serial-open' | 'serial-close' | 'serial-write' | 'usb-open' | 'usb-close' | 'usb-send';
 export interface IoArguments {
+  archive?: {id: string; report?: unknown; part?: number; csv?: string; jsonl?: string; characteristics?: string; measurements?: string};
   device?: string; baudRate?: number; dataBits?: number; stopBits?: number;
   parity?: string; bitrate?: number; id?: number; data?: Uint8Array;
 }
 export type DeviceInput = Uint8Array | {id: number; data: Uint8Array};
 export interface DeviceStateEvent {
+  desktopBusy?: boolean;
   active?: boolean; body?: BlobPart; type?: string; name?: string;
   control?: {blocked?: boolean; reason?: string}; test?: {running?: boolean};
   devices?: Record<string, {snapshot?: {status?: number; motor?: {output_on?: boolean}}}>;
 }
 export type MainToWorker =
-  | {kind: 'init'; app: AppId}
+  | {kind: 'init'; app: AppId; desktop?: boolean}
   | {kind: 'request'; id: number; path: string; method: string; body: Record<string, unknown>; headers: Record<string, string>}
   | {kind: 'io-result'; id: number; value?: unknown; error?: string}
   | {kind: 'input'; device: string; data: DeviceInput}

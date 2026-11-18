@@ -53,6 +53,7 @@ export class Specialized {
   }
   async save(report) {
     await this.env.store.put(`reports:${report.origin}:${report.id}`,report);
+    this.env.observe('test_report',report);
     const rows = this.historyCache[report.origin], index = rows.findIndex(item => item.id === report.id);
     if (index < 0) rows.unshift(this.public(report)); else rows[index] = this.public(report);
   }

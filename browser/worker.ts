@@ -1,12 +1,8 @@
 import type {MainToWorker, IoArguments, IoMethod, DeviceInput, DeviceIo} from './messages.ts';
 import {BrowserStore} from './storage.ts';
 import {Bench} from './bench.ts';
-import {LegacyApp} from './legacy.ts';
-import {FocApp} from './foc.ts';
-import {isFocApp} from './messages.ts';
 import {jsonValue} from './bytes.ts';
-type Engine = Pick<Bench, 'initialize' | 'request'> & Partial<Pick<Bench, 'device' | 'channels' | 'sensor' | 'epoch'>> & {ioError?: (device: string, error: string) => void};
-let engine: Engine,ready: Promise<void>;
+let engine: Bench,ready: Promise<void>;
 const pending = new Map(), subscriptions = new Map(); let nextIo = 0;
 const emit = (event,data) => postMessage({kind:'event',event,data:jsonValue(data)});
 const io: DeviceIo = {
@@ -24,9 +20,7 @@ self.addEventListener('message',(event: MessageEvent<MainToWorker>) => {
   if (message.kind === 'init') {
     ready = (async () => {
       const store = await new BrowserStore(message.app).open();
-      if (message.app === 'dynamometer') engine = new Bench(io,store,emit);
-      else if (isFocApp(message.app)) engine = new FocApp(message.app,io,store,emit);
-      else engine = new LegacyApp(message.app,io,store,emit);
+      engine = new Bench(io,store,emit,Boolean(message.desktop));
       await engine.initialize(); postMessage({kind:'ready'});
     })();
     ready.catch(error => postMessage({kind:'fatal',error:error.message}));
@@ -39,7 +33,6 @@ self.addEventListener('message',(event: MessageEvent<MainToWorker>) => {
     if (engine?.device?.bus?.device === message.device) engine.device.fail(new Error(message.error));
     for (const channel of Object.values(engine?.channels || {})) if (channel.config?.device === message.device) {channel.connected = false;channel.error = message.error;}
     if (engine?.sensor?.config?.device === message.device) {engine.sensor.connected = false;engine.sensor.error = message.error;}
-    engine?.ioError?.(message.device,message.error);
     emit('device_error',{device:message.device,error:message.error});
   } else if (message.kind === 'request') {
     void (async () => {

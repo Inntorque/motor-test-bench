@@ -13,7 +13,7 @@ const DEFAULTS={name:'',ratedSpeedRpm:'',ratedTorqueNm:'',
   durationS:'600',windowS:'1',settleS:'1',dwellS:'2',coolingS:'60',ambientC:'',thermalWindowS:'600',thermalSlopeCPerMin:'0.1',stopWhenStable:false,
   operation:'observe',test:'capture',controlMode:'IQ',target:'1',iqLevels:'0.5,1,1.5,2',ktMaxSpeedRpm:'5',ktMaxIdA:'0.5',
   positions:'0,45,90,135,180,225,270,315',cycles:'5',approachDeg:'2',positionReference:'relative',motionConfirmed:false,
-  startNm:'0.1',stepNm:'0.1',maxNm:'30',intervalS:'5',bandwidthVerified:false,sensorInfo:'',coolingInfo:''};
+  startNm:'0.1',stepNm:'0.1',maxNm:'30',bandwidthVerified:false,sensorInfo:'',coolingInfo:''};
 
 function Curve({title,points,x,y,xLabel,yLabel,series}: {title: string; points?: Capture['preview']; x?: string; y?: string; xLabel: string; yLabel: string; series?: {points: Capture['preview']; x: string; y: string; color: string}[]}) {
   const lines=series||[{points,x,y,color:'#2265bd'}];
@@ -81,9 +81,9 @@ export default function SpecializedTestsPanel({token,bridgeReady}) {
         if(category==='performance'&&(form.test==='capture'||form.test==='envelope')) {
           response=await request('/api/specialized/start',{...body,test:'capture'});captureId=response.current.id;
           if(form.test==='envelope') {
-            if(['startNm','stepNm','maxNm','intervalS'].some(key=>form[key].trim()===''||!Number.isFinite(Number(form[key]))))throw Error('加载参数必须填写有效数值');
-            await request('/api/coupled-current/start',{mode:'torque_sweep',motorMode:'maximum_output',busLimitA:20,busVoltageV:24,
-            brake:{startNm:Number(form.startNm),stepNm:Number(form.stepNm),maxNm:Number(form.maxNm),intervalS:Number(form.intervalS)}});
+            if(['startNm','stepNm','maxNm'].some(key=>form[key].trim()===''||!Number.isFinite(Number(form[key]))))throw Error('加载参数必须填写有效数值');
+            await request('/api/coupled-current/start',{mode:'torque_sweep',motorMode:'dyno',
+            brake:{startNm:Number(form.startNm),stepNm:Number(form.stepNm),maxNm:Number(form.maxNm)}});
           }
         }else if(category==='thermal'&&form.operation==='observe')response=await request('/api/specialized/start',body);
         else response=await request('/api/automatic/start',body);
@@ -123,14 +123,14 @@ export default function SpecializedTestsPanel({token,bridgeReady}) {
       <p className="sx-muted">先完成设备连接。电机、驱动板和测试配置在本次开始时冻结。</p>
       <p className="sx-note" aria-label="当前测试配置">{setupText(setup)}{setup?` · 质量 ${setup.massKg??'未填'} kg · 体积 ${setup.volumeL??'未填'} L`:'，请在右上角选择电机及其测试配置'}</p>
       <div className="sx-fields">{field('name','记录名称',{text:true})}
-        {category==='performance'&&select('test','性能配方',[['capture','T-N：记录现有工况'],['envelope','T-N：最大输出＋阶梯加载'],['kt','转矩常数：低速电流分级'],['point','指定工况测量']])}
+        {category==='performance'&&select('test','性能配方',[['capture','T-N：记录现有工况'],['envelope','T-N：测功模式＋阶梯加载'],['kt','转矩常数：低速电流分级'],['point','指定工况测量']])}
         {category==='thermal'&&select('operation','温升运行方式',[['observe','只记录现有工况'],['active','专项保持指定工况']])}
         {(category==='thermal'&&form.operation==='active'||category==='performance'&&form.test==='point')&&<>{select('controlMode','工况控制方式',[['IQ','指定 Iq'],['VELOCITY','指定输出转速']])}{field('target',form.controlMode==='IQ'?'目标 Iq A':'目标输出转速 rpm')}</>}
         {category!=='position'&&field('durationS','采集/运行时长 s')}{field('windowS','统计窗口 s')}
         {category!=='position'&&<>{field('ratedSpeedRpm','铭牌额定转速 rpm（可选）')}{field('ratedTorqueNm','铭牌额定转矩 N·m（可选）')}</>}
         {category==='performance'&&<>
           {form.test==='kt'&&<>{field('iqLevels','Iq 电流级 A（逗号分隔）',{text:true})}{field('ktMaxSpeedRpm','Kt 拟合转速范围 ±rpm')}{field('ktMaxIdA','Kt 拟合 Id 均值/波动范围 A')}{field('settleS','每级稳定等待 s')}{field('dwellS','每级有效采样 s')}</>}
-          {form.test==='envelope'&&<>{field('startNm','起始负载 N·m')}{field('stepNm','负载步长 N·m')}{field('maxNm','结束负载 N·m')}{field('intervalS','每级负载保持 s')}</>}
+          {form.test==='envelope'&&<>{field('startNm','起始负载 N·m')}{field('stepNm','负载步长 N·m')}{field('maxNm','结束负载 N·m')}</>}
           {field('sensorInfo','转矩传感器/标定与带宽说明',{text:true})}</>}
         {category==='position'&&<>{field('positions','目标位置 °（逗号分隔）',{text:true})}{select('positionReference','位置坐标',[['relative','相对测试起点'],['absolute','现有多圈坐标']])}{field('cycles','正反向重复轮数')}{field('approachDeg','换向接近距离 °')}{field('settleS','到位后等待 s')}{field('dwellS','到位采样窗口 s')}</>}
         {category==='thermal'&&<>{field('ambientC','环境温度 °C（未知留空）')}{field('thermalWindowS','热稳定观察窗口 s')}{field('thermalSlopeCPerMin','热稳定斜率范围 ±°C/min')}{field('coolingInfo','测点、环境和散热条件',{text:true})}</>}
@@ -140,7 +140,7 @@ export default function SpecializedTestsPanel({token,bridgeReady}) {
       {category==='position'&&<p className="sx-note">驱动反馈只评估跟随误差。输出端绝对定位及重复性需独立参考角度；正反向接近路径包含两端各 {form.approachDeg}°。</p>}
       {category==='thermal'&&<><p className="sx-note">现有 NTC 测点不自动等同绕组温度。无环境温度时只显示温度及相对初温变化。</p><label className="sx-check"><input type="checkbox" checked={form.stopWhenStable} onChange={event=>patch({stopWhenStable:event.target.checked})}/>满足观察窗口和工况稳定条件后结束（否则按配方时长）</label></>}
       <label className="sx-check"><input type="checkbox" checked={form.motionConfirmed} disabled={anyActive} onChange={event=>patch({motionConfirmed:event.target.checked})}/>主动测试：已确认电源、负载、散热及本次目标和换向路径允许运动</label>
-      <div className="sx-actions"><button className="button primary" disabled={!bridgeReady||busy||anyActive||!setup||((category==='position'||category==='thermal'&&form.operation==='active'||category==='performance'&&form.test!=='capture')&&!form.motionConfirmed)} onClick={()=>act('start')}>{category==='performance'&&form.test==='envelope'?'① 最大输出空载启动':'开始专项测试'}</button>
+      <div className="sx-actions"><button className="button primary" disabled={!bridgeReady||busy||anyActive||!setup||((category==='position'||category==='thermal'&&form.operation==='active'||category==='performance'&&form.test!=='capture')&&!form.motionConfirmed)} onClick={()=>act('start')}>{category==='performance'&&form.test==='envelope'?'① 测功模式空载启动':'开始专项测试'}</button>
         {state.coupled.run?.running&&<><button className="button" disabled={busy||state.coupled.run.phase!=='awaiting_load'} onClick={()=>act('load')}>② 开始阶梯加载</button><button className="button danger" disabled={busy} onClick={()=>act('stopEnvelope')}>停止加载并停机</button></>}
         {state.automatic.current?.running&&<button className="button danger" disabled={busy} onClick={()=>act('stopDrive')}>停止专项并停机</button>}
         {['running','settling'].includes(state.specialized.current?.state)&&<button className="button" disabled={busy} onClick={()=>act('stopCapture')}>仅结束专项采集</button>}

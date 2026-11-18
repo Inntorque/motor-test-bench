@@ -74,7 +74,7 @@ export class PowerChannel {
         snapshot = await this.readRaw(); const confirmed = powerProblem(this.key,this.config,snapshot);
         this.powerCheck = {state:confirmed ? 'confirmed' : 'recovered',first:initial,second:snapshot,issue:confirmed ? {message:confirmed} : null,firstIssue:{message:issue}}; issue = confirmed;
       }
-      this.connected = true; this.snapshot = snapshot; this.outputUncertain = Boolean(snapshot.status & 128); this.issue = issue;
+      this.connected = true; this.snapshot = snapshot; this.outputUncertain = Boolean(snapshot.status & 128); this.issue = issue; this.error = '';
       return this.status();
     });
   }
@@ -111,15 +111,26 @@ export class PowerChannel {
         if (powerProblem(this.key,c,fresh)) throw new Error(powerProblem(this.key,c,fresh));
         const raw = this.validateValues(data.voltage,data.current);
         if (this.key === 'motor-supply') {
-          if (fresh.settings.slice(1,3).some((value,index) => Math.abs(value - raw[index]) > 1)) throw new Error(`电机电源预设不匹配，请在面板设为 ${data.voltage} V / ${data.current} A；软件未改写预设`);
+          if (fresh.settings.slice(1,3).some((value,index) => Math.abs(value - raw[index]) > 1)) {
+            const voltage = fresh.settings[1] / 10 ** c.voltageDecimals, current = fresh.settings[2] / 10 ** c.currentDecimals;
+            throw new Error(`电机电源预设不匹配：读回 ${voltage} V / ${current} A，请在电源面板设为 ${data.voltage} V / ${data.current} A`);
+          }
         } else await this.writeValues(data.voltage,data.current);
         if (epoch !== this.epoch) throw new Error('开启已被停止取消');
         this.outputUncertain = true;
       }
       if (this.config.protocol === 'ru') await this.transport.exchange(5,133,1,[enabled]);
       else await this.transport.exchange(16,2016,1,[enabled ? 65535 : 0]);
-      this.snapshot = await this.readRaw(); this.outputUncertain = Boolean(this.snapshot.status & 128);
+      const deadline = now() + 1.5;
+      do {
+        if (epoch !== this.epoch) throw new Error('输出切换已被停止取消');
+        this.snapshot = await this.readRaw(); this.outputUncertain = Boolean(this.snapshot.status & 128);
+        if (this.outputUncertain === enabled) break;
+        await sleep(50);
+      } while (now() < deadline);
+      if (epoch !== this.epoch) throw new Error('输出切换已被停止取消');
       if (this.outputUncertain !== enabled) throw new Error('电源输出状态读回与指令不一致');
+      this.connected = true; this.error = '';
       return this.snapshot;
     });
   }
@@ -177,14 +188,15 @@ export class TorqueSensor {
   declare remove;
   declare transport: ModbusRtu | undefined;
 
+  streamId = ''; batchId = 0;
   config = null; snapshot = null; connected = false; frames = new FrameBuffer(60000); sequence = 0;
   constructor(io, observe) { this.io = io; this.observe = observe; }
   status() { return {connected:this.connected && !!this.snapshot && utc() - this.snapshot.receivedAt < (this.parser ? 1 : 3.5),config:this.config,snapshot:this.snapshot,error:this.error || ''}; }
-  async connect(data) {
+  async connect(data, streamTimeout = 30) {
     await this.disconnect();
     this.config = {...data,transport:'serial',protocol:data.protocol || 'modbus',baud:finite(data.baud || 19200,'baud',1200,115200),stopbits:Number(data.stopbits || 2),address:Number(data.address || 1),parity:'N'};
     if (!this.config.device || ![1,2].includes(this.config.stopbits) || !['modbus','hex6','hex8'].includes(this.config.protocol) || !Number.isInteger(this.config.address) || this.config.address < 1 || this.config.address > 120) throw new Error('传感器串口参数无效');
-    this.frames.clear(); this.sequence = 0;this.pendingFrames = [];
+    this.frames.clear(); this.sequence = 0; this.streamId = crypto.randomUUID(); this.batchId = 0;this.pendingFrames = [];
     try {
       if (['hex6','hex8'].includes(this.config.protocol)) {
         this.config.torqueDecimals = finite(data.torqueDecimals ?? 2,'扭矩小数位',0,4); this.config.speedDecimals = finite(data.speedDecimals ?? 1,'转速小数位',0,3);
@@ -195,7 +207,7 @@ export class TorqueSensor {
         this.opened = true;
         this.observe?.('sensor_stream',{config:this.config,reset:true});
         this.frameTimer = setInterval(() => this.flushFrames(),20);
-        const deadline = now() + 30;
+        const deadline = now() + streamTimeout;
         while (this.parser.streak < 3 && now() < deadline) await sleep(20);
         if (this.parser.streak < 3) throw new Error('未收到连续有效 HEX 帧');
       } else {
@@ -224,7 +236,7 @@ export class TorqueSensor {
     this.pendingFrames.push(...frames);
   }
   flushFrames() {
-    if (this.pendingFrames?.length) this.observe?.('sensor_frames',{config:this.config,frames:this.pendingFrames.splice(0)});
+    if (this.pendingFrames?.length) this.observe?.('sensor_frames',{config:this.config,streamId:this.streamId,batchId:++this.batchId,frames:this.pendingFrames.splice(0)});
   }
   async read() {
     if (this.parser) return this.status();

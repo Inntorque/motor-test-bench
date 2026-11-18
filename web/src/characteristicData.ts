@@ -1,5 +1,10 @@
 export const CHARACTERISTIC_COLUMNS=['power','efficiency','current','speed','voltage','inputPower'];
 
+export function characteristicAutoUpper(points, key, minimum, step, headroom = 1) {
+  const peak = points.reduce((max, point) => Number.isFinite(point[key]) ? Math.max(max, point[key]) : max, 0);
+  return Math.max(minimum, Math.ceil(peak * headroom / step) * step);
+}
+
 // A confirmed measured stop is a separate observation, never a torque-bin
 // average or an extrapolated zero. It also works before delayed frames arrive.
 export function measuredStopPoint(run) {
@@ -10,6 +15,17 @@ export function measuredStopPoint(run) {
   const power=Math.abs(s.torque*s.speed)/9550*1000;
   return {torque:Math.abs(s.torque),speed:Math.abs(s.speed),power,
     ...characteristicElectrical({...s,receivedAt:new Date(s.receivedAt*1000).toISOString()},power)};
+}
+
+// Retain an actual final zero-speed sample inside the same frozen trial.
+export function measuredZeroTail(samples, run) {
+  if (!run || run.running || !Number.isFinite(run.measurementEndedAt) || !samples.length) return null;
+  const sample = samples.at(-1), wall = Date.parse(sample.receivedAt) / 1000;
+  if (!Number.isFinite(wall) || wall > run.measurementEndedAt || run.measurementEndedAt - wall > 1 ||
+      wall < (run.curveStartedAt || run.startedAt) || !Number.isFinite(sample.torque) ||
+      !Number.isFinite(sample.speed) || sample.speed !== 0 ||
+      !samples.slice(0,-1).some(point => Number.isFinite(point.speed) && point.speed > 0)) return null;
+  return {torque:Math.abs(sample.torque),speed:0,receivedAt:wall};
 }
 
 // Use synchronized measured DC-bus V/A, never nominal 24 V / 10 A or Iq.
@@ -127,4 +143,29 @@ export function linearCharacteristic(points, key) {
   if (xx <= Number.EPSILON) return [];
   const slope=xy/xx;
   return [valid[0].torque,valid.at(-1).torque].map(torque=>({torque,[key]:y+slope*(torque-x)}));
+}
+
+// Keep the confirmed stop measurement distinct from torque-bin averages.
+export function fitCharacteristic(points, key, mode, rate, stop) {
+  const endpoint = stop && Number.isFinite(stop.torque) && Number.isFinite(stop[key]) ? stop : null;
+  const data = endpoint ? [...points,endpoint].sort((a,b)=>a.torque-b.torque) : points;
+  const fitted = mode === 'linear' ? linearCharacteristic(data,key) : curveCharacteristic(data,key,rate);
+  if (!endpoint || !fitted.length) return fitted;
+  const anchor = {torque:endpoint.torque,[key]:endpoint[key]};
+  const before = fitted.filter(point => point.torque < endpoint.torque);
+  const after = fitted.filter(point => point.torque > endpoint.torque);
+  return [...before,anchor,...after];
+}
+
+
+// Assign shaft observations to the brake target active at their acquisition time.
+export function loadStageSamples(samples, stages, loadStartedAt) {
+  if (!Array.isArray(stages) || !stages.length) return null;
+  return samples.flatMap(sample => {
+    const wall = Date.parse(sample.receivedAt)/1000;
+    if (!Number.isFinite(wall)) return [];
+    if (!Number.isFinite(loadStartedAt) || wall < loadStartedAt) return [];
+    const stage = [...stages].reverse().find(item => item.startedAt <= wall);
+    return stage && Number.isFinite(stage.targetNm) ? [{...sample,measuredTorque:sample.torque,torque:stage.targetNm}] : [];
+  });
 }

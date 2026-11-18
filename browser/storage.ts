@@ -1,5 +1,8 @@
+import {characteristicFields,isOutputPoint} from './characteristic-points.ts';
+import {sensorColumns,motorColumns,supplyColumns,brakeColumns,alignedColumns,measurementFields,alignmentLimits} from './recording-data.ts';
+import type {RecordingContext} from './recording-data.ts';
 import profile from '../profiles/bench.json' with {type:'json'};
-import {jsonValue,utc,finite,SerialQueue} from './bytes.ts';
+import {jsonValue,utc,now,finite,SerialQueue} from './bytes.ts';
 export const uid = () => crypto.randomUUID().replaceAll('-','');
 export class BrowserStore {
   declare db;
@@ -88,17 +91,24 @@ export class TestSubjects {
   }
 }
 const fields = ['elapsed_s','recording_elapsed_s','source_recording_elapsed_s','pc_recorded_unix_s','phase','source','source_received_unix_s','sensor_sequence','torque_Nm','sensor_speed_rpm','shaft_power_W','commanded_iq_A','reported_iq_reference_A','actual_iq_A','actual_id_A','rotor_position_deg','output_position_deg','rotor_speed_rpm','output_speed_rpm','motor_ntc_C','motor_output_on','motor_mode','motor_fault','supply_target_voltage_V','supply_target_current_A','supply_actual_voltage_V','supply_actual_current_A','supply_actual_power_W','supply_output_on','supply_max_voltage_V','supply_max_current_A','brake_target_torque_Nm','brake_feedback_torque_Nm','brake_command_current_A','payload_json','motor_name','driver_board_name','test_setup_id','test_setup_name','gearbox_name','has_gearbox','reduction_ratio','measurement_axis','measured_object_mass_kg','measured_object_volume_L'];
+const extraFields = ['timestamp_basis','sensor_stream_id','sensor_batch_id','sensor_frame_index','sensor_batch_size','run_id','test_kind','shaft_power_signed_W',...measurementFields];
+const allFields = [...new Set([...fields,...extraFields])];
+const alignedFields = [...new Set(['elapsed_s','recording_elapsed_s','pc_recorded_unix_s','timestamp_basis','run_id','test_kind','phase',...measurementFields,...fields.slice(fields.indexOf('motor_name'))])];
 const csvCell = value => value == null ? '' : '"' + String(value).replaceAll('"','""') + '"';
 export class Recordings {
   declare phase;
+  declare automatic: boolean;
   declare source: () => Record<string, {connected?: boolean; snapshot?: ReturnType<import('./motor.ts').MotorDevice['snapshot']>}>;
   declare stamps: {} | undefined;
   declare store;
   declare subject;
   declare timer: number | undefined;
 
+  context: () => RecordingContext = () => ({});
+  drain = () => {};
+  startedMonotonic = 0; hadMeasurements = false;
   live = null; buffer = []; queue = new SerialQueue(); part = 0;
-  constructor(store,source,subject) { this.store = store; this.source = source; this.subject = subject; }
+  constructor(store,source,subject,automatic=false) { this.store = store; this.source = source; this.subject = subject; this.automatic = automatic; }
   async initialize() {
     for (const report of await this.history()) if (report.running) {
       report.running = false; report.state = 'interrupted'; report.reason = '网页已关闭或重新加载，记录中断；已有数据保留'; report.finishedAt = utc();
@@ -110,43 +120,60 @@ export class Recordings {
   async start(data: {name?: string; range?: number} = {}, subject = this.subject()) {
     if (this.live?.running) throw new Error('已有首页记录，请先停止记录');
     const source = this.source();
-    if (!Object.values(source).some(channel => channel?.connected && utc() - (channel.snapshot?.receivedAt || 0) < 3)) throw new Error('请先连接并读取至少一个真实设备');
-    const id = uid(); this.buffer = []; this.part = 0; this.stamps = {};
-    this.live = {id,recordSchema:2,hostApi:1,name:String(data.name || '工作台试验').slice(0,100),testSubject:structuredClone(subject),ratio:subject.testSetup?.ratio ?? null,range:data.range || 100,startedAt:utc(),running:true,state:'recording',reason:'',elapsedS:0,sourceAtStart:source,counts:{},files:{csv:`/api/recordings/files/${id}/timeline.csv`,jsonl:`/api/recordings/files/${id}/timeline.jsonl`,report:`/api/recordings/files/${id}/report.json`}};
+    if (!this.automatic && !Object.values(source).some(channel => channel?.connected && utc() - (channel.snapshot?.receivedAt || 0) < 3)) throw new Error('请先连接并读取至少一个真实设备');
+    const id = uid(); this.startedMonotonic = now(); this.hadMeasurements = false; this.buffer = []; this.part = 0; this.stamps = {};
+    this.live = {id,recordSchema:2,hostApi:1,name:String(data.name || '工作台试验').slice(0,100),testSubject:structuredClone(subject),ratio:subject.testSetup?.ratio ?? null,range:data.range || (this.automatic ? null : 100),startedAt:utc(),running:true,state:'recording',reason:'',elapsedS:0,sourceAtStart:source,counts:{},files:{csv:`/api/recordings/files/${id}/timeline.csv`,jsonl:`/api/recordings/files/${id}/timeline.jsonl`,report:`/api/recordings/files/${id}/report.json`,characteristics:`/api/recordings/files/${id}/characteristics.csv`}};
+    Object.assign(this.live,{dataFormat:3,timing:{sensor:'host receive time; frames received together may share timestamps; no invented 1 kHz timestamps',elapsed_s:'source receive UTC minus session start UTC, or monotonic recording time for events',recording_elapsed_s:'monotonic host recording time',source_recording_elapsed_s:'source receive UTC minus session start UTC; blank when unavailable'},alignment:{mode:'latest received snapshot at each 50 ms host poll; no interpolation or future samples',maxAgeSeconds:alignmentLimits},power:{shaft_power_W:'abs(T*n)/9550*1000, matches UI',shaft_power_signed_W:'T*n/9550*1000',supply_actual_power_W:'measured V * measured A'}});
     await this.store.put(`reports:recordings:${id}`,this.live);
     this.timer = setInterval(() => { void this.flush().catch(error => { this.live.error = error.message; }); },1000);
     this.observe('configuration',{testSubject:subject,recordingId:id}); return this.status();
   }
   observe(kind,payload) {
     if (!this.live?.running) return;
-    const report = this.live, subject = report.testSubject, setup = subject.testSetup || {};
-    const stamp = utc(), elapsed = stamp - report.startedAt;
-    this.buffer.push({elapsed_s:elapsed,recording_elapsed_s:elapsed,source_recording_elapsed_s:elapsed,pc_recorded_unix_s:stamp,phase:this.phase || 'recording',source:kind,source_received_unix_s:payload.receivedAt ?? null,payload_json:JSON.stringify(jsonValue(payload)),motor_name:subject.motor?.name || '',driver_board_name:subject.driverBoard?.name || '',test_setup_id:setup.id,test_setup_name:setup.name,gearbox_name:setup.gearboxName,has_gearbox:setup.hasGearbox,reduction_ratio:setup.ratio,measurement_axis:setup.axis,measured_object_mass_kg:setup.massKg,measured_object_volume_L:setup.volumeL});
+    const report = this.live, subject = this.automatic ? this.subject() : report.testSubject, setup = subject.testSetup || {};
+    if (this.automatic) { report.testSubject = subject; report.ratio = setup.ratio ?? null; }
+    const stamp = utc(), elapsed = now() - this.startedMonotonic, context = this.context();
+    const received = Number.isFinite(payload.receivedAt) ? payload.receivedAt : null;
+    const sourceElapsed = received == null ? null : received - report.startedAt;
+    this.buffer.push({elapsed_s:sourceElapsed ?? elapsed,recording_elapsed_s:elapsed,source_recording_elapsed_s:sourceElapsed,pc_recorded_unix_s:stamp,timestamp_basis:received == null ? 'host_recorded' : 'host_received',phase:context.phase || this.phase || 'idle',run_id:context.runId ?? null,test_kind:context.kind ?? null,source:kind,source_received_unix_s:received,payload_json:JSON.stringify(jsonValue(payload)),motor_name:subject.motor?.name || '',driver_board_name:subject.driverBoard?.name || '',test_setup_id:setup.id,test_setup_name:setup.name,gearbox_name:setup.gearboxName,has_gearbox:setup.hasGearbox,reduction_ratio:setup.ratio,measurement_axis:setup.axis,measured_object_mass_kg:setup.massKg,measured_object_volume_L:setup.volumeL});
     if (kind === 'sensor_frames') {
       const base = this.buffer.pop(), config = payload.config;
-      for (const [sequence,receivedAt,rawTorque,rawSpeed] of payload.frames) {
+      for (const [index,[sequence,receivedAt,rawTorque,rawSpeed]] of payload.frames.entries()) {
         const torque = rawTorque / 10 ** config.torqueDecimals, speed = rawSpeed / 10 ** config.speedDecimals;
-        this.buffer.push({...base,source_received_unix_s:receivedAt,sensor_sequence:sequence,torque_Nm:torque,sensor_speed_rpm:speed,shaft_power_W:torque * speed * Math.PI / 30,payload_json:JSON.stringify({rawTorque,rawSpeed,config})});
+        this.buffer.push({...base,elapsed_s:receivedAt-report.startedAt,source_recording_elapsed_s:receivedAt-report.startedAt,source_received_unix_s:receivedAt,timestamp_basis:'host_receive_batch',sensor_stream_id:payload.streamId ?? null,sensor_batch_id:payload.batchId ?? null,sensor_frame_index:index,sensor_batch_size:payload.frames.length,sensor_sequence:sequence,...sensorColumns(torque,speed),payload_json:JSON.stringify({rawTorque,rawSpeed,config})});
       }
     }
-    report.counts[kind] = (report.counts[kind] || 0) + 1; report.elapsedS = elapsed;
+    if (kind === 'characteristic_end') (report.characteristicRuns ??= []).push(structuredClone(payload));
+    if (kind === 'characteristic_start') report.characteristicSchema=payload.characteristicSchema;
+    if (kind === 'characteristic_point') {
+      Object.assign(this.buffer.at(-1),payload);
+      (report.characteristicPoints ??= []).push(structuredClone(payload));
+      report.characteristicSchema ??= 1;
+    }
+    if (kind === 'torque_feedback') Object.assign(this.buffer.at(-1),brakeColumns(payload));
+    report.counts[kind] = (report.counts[kind] || 0) + (kind === 'sensor_frames' ? payload.frames.length : 1); report.elapsedS = elapsed;
   }
   capture() {
     if (!this.live?.running) return;
-    for (const [key,channel] of Object.entries(this.source())) {
+    const devices = this.source();
+    for (const [key,channel] of Object.entries(devices)) {
       if (!channel?.connected || !channel.snapshot) continue;
       const snapshot = channel.snapshot;
       if (snapshot.receivedAt === this.stamps[key]) continue;
       this.stamps[key] = snapshot.receivedAt; this.observe(key,snapshot);
       const row = this.buffer.at(-1), ratio = this.live.ratio;
-      if (key === 'current-motor') Object.assign(row,{actual_iq_A:snapshot.feedback?.iq_a,actual_id_A:snapshot.feedback?.id_a,reported_iq_reference_A:snapshot.feedback?.iq_reference_a,rotor_position_deg:snapshot.feedback?.position_deg,output_position_deg:ratio ? snapshot.feedback?.position_deg / ratio : null,rotor_speed_rpm:snapshot.feedback?.speed_rpm,output_speed_rpm:ratio ? snapshot.feedback?.speed_rpm / ratio : null,motor_ntc_C:snapshot.ntc?.temp_c,motor_output_on:snapshot.motor?.output_on,motor_mode:snapshot.motor?.mode,motor_fault:snapshot.motor?.fault});
-      else if (key === 'torque-sensor') Object.assign(row,{torque_Nm:snapshot.torque,sensor_speed_rpm:snapshot.speed,shaft_power_W:Number.isFinite(snapshot.torque) && Number.isFinite(snapshot.speed) ? snapshot.torque * snapshot.speed * Math.PI / 30 : null});
-      else if (key.endsWith('-supply')) {
-        const config = snapshot.config, sv = 10 ** config.voltageDecimals, sa = 10 ** config.currentDecimals;
-        Object.assign(row,{supply_target_voltage_V:snapshot.settings?.[1] / sv,supply_target_current_A:snapshot.settings?.[2] / sa,supply_actual_voltage_V:snapshot.measured?.[0] / sv,supply_actual_current_A:snapshot.measured?.[1] / sa,supply_output_on:Boolean(snapshot.status & 128),supply_max_voltage_V:config.maxVoltage,supply_max_current_A:config.maxCurrent});
-      }
+      if (key === 'current-motor') Object.assign(row,motorColumns(snapshot,ratio));
+      else if (key === 'torque-sensor') Object.assign(row,sensorColumns(snapshot.torque,snapshot.speed));
+      else if (key.endsWith('-supply')) Object.assign(row,supplyColumns(snapshot));
+    }
+    this.hadMeasurements ||= Object.values(devices).some(device => !!device?.snapshot);
+    if (this.hadMeasurements) {
+      const stamp = utc();
+      this.observe('measurement',{receivedAt:stamp});
+      Object.assign(this.buffer.at(-1),alignedColumns(devices,stamp,this.live.ratio,this.context()),{timestamp_basis:'host_poll_latest'});
     }
   }
+
   flush() {
     return this.queue.run(async () => {
       if (!this.live) return;
@@ -156,12 +183,21 @@ export class Recordings {
         this.part++; this.buffer.splice(0,rows.length);
       }
       await this.store.put(`reports:recordings:${report.id}`,report);
+      delete this.live.error;
     });
   }
   async stop(id) {
     if (!this.live || id && this.live.id !== id) throw new Error('当前记录不存在或已变化');
-    clearInterval(this.timer); this.capture(); this.live.running = false; this.live.state = 'complete'; this.live.finishedAt = utc();
-    await this.flush(); return this.status();
+    this.drain(); clearInterval(this.timer); this.capture(); this.live.running = false; this.live.state = 'complete'; this.live.finishedAt = utc();
+    try { await this.flush(); }
+    catch (error) {
+      if (this.automatic) {
+        this.live.running = true; this.live.state = 'recording'; delete this.live.finishedAt;
+        this.timer = setInterval(() => { void this.flush().catch(error => { this.live.error = error.message; }); },1000);
+      }
+      throw error;
+    }
+    return this.status();
   }
   async file(id,name) {
     if (this.live?.id === id) await this.flush();
@@ -169,8 +205,25 @@ export class Recordings {
     if (!report) throw new Error('记录不存在');
     if (name === 'report.json') return {body:JSON.stringify(report,null,2),type:'application/json'};
     const chunks = await this.store.entries(`chunks:recordings:${id}:`), rows = chunks.flatMap(chunk => chunk.rows);
+    if (name === 'characteristics.csv') return {body:'\ufeff'+characteristicFields.join(',')+'\r\n'+rows.filter(row=>row.source==='characteristic_point' && isOutputPoint(row)).map(row=>characteristicFields.map(field=>csvCell(row[field])).join(',')+'\r\n').join(''),type:'text/csv'};
     if (name === 'timeline.jsonl') return {body:rows.map(row => JSON.stringify(row)).join('\n') + '\n',type:'application/x-ndjson'};
-    if (name === 'timeline.csv') return {body:'\ufeff' + fields.join(',') + '\r\n' + rows.map(row => fields.map(field => csvCell(row[field])).join(',')).join('\r\n'),type:'text/csv'};
+    if (name === 'timeline.csv') return {body:'\ufeff' + allFields.join(',') + '\r\n' + rows.map(row => allFields.map(field => csvCell(row[field])).join(',')).join('\r\n'),type:'text/csv'};
     throw new Error('记录文件不存在');
+  }
+}
+
+export class DesktopRecordStore {
+  declare io: import('./messages.ts').DeviceIo;
+  constructor(io: import('./messages.ts').DeviceIo) { this.io = io; }
+  put(key: string, value) {
+    const [, , id, part] = key.split(':');
+    const packet = part === undefined ? {id,report:{...value,files:{csv:'timeline.csv',jsonl:'timeline.jsonl',report:'report.json',measurements:'measurements.csv',characteristics:'characteristics.csv'}}} : {
+      id,part:Number(part),
+      csv:(Number(part) === 0 ? '\ufeff'+allFields.join(',')+'\r\n' : '')+value.rows.map(row=>allFields.map(field=>csvCell(row[field])).join(',')).join('\r\n')+'\r\n',
+      measurements:(Number(part) === 0 ? '\ufeff'+alignedFields.join(',')+'\r\n' : '')+value.rows.filter(row=>row.source==='measurement').map(row=>alignedFields.map(field=>csvCell(row[field])).join(',')+'\r\n').join(''),
+      characteristics:(Number(part)===0?'\ufeff'+characteristicFields.join(',')+'\r\n':'')+value.rows.filter(row=>row.source==='characteristic_point' && isOutputPoint(row)).map(row=>characteristicFields.map(field=>csvCell(row[field])).join(',')+'\r\n').join(''),
+      jsonl:value.rows.map(row=>JSON.stringify(row)).join('\n')+'\n',
+    };
+    return this.io.call('archive-write',{archive:packet});
   }
 }

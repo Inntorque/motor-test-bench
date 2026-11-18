@@ -34,9 +34,9 @@ export function zqwlConfig(func, data) {
   const body = new Uint8Array(16); body.set(data.slice(0,16));
   return concat(Uint8Array.of(0x49,0x3b,func,0x57), body, Uint8Array.of(0x45,0x2e));
 }
-export function zqwlFrame(id, data) {
+export function zqwlFrame(id, data, singleShot = true) {
   if (!Number.isInteger(id) || id < 0 || id > 0x7ff || data.length > 8) throw new Error('Classic CAN standard frame required');
-  return concat(Uint8Array.of(0x5a,data.length,0x40,0,0,id >> 8,id & 255), data, Uint8Array.of(0xa5));
+  return concat(Uint8Array.of(0x5a,data.length,singleShot ? 0x40 : 0,0,0,id >> 8,id & 255), data, Uint8Array.of(0xa5));
 }
 export class ZqwlDecoder {
   declare heartbeat: Uint8Array<ArrayBuffer> | undefined;
@@ -117,11 +117,11 @@ export class CanTransport {
     }
     this.closed = false;
   }
-  send(id, data) {
+  send(id, data, singleShot = true) {
     if (this.closed) return Promise.reject(new Error('CAN 未连接'));
     return this.queue.run(async () => {
       if (this.interface === 'gs_usb') return this.io.call('usb-send',{device:this.device,id,data});
-      await this.io.call('serial-write',{device:this.device,data:this.interface === 'slcan' ? slcanFrame(id,data) : zqwlFrame(id,data)});
+      await this.io.call('serial-write',{device:this.device,data:this.interface === 'slcan' ? slcanFrame(id,data) : zqwlFrame(id,data,singleShot)});
       await sleep(.3);
     });
   }

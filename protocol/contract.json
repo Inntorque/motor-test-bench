@@ -1,0 +1,16 @@
+{
+  "name": "Inntorque Motor Bench Protocol",
+  "release": "1.1.0",
+  "wire": [1, 0],
+  "transport": {"primary":"CAN 2.0A 11-bit / ISO-TP", "nodeMin":1,"nodeMax":63,"byteOrder":"little-endian","maxPduBytes":1024},
+  "units": {"iq_actual":"mA peak","iq_reference":"mA peak","id_actual":"mA peak","iq_target":"mA peak","rotor_speed":"0.001 rpm, motor shaft","position":"signed int64 microturns, motor shaft","bus_voltage":"mV","bus_current":"mA DC","motor_temperature":"0.001 degC","board_temperature":"0.001 degC","device_time":"microseconds since boot","external_torque":"N.m, measured output shaft"},
+  "timing": {"hostHeartbeatMs":250,"maxDeviceWatchdogMs":1000,"recommendedStatusMs":100,"recommendedSampleMs":100,"hostStatusExpiryMs":1500,"stopConfirmTimeoutMs":2000},
+  "profiles": {
+    "identity": {"requiredObjects":["device_uid","hardware_identity","firmware_version","sdk_version","boot_id","control_modes","feedback_fields","dq_current_convention"]},
+    "current_loop": {"mode":1,"requiredFeedback":[2,4,12],"requiredObjects":["iq_min","iq_max","phase_protection_current","phase_run_limit_max","readiness_flags","device_watchdog_ms"]},
+    "dyno": {"mode":5,"requiredFeature":1,"requiredFeedback":[2,3,4],"requiredObjects":["iq_min","iq_max","phase_protection_current","phase_run_limit_max","available_iq","active_limits","readiness_flags","device_watchdog_ms"]},
+    "load_characteristic": {"requiredFeedback":[2,4,5,6,7],"externalTorqueSensorRequired":true},
+    "temperature": {"optionalFeedback":[10],"requiredWhenDeclared":["motor_temperature_trip"]}
+  },
+  "compatibility": {"majorMismatch":"identity and STOP only", "unknownOptionalObject":"ignore known TLV types", "missingFeedback":"null, never inferred", "updatesFirmwareAutomatically":false}
+}

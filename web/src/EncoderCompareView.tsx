@@ -188,7 +188,7 @@ function EncoderCompareView({sensor,motor}) {
       <span><i style={{background:'#d28131'}}/>编码器推算转速 rpm（左轴，虚线）</span>
       <span><i style={{background:'#d64545'}}/>电机温度 °C（右轴）</span>
     </div>
-    <p className="encoder-note">横轴量程与特性图一致（0–{axisMax} N·m），按制动扭矩分箱平均；扭矩取幅值。{chart.clipped?' 有扭矩超过上限的点未显示。':''}</p>
+    <p className="encoder-note">横轴量程 0–{axisMax} N·m，按轴端实测扭矩分箱平均；扭矩取幅值。{chart.clipped?' 有扭矩超过上限的点未显示。':''}</p>
   </section>;
 }
 

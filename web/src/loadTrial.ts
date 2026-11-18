@@ -4,16 +4,18 @@ export class LoadTrial {
   declare bucket;
   declare lastWall: number;
   declare points: any[];
+  declare lastSequence: number | undefined;
   declare run;
 
-  constructor(run) { this.run=run; this.points=[]; this.bucket=null; this.lastWall=-Infinity; }
+  constructor(run) { this.run=run; this.points=[]; this.bucket=null; this.lastWall=-Infinity; this.lastSequence=undefined; }
   update(run) {
-    if (run.startedAt && run.startedAt!==this.run.startedAt) { this.points=[]; this.bucket=null; this.lastWall=-Infinity; }
+    if (run.startedAt && run.startedAt!==this.run.startedAt) { this.points=[]; this.bucket=null; this.lastWall=-Infinity; this.lastSequence=undefined; }
     this.run=run;
     if(run.measurementEndedAt && this.lastWall>run.measurementEndedAt) {
       this.flush();
       this.points=this.points.filter(p=>Date.parse(p.receivedAt)/1000<=run.measurementEndedAt);
       this.lastWall=this.points.length?Date.parse(this.points.at(-1).receivedAt)/1000:-Infinity;
+      this.lastSequence=this.points.at(-1)?.sequence;
     }
   }
   append(incoming) {
@@ -22,8 +24,8 @@ export class LoadTrial {
     let changed=false;
     for (const p of incoming) {
       const wall=Date.parse(p.receivedAt)/1000;
-      if (!Number.isFinite(wall) || wall<=this.lastWall || wall<(this.run.curveStartedAt||this.run.startedAt) || (this.run.measurementEndedAt && wall>this.run.measurementEndedAt)) continue;
-      this.lastWall=wall;
+      if (!Number.isFinite(wall) || (wall<this.lastWall || wall===this.lastWall && (!Number.isFinite(p.sequence) || !Number.isFinite(this.lastSequence) || p.sequence<=this.lastSequence)) || wall<(this.run.curveStartedAt||this.run.startedAt) || (this.run.measurementEndedAt && wall>this.run.measurementEndedAt)) continue;
+      this.lastWall=wall; this.lastSequence=p.sequence;
       changed=true;
       const key=Math.floor((wall-this.run.startedAt)*50);
       if (this.bucket?.key!==key) {

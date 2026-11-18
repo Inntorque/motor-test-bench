@@ -10,9 +10,7 @@
     "strict": true
   },
   "include": [
-    "vite.config.ts",
-    "vite.gateway.config.ts",
-    "scripts/generate_browser_metadata.mts"
+    "vite.config.ts"
   ],
   "exclude": [
     "node_modules",

@@ -1,0 +1,16 @@
+{
+  "description":"示例能力声明，不是可直接发送的 JSON 协议；按 schema 对象编码为 TLV",
+  "hardware_identity":"Example MBP current drive",
+  "wire":[1,0],
+  "control_modes":2,
+  "feedback_fields":[0,1,2,4,5,6,7,8,9,10,12],
+  "optional_features":4,
+  "dq_current_convention":1,
+  "iq_min":-5000,
+  "iq_max":5000,
+  "phase_protection_current":6000,
+  "phase_run_limit_max":5000,
+  "device_watchdog_ms":1000,
+  "motor_temperature_trip":80000,
+  "notes":"必须同时实现会话、命令确认、状态、采样组、STOP 和板端看门狗；UID 和 boot_id 必须由设备生成"
+}

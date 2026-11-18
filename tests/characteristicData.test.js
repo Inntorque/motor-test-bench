@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CharacteristicWindow } from '../web/src/characteristicData.ts';
+import { CharacteristicWindow, characteristicAutoUpper } from '../web/src/characteristicData.ts';
 import {characteristicElectrical} from '../web/src/characteristicData.ts';
 import {measuredStopPoint} from '../web/src/characteristicData.ts';
 
@@ -81,4 +81,56 @@ test('adjustable curve fit follows curvature instead of flattening to a line', a
   assert.ok(near(curveCharacteristic(bumped,'power',100)).power > near(curveCharacteristic(bumped,'power',0)).power);
   assert.deepEqual(curveCharacteristic([{torque:1,power:3},{torque:2,power:5}],'power').map(p=>p.power),[3,5]);
   assert.deepEqual(curveCharacteristic([{torque:1,power:null}],'power'),[]);
+});
+
+test('characteristic axes cover measured shaft speed and supply voltage',()=>{
+  const points=[{speed:1139.4,voltage:24.03},{speed:932.1,voltage:24.02},{speed:null,voltage:null}];
+  assert.equal(characteristicAutoUpper(points,'speed',100,100,1.05),1200);
+  assert.equal(characteristicAutoUpper(points,'voltage',24,2),26);
+  assert.equal(characteristicAutoUpper([{speed:60}],'speed',100,100,1.05),100);
+  assert.equal(characteristicAutoUpper([],'voltage',24,2),24);
+});
+
+test('fitted curves retain the confirmed measured stop and do not invent one',async () => {
+  const {fitCharacteristic} = await import('../web/src/characteristicData.ts');
+  const points=[{torque:0,speed:1200},{torque:1,speed:800},{torque:2,speed:400}];
+  const stop={torque:2,speed:0};
+  for (const mode of ['linear','curve']) {
+    const withStop=fitCharacteristic(points,'speed',mode,60,stop);
+    assert.deepEqual(withStop.at(-1),stop);
+    assert.ok(withStop.every(p=>p.torque>=0 && p.torque<=2 && p.speed>=0));
+    const withoutStop=fitCharacteristic(points,'speed',mode,60,null);
+    assert.ok(withoutStop.at(-1).speed>0);
+    const internal=fitCharacteristic(points,'speed',mode,60,{torque:1.5,speed:0});
+    assert.ok(internal.some(p=>p.torque===1.5 && p.speed===0));
+    assert.equal(internal.at(-1).torque,2);
+  }
+});
+
+test('only the same frozen run final measured zero is anchored independently of bin means',async ()=>{
+  const {measuredZeroTail,fitCharacteristic}=await import('../web/src/characteristicData.ts');
+  const sample={receivedAt:new Date(1002*1000).toISOString(),torque:1.7,speed:0};
+  const run={running:false,startedAt:1000,measurementEndedAt:1002};
+  const zero=measuredZeroTail([{...sample,speed:150},sample],run);
+  assert.equal(zero.speed,0);assert.equal(zero.torque,1.7);
+  for(const mode of ['linear','curve']) assert.equal(fitCharacteristic([{torque:1,speed:400},{torque:1.7,speed:130}],'speed',mode,60,zero).find(p=>p.torque===1.7).speed,0);
+  assert.equal(measuredZeroTail([{...sample,speed:null}],run),null);
+  assert.equal(measuredZeroTail([sample],{...run,running:true}),null);
+  assert.equal(measuredZeroTail([sample],{...run,measurementEndedAt:1001}),null);
+  assert.equal(measuredZeroTail([sample],run),null);
+  assert.equal(measuredZeroTail([{...sample,speed:150},sample],{...run,measurementEndedAt:1004}),null);
+  assert.equal(measuredZeroTail([sample,{...sample,speed:150}],run),null);
+});
+
+test('brake stage coordinates retain previous stages when measured torque falls at zero speed',async ()=>{
+  const {loadStageSamples,fitCharacteristic}=await import('../web/src/characteristicData.ts');
+  const stages=[{targetNm:.4,startedAt:1001},{targetNm:1.6,startedAt:1002}];
+  const point=(time,torque,speed)=>({receivedAt:new Date(time*1000).toISOString(),torque,speed});
+  const raw=[point(1001.1,.4,900),point(1002.1,1.6,600),point(1002.2,.42,0)];
+  const mapped=loadStageSamples(raw,stages,1001);
+  assert.deepEqual(mapped.map(row=>[row.torque,row.measuredTorque,row.speed]),[[.4,.4,900],[1.6,1.6,600],[1.6,.42,0]]);
+  assert.equal(raw.at(-1).torque,.42);
+  assert.equal(fitCharacteristic([{torque:.4,speed:900},{torque:1.6,speed:600}],'speed','curve',60,{torque:1.6,speed:0}).at(-1).speed,0);
+  assert.equal(loadStageSamples(raw,[],1001),null);
+  assert.deepEqual(loadStageSamples([point(1000.9,.2,900),...raw],stages,1001).map(row=>row.torque),[.4,1.6,1.6]);
 });

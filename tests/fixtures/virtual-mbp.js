@@ -38,7 +38,7 @@ export class VirtualBoard {
       if (request.opcode === OP.read_state) result = this.stateObjects();
       if (request.opcode === OP.claim_control) {const source = view(body);assert.equal(source.getBigUint64(0,true),this.boot);this.session = source.getBigUint64(8,true);this.generation = source.getUint32(16,true);this.sequence = source.getUint32(20,true);}
       if (request.opcode === OP.prepare_run) {this.config = values(body);this.mode = this.config[O.run_mode];result = {...this.config,[O.prepared_id]:88};}
-      if (request.opcode === OP.start) {assert.equal(values(body)[O.prepared_id],88);this.state = 2;}
+      if (request.opcode === OP.start) {assert.equal(values(body)[O.prepared_id],88);this.state = 2;this.iq=this.config[O.iq_target]||0;}
       if (request.opcode === OP.set_target) this.iq = values(body)[O.iq_target];
       if (request.opcode === OP.read_diagnostic && view(body).getUint16(0,true) === 3) result = {[O.frozen_transfer_descriptor]:concat(tlv(1,3,77),tlv(2,2,1),tlv(3,3,3),tlv(4,2,40),tlv(5,3,this.trace.length),tlv(6,3,crc32(this.trace)),tlv(7,3,500))};
       if (request.opcode === OP.read_transfer) {

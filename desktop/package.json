@@ -1,0 +1,16 @@
+{
+  "name": "inntorque-bench-desktop",
+  "productName": "Inntorque \u6d4b\u529f\u673a",
+  "version": "1.2.2",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "package": "node package.mjs",
+    "install:linux": "node install-linux.mjs"
+  },
+  "devDependencies": {
+    "electron": "45.3.3"
+  }
+}

@@ -3315,8 +3315,6 @@ h1 {
   .control-area > .coupled-current-panel,
   .control-area > .motor-single-controls { grid-column: 1 / -1; }
 }
-.characteristic-load { display:flex; flex-direction:column; align-items:flex-end; gap:4px; margin:0 0 12px; color:#24364b; font-size:13px; text-align:right; }
-.characteristic-load small { color:#64748b; }
 .torque-characteristics .characteristic-load-svg { font-size:12px; fill:#24364b; font-weight:600; }
 
 /* Six-axis motor chart follows the supplied square-grid performance sheet. */
@@ -3326,7 +3324,7 @@ h1 {
   font-size: 21px;
   font-weight: 400;
 }
-.motor-performance-chart .performance-axis-unit { font-size: 22px; }
+.motor-performance-chart .performance-axis-unit { font-size: 16px; }
 .motor-performance-chart .performance-chart-title { font-family: inherit; font-size: 21px; fill: #252525; }
 .motor-performance-chart .performance-curve-label { font-size: 18px; paint-order: stroke; stroke: white; stroke-width: 3px; stroke-linejoin: round; }
 .characteristic-axis-tools { flex-wrap: wrap; gap: 10px 16px; }

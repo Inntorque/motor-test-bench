@@ -1,7 +1,7 @@
 import {FrameBuffer} from './frameBuffer.ts';
 import {eventData} from '../../browser/events.ts';
 
-let state=null,received=0,stream=null;
+let state=null,received=0,stream=null,revision=0;
 const listeners=new Set<(value: typeof state) => void>();
 const frameRows=new FrameBuffer();
 const frameListeners=new Set<() => void>();
@@ -37,11 +37,16 @@ export function sensorFrameBatch(since) {
   frameReset=false;
   return data;
 }
-function apply(next) {state=next;received=Date.now();for(const listener of listeners)listener(state);}
+function apply(next) {revision++;state=next;received=Date.now();for(const listener of listeners)listener(state);}
 export function startDeviceStore(request) {
   if(stream)return;
   const refresh=async()=>{
-    try {const response=await request('/api/state',{signal:AbortSignal.timeout(3000)});if(response.ok)apply(await response.json());}catch{}
+    const started=revision;
+    try {const response=await request('/api/state',{signal:AbortSignal.timeout(3000)});if(response.ok){const next=await response.json();if(started===revision)apply(next);}}catch{}
+  };
+  const offline=()=>{
+    received=0;revision++;
+    if(state){state={...state,streamOnline:false};for(const listener of listeners)listener(state);}
   };
   void refresh();
   stream=new EventSource('/api/v1/events');
@@ -56,8 +61,6 @@ export function startDeviceStore(request) {
     const packet=eventData<{config: object; reset?: boolean}>(event);frameConfig=packet.config;
     if(packet.reset){frameRows.clear();frameReset=true;}
   });
-  stream.addEventListener('error',()=>{
-    received=0;
-    if(state)for(const listener of listeners)listener({...state,streamOnline:false});
-  });
+  stream.addEventListener('error',offline);
+  window.setInterval(()=>{if(received&&Date.now()-received>1500)offline();},500);
 }

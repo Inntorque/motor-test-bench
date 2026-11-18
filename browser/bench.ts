@@ -2,11 +2,13 @@ import {MotorDevice} from './motor.ts';
 import {PowerChannel,TorqueSensor} from './rs485.ts';
 import {canInterface} from './transports.ts';
 import {CurrentMotor,BrakeCurrent,CoupledCurrent} from './control.ts';
-import {TestSubjects,Recordings} from './storage.ts';
+import {TestSubjects,Recordings,DesktopRecordStore} from './storage.ts';
 import {Specialized} from './specialized.ts';
 import {O,OP} from './mbp-codec.ts';
 import {finite,jsonValue,now,pack,sleep,utc} from './bytes.ts';
 export class Bench {
+  updating = false;
+  private pendingWrites = 0;
   declare brake: BrakeCurrent;
   declare channels: { [k: string]: PowerChannel; };
   declare coupled: CoupledCurrent;
@@ -20,6 +22,7 @@ export class Bench {
   declare polling: boolean | undefined;
   declare prepared: { id: number; epoch: number; } | null | undefined;
   declare recordings: Recordings;
+  declare autoRecording: Recordings | undefined;
   declare recoveryExpected: Set<string> | null | undefined;
   declare recoveryMotor: boolean | undefined;
   declare sensor: TorqueSensor;
@@ -31,16 +34,35 @@ export class Bench {
   declare timers: number[] | undefined;
   declare token: `${string}-${string}-${string}-${string}-${string}`;
 
-  epoch = 0; owner = null; blocked = false; stopping = false; errors = []; reason = ''; expected = new Set();
+  epoch = 0; owner = null; blocked = false; stopping = false; clearingFault = false; errors = []; reason = ''; expected = new Set();
   connection = {running:false,report:[],candidates:[]}; histories = [];
-  constructor(io,store,emit) {
+  private waitingForMotor = false;
+  private motorConnectTask: Promise<ReturnType<CurrentMotor['status']>> | null = null;
+  private nextMotorConnect = 0;
+  private motorConnectGeneration = 0;
+  private motorHint: {device?: string; node?: number} = {};
+  constructor(io,store,emit,desktop=false) {
     this.io = io; this.store = store; this.emit = emit; this.token = crypto.randomUUID();
-    this.observe = (kind,data) => { this.recordings?.observe(kind,data); this.emit(kind,data); };
+    this.observe = (kind,data) => { this.recordings?.observe(kind,data); this.autoRecording?.observe(kind,data); this.emit(kind,data); };
     this.channels = Object.fromEntries(['motor-supply','brake-supply'].map(key => [key,new PowerChannel(key,io)]));
     this.sensor = new TorqueSensor(io,this.observe); this.device = new MotorDevice(io,this.observe);
     this.motor = new CurrentMotor(this.device,this); this.brake = new BrakeCurrent(this.channels['brake-supply']); this.coupled = new CoupledCurrent(this);
     this.subjects = new TestSubjects(store,() => this.busy());
     this.recordings = new Recordings(store,() => this.source(),() => this.subjects.selection()); this.specialized = new Specialized(this);
+    if (desktop) this.autoRecording = new Recordings(new DesktopRecordStore(io),() => this.source(),() => this.subjects.selection(),true);
+    for (const recording of [this.recordings,this.autoRecording].filter(Boolean)) {
+      recording.context = () => this.recordingContext();
+      recording.drain = () => this.sensor.flushFrames();
+    }
+  }
+  recordingContext() {
+    const special = Object.values(this.specialized.live).find(report => report?.running);
+    if (special) return {runId:special.id,kind:special.origin,phase:special.phase || 'preparing'};
+    const run = this.coupled.run.running || this.coupled.run.postStopTailState === 'collecting' ? this.coupled.run : null;
+    if (run) return {runId:run.id,kind:'coupled',phase:run.postStopTailState === 'collecting' ? 'post_stop_tail' : run.phase,targetNm:run.targetNm,measuredNm:run.measuredNm,currentA:run.brakeCurrentA};
+    if (this.brake.run.running) return {runId:this.brake.run.id,kind:'brake',phase:this.brake.run.phase};
+    const motor = this.motor.run;
+    return {runId:motor.id,kind:motor.running ? 'motor' : 'idle',phase:motor.running ? motor.phase : 'idle'};
   }
   async initialize() {
     await this.subjects.initialize(); await this.recordings.initialize(); await this.specialized.initialize();
@@ -49,10 +71,11 @@ export class Bench {
       this.recoveryExpected = new Set(journal.expected || []);
       this.recoveryMotor = !!journal.motorMayBeOn;
       this.expected = new Set(journal.expected || []);
-      this.blocked = true; this.reason = '上次退出时输出未确认关闭，请重新连接原设备并执行停止确认';
+      this.blocked = true; this.reason = '上次会话有未核实的输出记录，等待相关设备回读';
     }
+    if (this.autoRecording) await this.autoRecording.start({name:"自动采集"});
     this.histories = await this.recordings.history();
-    this.timers = [setInterval(() => this.publish(),200),setInterval(() => {this.recordings.capture();},50),setInterval(() => {void this.poll();},300)];
+    this.timers = [setInterval(() => this.publish(),200),setInterval(() => {this.recordings.capture(); this.autoRecording?.capture();},50),setInterval(() => {void this.poll();},300)];
   }
   busy() { return !!(this.motor.run.running || this.brake.run.running || this.coupled.run.running || this.recordings.live?.running || this.specialized.active()); }
   source() { return {...Object.fromEntries(Object.entries(this.channels).map(([key,channel]) => [key,channel.status()])), 'torque-sensor':this.sensor.status(),'current-motor':this.motor.status()}; }
@@ -64,7 +87,11 @@ export class Bench {
   }
   state() {
     const devices = this.source(),control = this.safety(),recording = this.recordings.status();
-    return {hostApi:1,recordSchema:2,routes:this.routes(devices,control,recording),devices,control,test:this.coupled.run,recording};
+    return {hostApi:1,recordSchema:2,routes:this.routes(devices,control,recording),devices,control,test:this.coupled.run,recording,desktopBusy:this.desktopBusy()};
+  }
+  desktopBusy() {
+    return this.busy() || this.blocked || this.stopping || !!(this.device.state.flags & 1) ||
+      Object.values(this.channels).some(channel => channel.outputUncertain || channel.snapshot?.status & 128);
   }
   publish() {
     if (this.owner && !this.stopping && !this.blocked && !this.coupled.run.running && [this.motor,this.brake].some(engine => engine.run.phase === 'stopped' && engine.run.stopConfirmed === false)) this.beginStop('输出关闭未确认，执行原电源断电兜底',Object.keys(this.channels));
@@ -90,7 +117,41 @@ export class Bench {
       if (this.sensor.config && !this.sensor.parser) {
         try { await this.sensor.read(); } catch (error) { this.sensor.connected = false; this.sensor.error = error.message; }
       }
+      await this.reconcileRecovery();
+      this.pollMotorConnection();
     } finally { this.polling = false; }
+  }
+  async reconcileRecovery() {
+    if (!this.recoveryExpected || !this.blocked || this.stopping) return;
+    if (!this.recoveryExpected.size && !this.recoveryMotor) return;
+    const epoch = this.epoch, devices = this.source(), stamp = utc();
+    const fresh = device => device?.connected && Number.isFinite(device.snapshot?.receivedAt) &&
+      stamp - device.snapshot.receivedAt >= 0 && stamp - device.snapshot.receivedAt <= 1.5;
+    const power = devices['motor-supply'], drive = devices['current-motor'], motor = drive?.snapshot?.motor;
+    const needsMotor = this.recoveryMotor || this.recoveryExpected.has('current-motor');
+    const motorOff = fresh(drive) && motor?.output_on === false && Number.isFinite(motor.age_s) && motor.age_s >= 0 && motor.age_s <= 1;
+    const decimals = power?.config?.voltageDecimals ?? power?.snapshot?.config?.voltageDecimals;
+    const rawVoltage = power?.snapshot?.measured?.[0];
+    const isolated = fresh(power) && !(power.snapshot.status & 128) && Number.isFinite(decimals) &&
+      Number.isFinite(rawVoltage) && rawVoltage >= 0 && rawVoltage / 10 ** decimals < 2.4;
+    if (needsMotor && !motorOff && !isolated) return;
+    for (const key of this.recoveryExpected) {
+      if (key === 'current-motor') continue;
+      if (!fresh(devices[key]) || key !== 'motor-supply' && (devices[key].snapshot.status & 128)) return;
+    }
+    const powered = fresh(devices['motor-supply']) && !!(devices['motor-supply'].snapshot.status & 128);
+    const expected = powered ? ['motor-supply'] : [];
+    try { await this.store.put('output-journal',{dirty:powered,expected,motorMayBeOn:false}); }
+    catch (error) { this.errors = ['输出状态确认保存失败：' + error.message]; return; }
+    if (epoch !== this.epoch || this.stopping) return;
+    this.blocked = false; this.errors = []; this.reason = '上次会话的输出状态已核实';
+    this.recoveryExpected = null; this.recoveryMotor = false; this.expected = new Set(expected);
+    this.motorIsolated = needsMotor && !motorOff && isolated;
+    this.motor.run.stopConfirmed = needsMotor || motorOff ? true : null;
+    this.brake.run.stopConfirmed = fresh(devices['brake-supply']) && !(devices['brake-supply'].snapshot.status & 128) ? true : null;
+    this.coupled.run.stopConfirmed = this.motor.run.stopConfirmed && this.brake.run.stopConfirmed ? true : null;
+    this.coupled.run.stopErrors = [];
+    this.observe('safety_recovered',this.safety()); this.publish();
   }
   async claim(headers,{energizing = false,restoring = false,keys = [],motor = false} = {}) {
     const client = headers['x-workbench-client'], epoch = headers['x-control-epoch'];
@@ -99,12 +160,14 @@ export class Bench {
     if (this.blocked && !restoring) throw new Error('停机尚未确认，请先重试停止');
     if (this.owner && client !== this.owner) throw new Error('另一控制会话仍在使用设备');
     if (energizing) {
+      if (motor && !this.motor.status().connected) throw new Error('电机未连接，未发送启动命令');
       this.owner = client; keys.filter(key => this.channels[key]?.config).forEach(key => this.expected.add(key));
       if (motor) {this.expected.add('current-motor');this.motorIsolated = false;}
       await this.store.put('output-journal',{dirty:true,expected:[...this.expected],motorMayBeOn:this.expected.has('current-motor')});
     }
   }
   beginStop(reason = '操作者停止',keys = []) {
+    this.cancelMotorConnection();
     this.epoch++; this.prepared = null; this.reason = reason; this.blocked = true; this.stopping = true;
     this.motor.generation++; this.brake.generation++; this.coupled.generation++;
     for (const origin of ['automatic','specialized']) this.specialized.generation[origin]++;
@@ -124,17 +187,18 @@ export class Bench {
     let motorOk = true;
     if (this.recoveryMotor && (!this.device.bus || this.device.bus.closed)) {motorOk = false;errors.push('电机：请重新连接原驱动板以确认停止，或连接原电机电源进行断电确认');}
     const motor = this.device.bus && !this.device.bus.closed ? attempt('电机',() => this.motor.stop()).then(ok => {motorOk = ok;}) : Promise.resolve();
-    const brake = this.channels['brake-supply'].config ? attempt('制动',() => this.brake.stop()) : Promise.resolve();
+    if (this.channels['brake-supply'].config) this.stopKeys.add('brake-supply');
     const drainPowerOff = async () => { while (this.stopKeys.size) {
       const keys = [...this.stopKeys]; this.stopKeys.clear();
       await Promise.all(keys.map(key => {
-        if (this.channels[key]?.config) return attempt(key,() => this.channels[key].output(false));
+        if (this.channels[key]?.config) return key === 'brake-supply'
+          ? attempt('制动',() => this.brake.stop()) : attempt(key,() => this.channels[key].output(false));
         if (this.recoveryExpected?.has(key)) errors.push(`${key}：请重新连接原电源以确认输出关闭`);
         return Promise.resolve();
       }));
     } };
     await drainPowerOff();
-    await Promise.all([motor,brake]);
+    await motor;
     await drainPowerOff();
     if (!motorOk && this.channels['motor-supply'].config) {
       const channel = this.channels['motor-supply'];
@@ -152,7 +216,7 @@ export class Bench {
     }
     Object.assign(this.motor.run,{running:false,phase:'stopped',stopConfirmed:motorOk});
     Object.assign(this.brake.run,{running:false,phase:'stopped'});
-    Object.assign(this.coupled.run,{running:false,phase:'stopped',stopConfirmed:motorOk && !errors.length,stopErrors:errors});
+    Object.assign(this.coupled.run,{running:false,phase:'stopped',stopErrors:errors});
     await drainPowerOff();
     this.stopping = false; this.errors = errors; this.blocked = !motorOk || errors.some(error => !this.motorIsolated || !error.startsWith('电机：'));
     if (!this.blocked) { this.owner = null; this.expected.clear(); }
@@ -162,6 +226,7 @@ export class Bench {
     if (motorMayBeOn) expected.push('current-motor');
     try { await this.store.put('output-journal',{dirty,expected,motorMayBeOn}); }
     catch (error) { this.errors.push('停机记录保存失败：' + error.message); this.blocked = true; }
+    this.coupled.run.stopConfirmed = !this.blocked;
     if (!this.blocked) {this.recoveryExpected = null;this.recoveryMotor = false;}
     this.observe('safety_stop_result',this.safety()); this.publish();
   }
@@ -172,33 +237,168 @@ export class Bench {
     if (!canInterface(port)) throw new Error('所选接口不是已支持的 CAN 适配器');
     return {...data,device:port.port,interface:canInterface(port),baud:500000,node:Number(data.node ?? selected.node ?? 1)};
   }
+  private reportMotorConnection(message: string) {
+    this.connection.report = this.connection.report.filter(line => !line.startsWith('电机驱动板：'));
+    this.connection.report.push('电机驱动板：' + message);
+  }
+  private cancelMotorConnection() {
+    if (this.waitingForMotor) {
+      this.motor.error = '已取消驱动板自动连接';
+      this.reportMotorConnection(this.motor.error);
+    }
+    this.waitingForMotor = false;
+    this.motorConnectGeneration++;
+  }
+  private connectMotor(hint = this.motorHint) {
+    if (this.motorConnectTask) return this.motorConnectTask;
+    this.motorHint = hint; this.waitingForMotor = true;
+    const generation = this.motorConnectGeneration;
+    this.motorConnectTask = (async () => {
+      try {
+        const config = await this.motorConfig(hint);
+        if (generation !== this.motorConnectGeneration) return this.motor.status();
+        const result = await this.motor.connect(config);
+        if (generation === this.motorConnectGeneration) {
+          this.waitingForMotor = false;
+          this.reportMotorConnection('已连接');
+        }
+        return result;
+      } catch (error) {
+        if (generation === this.motorConnectGeneration) {
+          this.nextMotorConnect = now() + 1;
+          this.motor.error = '等待驱动板上电回传，电源开启后自动连接；' + error.message;
+          this.reportMotorConnection(this.motor.error);
+        }
+        throw error;
+      } finally {
+        this.motorConnectTask = null;
+        this.publish();
+      }
+    })();
+    return this.motorConnectTask;
+  }
+  private pollMotorConnection() {
+    if (!this.waitingForMotor || this.motorConnectTask || this.connection.running || this.stopping || this.busy() || now() < this.nextMotorConnect) return;
+    if (this.motor.status().connected) {this.waitingForMotor = false;return;}
+    const power = this.channels['motor-supply'];
+    if (!power.connected || power.issue || !(power.snapshot?.status & 128) || utc() - power.snapshot.receivedAt > 2) return;
+    this.motor.error = '电机电源已开启，正在等待驱动板回传并自动连接';
+    this.reportMotorConnection(this.motor.error);
+    void this.connectMotor().catch(() => {});
+  }
+  private async probeRs485(device, key, hint) {
+    const config = {...hint,device,transport:'serial'};
+    if (key === 'torque-sensor') {
+      const sensor = new TorqueSensor(this.io,undefined);
+      const streaming = ['hex6','hex8'].includes(hint?.protocol);
+      const candidates = ['hex6','hex8'].map(protocol => ({
+        ...config,protocol,baud:streaming ? hint.baud : 115200,stopbits:streaming ? hint.stopbits : 1,
+      }));
+      candidates.push({...config,protocol:'modbus',baud:streaming ? 19200 : config.baud,stopbits:streaming ? 2 : config.stopbits});
+      for (const candidate of candidates) {
+        try { await sensor.connect(candidate,.4); return candidate; }
+        catch { continue; }
+        finally { await sensor.disconnect(); }
+      }
+      return null;
+    }
+
+    const power = new PowerChannel(key,this.io);
+    try { await power.connect(config); return config; }
+    catch { return null; }
+    finally { await power.transport?.close(); }
+  }
   async connectAll(hints) {
     if (this.busy() || this.connection.running) throw new Error('试验或记录中不重新扫描');
     this.connection = {running:true,report:[],candidates:[]};
     void (async () => {
+      const labels = {'motor-supply':'电机电源','brake-supply':'制动电源','torque-sensor':'动态扭矩传感器'};
+      const channels = {'torque-sensor':this.sensor,...this.channels};
+      const report = (label, result) => this.connection.report.push(`${label}：${result}`);
       try {
         const ports = await this.io.call('ports',{});
         const rs485 = ports.filter(port => port.kind === 'serial' && !canInterface(port));
-        for (const key of ['motor-supply','brake-supply','torque-sensor','current-motor']) {
-          const channel = key === 'current-motor' ? this.motor : key === 'torque-sensor' ? this.sensor : this.channels[key];
-          const label = {'motor-supply':'电机电源','brake-supply':'制动电源','torque-sensor':'动态扭矩传感器','current-motor':'电机驱动板'}[key];
-          if (channel.status().connected) { this.connection.report.push(`${label}：已连接`); continue; }
-          try {
-            const config = key === 'current-motor' ? await this.motorConfig(hints[key]) : hints[key];
-            if (key !== 'current-motor' && !rs485.some(port => port.port === config?.device))
-              throw new Error(rs485.length ? '请在设备的通信参数中绑定对应串口' : '未发现已授权的 USB-RS485，请在设备的通信参数中授权并绑定');
-            await channel.connect(config); this.connection.report.push(`${label}：已连接`);
-          } catch (error) { this.connection.report.push(`${label}：${error.message}`); }
+        const reserved = new Set(Object.values(channels).map(channel => channel.config?.device).filter(Boolean));
+        for (const hint of Object.values(hints) as {device?: string}[]) if (hint?.device) reserved.add(hint.device);
+        const missing = [];
+        for (const [key,channel] of Object.entries(channels)) {
+          if (channel.status().connected) { report(labels[key],'已连接'); continue; }
+          const hint = hints[key];
+          if (rs485.some(port => port.port === hint?.device)) {
+            try { await channel.connect(hint); report(labels[key],'已连接'); }
+            catch (error) { report(labels[key],error.message); }
+          } else missing.push(key);
         }
+
+        const available = rs485.filter(port => port.vid != null && !port.opened && !reserved.has(port.port));
+        const candidates = missing.length ? (await Promise.all(available.map(async port => {
+          const matches = [];
+          for (const key of missing) {
+            const config = await this.probeRs485(port.port,key,hints[key]);
+            if (config) matches.push({key,config,description:port.description});
+          }
+          return matches;
+        }))).flat() : [];
+        for (const key of missing) {
+          const matches = candidates.filter(candidate => candidate.key === key);
+          if (!matches.length) {
+            report(labels[key],rs485.length ? '未识别到设备，请确认转接器都已授权且设备已应答' : '请先通过顶部“授权串口”逐个授权 USB-RS485，再点一键连接');
+            continue;
+          }
+          const [match] = matches;
+          if (matches.length > 1 || candidates.some(other => other !== match && other.config.device === match.config.device)) {
+            report(labels[key],'存在多个匹配，请在设备面板手动绑定');
+            continue;
+          }
+          try {
+            await channels[key].connect(match.config);
+            const result = `已自动识别并连接（${match.description}）`;
+            report(labels[key],result);
+          } catch (error) { report(labels[key],error.message); }
+        }
+        try {
+          if (!this.motor.status().connected) await this.connectMotor(hints['current-motor']);
+          this.reportMotorConnection('已连接');
+        } catch { /* connectMotor keeps the pending connection status. */ }
       } catch (error) {
-        this.connection.report.push(`无法读取设备接口：${error.message}`);
+        report('接口扫描失败',error.message);
       } finally { this.connection.running = false; this.publish(); }
     })();
     return this.connection;
   }
   async request(path,method,body,headers = {}) {
+    if (method !== 'POST') return this.dispatch(path,method,body,headers);
+    this.pendingWrites++;
+    try { return await this.dispatch(path,method,body,headers); }
+    finally { this.pendingWrites--; }
+  }
+  private async dispatch(path,method,body,headers) {
     const url = new URL(path,'https://browser.invalid'); path = url.pathname.replace('/api/v1/','/api/');
+    if(this.updating&&method!=='GET'&&!path.endsWith('/stop'))throw new Error('正在准备更新，暂不接受设备控制');
     if (method === 'GET') {
+      if(path==='/api/desktop/update-ready'){
+        if(this.pendingWrites || this.desktopBusy())return {ready:false,error:'试验或设备输出尚未结束，请先停止后再更新'};
+        this.updating=true;return {ready:true};
+      }
+      if(path==='/api/desktop/update-cancel'){
+        if(this.updating && this.autoRecording?.live && !this.autoRecording.live.running)
+          await this.autoRecording.start({name:'自动采集'});
+        this.updating=false;return {ready:true};
+      }
+      if (path === '/api/desktop/close-ready') {
+        this.sensor.flushFrames();
+        if (url.searchParams.get('finish') === '1') {
+          if (this.recordings.live?.running) await this.recordings.stop(null);
+          else await this.recordings.flush();
+          if (this.autoRecording?.live?.running) await this.autoRecording.stop(null);
+          else await this.autoRecording?.flush();
+        } else {
+          await this.recordings.flush();
+          await this.autoRecording?.flush();
+        }
+        return {ready:true};
+      }
+      if (path === '/api/desktop/autosave') return this.autoRecording?.status() || null;
       if (path === '/api/recordings/status') return {current:this.recordings.status(),...(url.searchParams.get('history') !== '0' ? {records:await this.recordings.history()} : {})};
       if (path === '/api/automatic/status' || path === '/api/specialized/status') return this.specialized.status(path.split('/')[2],url.searchParams.get('history') !== '0');
       if (path === '/api/state') return this.state();
@@ -229,11 +429,16 @@ export class Bench {
       return {httpStatus:202,safety:this.beginStop('操作者停止',path === '/api/control/stop' ? Object.keys(this.channels) : [])};
     }
     if (/^\/api\/supplies\/[^/]+\/output$/.test(path) && body.on === false) return {httpStatus:202,safety:this.beginStop('操作者关闭电源',[path.split('/')[3]])};
-    const energizing = path.endsWith('/start') && !['/api/recordings/start','/api/connections/start','/api/specialized/start'].includes(path) || path === '/api/coupled-current/load' || path.endsWith('/output') && body.on === true;
+    const energizing = path.endsWith('/start') && !['/api/recordings/start','/api/connections/start','/api/specialized/start'].includes(path) || path === '/api/coupled-current/load' || path === '/api/coupled-current/target' || path.endsWith('/output') && body.on === true;
+    if ((energizing || path === '/api/specialized/start') && this.clearingFault) throw new Error('正在清除故障，请等待设备回读');
     const requestEpoch = this.epoch;
     const keys = path.startsWith('/api/supplies/') ? [path.split('/')[3]] : path.startsWith('/api/coupled-current/') ? Object.keys(this.channels) : path.startsWith('/api/brake-current/') ? ['brake-supply'] : ['motor-supply'];
     await this.claim(headers,{energizing,motor:energizing && /^\/api\/(motor-current|motor|coupled-current|automatic)\//.test(path),restoring:path.endsWith('/connect') || path.endsWith('/read') || path === '/api/connections/start',keys});
     if (requestEpoch !== this.epoch) throw new Error('指令已被停止取消');
+    if (['/api/recordings/start','/api/specialized/start','/api/automatic/start'].includes(path)) {
+      await this.coupled.finishTail();
+      if (requestEpoch !== this.epoch) throw new Error('指令已被停止取消');
+    }
     this.observe('operation_request',{path,request:body,controlEpoch:this.epoch});
     const parts = path.split('/').filter(Boolean), action = parts.at(-1);
     if (path.startsWith('/api/test-subjects/')) {
@@ -249,12 +454,26 @@ export class Bench {
     if (path === '/api/specialized/stop') return this.specialized.stop('specialized',body.id);
     if (path === '/api/automatic/start') return this.specialized.start(body,'automatic');
     if (path.startsWith('/api/motor-current/')) {
-      if (action === 'connect') return this.motor.connect(await this.motorConfig(body));
-      if (action === 'disconnect') { if (this.motor.run.running || this.device.state.flags & 1) throw new Error('请先停止输出'); await this.device.close(); return this.motor.status(); }
+      if (action === 'clear-fault') {
+        if (this.clearingFault) throw new Error('正在清除故障');
+        this.clearingFault = true;
+        const checkStopped = () => {
+          if (requestEpoch !== this.epoch || this.stopping) throw new Error('清故障已被停止操作取消');
+          if (this.coupled.run.running || this.specialized.active() || this.motor.run.running || this.brake.run.running || this.device.session) throw new Error('请先结束测试并确认控制会话已关闭');
+          if (this.coupled.run.stopConfirmed !== true && this.motor.run.stopConfirmed !== true) throw new Error('请先执行停止并确认输出关闭');
+          const snapshot = this.device.snapshot();
+          if (snapshot.motor.output_on || snapshot.motor.age_s > 1 || !snapshot.motor.fault && snapshot.motor.state !== 4) throw new Error('没有新鲜的输出关闭故障状态');
+        };
+        try { await this.device.clearKnownFault(checkStopped); return this.motor.status(); }
+        finally { this.clearingFault = false; }
+      }
+      if (action === 'connect') return this.connectMotor(body);
+      if (action === 'disconnect') { if (this.motor.run.running || this.device.state.flags & 1) throw new Error('请先停止输出'); this.cancelMotorConnection(); await this.motorConnectTask?.catch(() => {}); await this.device.close(); return this.motor.status(); }
       if (action === 'start') return this.motor.start(body);
     }
     if (path === '/api/brake-current/start') return this.brake.start(body);
     if (path === '/api/coupled-current/start') return this.coupled.start(body);
+    if (path === '/api/coupled-current/target') return this.coupled.setCurrent(body);
     if (path === '/api/coupled-current/load') return this.coupled.load(body);
     if (parts[1] === 'supplies' && parts.length === 4) {
       const channel = this.channels[parts[2]];
@@ -268,7 +487,9 @@ export class Bench {
         const result = await channel.output(body.on,body);
         if (parts[2] === 'motor-supply' && body.on) {
           this.motorIsolated = false;
-          void this.motorConfig().then(config => this.motor.connect(config)).catch(error => {this.motor.error = error.message;});
+          this.waitingForMotor = !this.motor.status().connected;
+          this.nextMotorConnect = 0;
+          this.pollMotorConnection();
         }
         return result;
       }
@@ -308,7 +529,7 @@ export class Bench {
       Object.assign(this.motor.run,{running:true,phase:'manual',stopConfirmed:null}); this.prepared = null; return this.motor.status();
     }
     if (action === 'target') { if (!this.motor.run.running || this.motor.run.phase !== 'manual') throw new Error('当前没有独立电机输出'); await this.device.setTarget(O.iq_target,Math.round(finite(data.iqTargetA,'目标 Iq') * 1000)); return this.motor.status(); }
-    if (action === 'clear-fault') return this.device.request(OP.clear_fault,new Uint8Array(),{mutation:true});
+    if (action === 'clear-fault') throw new Error('请使用电机清除故障按钮');
     if (action === 'diagnostic') return jsonValue(await this.device.request(OP.read_diagnostic,pack('H',data.kind || 2),{channel:1}));
     if (action === 'frozen') return jsonValue(await this.device.readFrozen());
     throw new Error('未知独立电机操作');

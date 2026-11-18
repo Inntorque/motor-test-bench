@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Bench} from '../browser/bench.ts';
-import {CurrentMotor,CoupledCurrent,StandstillConfirmation,BrakeTorque,BrakeCurrent} from '../browser/control.ts';
+import {CurrentMotor,CoupledCurrent,StandstillConfirmation,brakeCurrentForTorque,BrakeCurrent} from '../browser/control.ts';
 import {TestSubjects,Recordings} from '../browser/storage.ts';
 import {Specialized} from '../browser/specialized.ts';
 import {fit,positioning,thermal} from '../browser/metrics.ts';
@@ -54,15 +54,26 @@ test('a failed IndexedDB chunk write retains the buffered samples and retries th
 
 test('STOP during prepare cancels a pending current start before any START command is sent',async () => {
   const gate = deferred();let starts = 0;
-  const device = {snapshot,prepare:() => gate.promise,start:async () => {starts++;},stop:async () => ({deviceDisabled:true})};
+  const device = {snapshot,refreshReadiness:async () => {},prepare:() => gate.promise,start:async () => {starts++;},stop:async () => ({deviceDisabled:true})};
   const motor = new CurrentMotor(device,{});await motor.start({mode:'maximum_output',busLimitA:20,busVoltageV:24});
   const task = motor.task;await motor.stop();gate.resolve(123);await task;
   assert.equal(starts,0);assert.equal(motor.run.running,false);assert.equal(motor.run.stopConfirmed,true);
 });
 
+test('STOP during the fresh readiness read cancels start before preparing any run',async () => {
+  const gate = deferred();
+  const device = {snapshot,refreshReadiness:() => gate.promise,prepare:async () => assert.fail('cancelled start must not prepare'),stop:async () => ({deviceDisabled:true})};
+  const motor = new CurrentMotor(device,{});
+  const start = motor.start({mode:'maximum_output'});
+  await motor.stop();
+  gate.resolve();
+  await assert.rejects(start,/启动已被停止取消/);
+  assert.equal(motor.run.running,false);
+});
+
 test('STOP while the output journal is pending cancels the dispatch and never starts the motor',async () => {
   const store = new MemoryStore(), env = await bench(store), entered = deferred(), release = deferred();let starts = 0;
-  env.motor.start = async () => {starts++;};const put = store.put.bind(store);
+  env.motor.status = () => ({connected:true});env.motor.start = async () => {starts++;};const put = store.put.bind(store);
   store.put = async (key,value) => {if (key === 'output-journal' && value.dirty) {entered.resolve();await release.promise;}return put(key,value);};
   const request = env.request('/api/motor-current/start','POST',{mode:'maximum_output'},client(env));await entered.promise;
   env.beginStop('test');await env.stopTask;release.resolve();await assert.rejects(request,/停止取消/);assert.equal(starts,0);
@@ -70,7 +81,7 @@ test('STOP while the output journal is pending cancels the dispatch and never st
 
 test('journal failure prevents ON and does not call the motor execution layer',async () => {
   const store = new MemoryStore(), env = await bench(store);let starts = 0;
-  env.motor.start = async () => {starts++;};store.put = async () => {throw new Error('storage full');};
+  env.motor.status = () => ({connected:true});env.motor.start = async () => {starts++;};store.put = async () => {throw new Error('storage full');};
   await assert.rejects(env.request('/api/motor-current/start','POST',{mode:'maximum_output'},client(env)),/storage full/);assert.equal(starts,0);
 });
 
@@ -106,16 +117,20 @@ test('STOP during specialized report creation cannot allocate a fresh task gener
 
 test('standstill confirmation uses fresh independent positions; repeated cached positions do not advance time',() => {
   const detector = new StandstillConfirmation(), motor = snapshot();motor.motor.state = 2;motor.motor.output_on = true;
-  const measured = {speed:0,speedDecimals:1};const status = {snapshot:motor};
+  const measured = {speed:0,torque:.3,speedDecimals:1,receivedAt:utc()};const status = {snapshot:motor};
   motor.motor.updated_at = motor.feedback.updated_at = motor.feedback.position_at = utc() - .5;
   assert.equal(detector.update(measured,status,true),false);const count = detector.samples.length;
   for (let i = 0; i < 100; i++) assert.equal(detector.update(measured,status,true),false);
   assert.equal(detector.samples.length,count);assert.equal(detector.evidence.confirmed,false);
 });
 
-test('torque sweep keeps the original measured feedforward boundary and strict 1.999 A excitation cap',() => {
-  const control = new BrakeTorque();for (let i = 0; i < 1000; i++) assert.ok(control.update(99,0) <= 1.999);
-  assert.equal(control.current,1.999);assert.equal(control.update(0,1),0);assert.equal(control.current,0);
+test('open-loop torque sweep uses the existing calibration and rejects extrapolation',() => {
+  assert.equal(brakeCurrentForTorque(0),0);
+  assert.equal(brakeCurrentForTorque(.1),0);
+  assert.equal(brakeCurrentForTorque(.2),.046);
+  assert.equal(brakeCurrentForTorque(1.3986),.35);
+  assert.equal(brakeCurrentForTorque(2.7),.396);
+  assert.throws(()=>brakeCurrentForTorque(2.71),/目标力矩/);
 });
 
 test('specialized metrics keep measured-current regression, directional repeats and thermal operating-point qualification',() => {
@@ -131,7 +146,7 @@ test('a reloaded dirty motor journal cannot be cleared without reconnecting the 
   const store = new MemoryStore();await store.put('output-journal',{dirty:true,expected:['current-motor'],motorMayBeOn:true});
   const env = new Bench(noIo,store,() => {});await env.initialize();t.after(() => env.timers.forEach(clearInterval));
   env.beginStop('reconcile');await env.stopTask;
-  assert.equal(env.blocked,true);assert.equal(env.motor.run.stopConfirmed,false);assert.equal((await store.get('output-journal')).dirty,true);
+  assert.equal(env.blocked,true);assert.equal(env.motor.run.stopConfirmed,false);assert.equal(env.coupled.run.stopConfirmed,false);assert.equal((await store.get('output-journal')).dirty,true);
   env.device.bus = {closed:false};env.motor.stop = async () => {env.device.state.flags = 0;};
   env.beginStop('reconnected original driver');await env.stopTask;
   assert.equal(env.blocked,false);assert.equal((await store.get('output-journal')).dirty,false);
@@ -154,19 +169,20 @@ test('recovery never clears an unresolved power journal merely because CAN is al
 test('maximum-output torque sweep waits for the second click and completes all configured load steps',async t => {
   const env = await bench(), power = {config:{protocol:'ru',voltageDecimals:2,currentDecimals:2},status() {return {connected:true,config:this.config,snapshot:{config:this.config,receivedAt:utc(),status:128,settings:[1,2400,2000],measured:[2400,0]}};},async read() {return this.status();}};
   let current = 0,on = false,starts = 0,stops = 0;
-  const channel = {config:{protocol:'ssj',voltageDecimals:2,currentDecimals:3},snapshot:{status:0},status() {return {connected:true,config:this.config,snapshot:{config:this.config,receivedAt:utc(),status:on ? 128 : 0,settings:[1,2400,current * 1000],measured:[2400,0]}};},async output(value) {on = value;this.snapshot.status = on ? 128 : 0;return this.status();},async setValues(value) {current = value.current;},async read() {return this.status();}};
+  const channel = {config:{protocol:'ssj',voltageDecimals:2,currentDecimals:3},snapshot:{status:0},status() {return {connected:true,config:this.config,snapshot:{config:this.config,receivedAt:utc(),status:on ? 128 : 0,settings:[1,2400,current * 1000],measured:[2400,0]}};},async output(value,settings) {if(value)await this.setValues(settings);on = value;this.snapshot.status = on ? 128 : 0;return this.status();},async setValues(value) {current = value.current;},async read() {return this.status();}};
   env.channels = {'motor-supply':power,'brake-supply':channel};
-  env.sensor = {status:() => ({connected:true,snapshot:{receivedAt:utc(),torque:.1 + (on ? current * 4 : 0),speed:100,speedDecimals:1}})};
+  env.sensor = {flushFrames() {},status:() => ({connected:true,snapshot:{receivedAt:utc(),torque:.1 + (on ? current * 4 : 0),speed:100,speedDecimals:1}})};
   env.device.bus = {closed:false};env.device.wait = async predicate => {assert.equal(!!predicate(),true);};
-  env.motor.status = () => ({connected:true,snapshot:snapshot(),run:env.motor.run});
+  env.motor.status = () => {const s=snapshot();s.motor.output_on=!!env.motor.run.running;return {connected:true,snapshot:s,run:env.motor.run};};
   env.motor.start = async data => {assert.equal(data.mode,'maximum_output');starts++;env.motor.run = {running:true,phase:'running',mode:'maximum_output',maximumRequested:true,maximumRequestedAt:0};};
   env.motor.stop = async () => {stops++;env.motor.run.running = false;};
   env.brake = {run:{running:false},status:() => ({}),stop:async () => channel.output(false)};
   env.coupled = new CoupledCurrent(env);t.after(() => clearInterval(env.recordings.timer));
   await env.coupled.start({mode:'torque_sweep',motorMode:'maximum_output',brake:{startNm:0,stepNm:.2,maxNm:.4,intervalS:.5}});
   const deadline = Date.now() + 3000;while (env.coupled.run.phase !== 'awaiting_load' && Date.now() < deadline) await new Promise(done => setTimeout(done,10));
-  assert.equal(env.coupled.run.phase,'awaiting_load');await new Promise(done => setTimeout(done,100));assert.equal(on,false);assert.equal(starts,1);
+  assert.equal(env.coupled.run.phase,'awaiting_load');assert.deepEqual(env.coupled.run.characteristicPoints,[]);await new Promise(done => setTimeout(done,100));assert.equal(on,false);assert.equal(starts,1);
   env.coupled.load({id:env.coupled.run.id});await env.coupled.task;
+  assert.deepEqual(env.coupled.run.characteristicPoints.map(p=>p.torque),[0,.2,.4]);assert.ok(env.coupled.run.characteristicPoints.every(p=>p.startedAt>=env.coupled.run.loadStartedAt));
   assert.equal(env.coupled.run.loadSteps,3);assert.match(env.coupled.run.reason,/阶梯完成/);assert.equal(env.coupled.run.stopConfirmed,true);assert.equal(on,false);assert.equal(stops,1);
   const reports = await env.recordings.history();assert.equal(reports.length,1);assert.equal(reports[0].running,false);
 });
@@ -181,7 +197,7 @@ test('browser specialized recipes finish and retain named geared/bare records, s
     env.motor.healthy = () => {};env.motor.stop = async () => {enabled = false;env.motor.run.running = false;};
     const {O} = await import('../browser/mbp-codec.ts');env.device.prepare = async config => {mode = config[O.run_mode];return 1;};
     env.device.start = async () => {enabled = true;};env.device.setTarget = async (_oid,value) => {target = Number(value);return {};};
-    env.sensor = {status:() => ({connected:true,snapshot:{receivedAt:utc(),torque:target / 1000 * 2,speed:0}}),batch:() => ({frames:[]})};
+    env.sensor = {flushFrames() {},status:() => ({connected:true,snapshot:{receivedAt:utc(),torque:target / 1000 * 2,speed:0}}),batch:() => ({frames:[]})};
     t.after(() => clearInterval(env.recordings.timer));
     const body = {suite,motionConfirmed:true,durationS:.25,windowS:.1,settleS:0,dwellS:.25,coolingS:.1,iqLevelsA:[.5,1,1.5],positionsDeg:[0,90],cycles:1};
     const {current} = await env.specialized.start(body,'automatic');await env.specialized.tasks.automatic;
@@ -212,4 +228,45 @@ test('failed autonomous stop retains uncertainty and invokes the original power-
   channel.output = async enabled => {assert.equal(enabled,false);off++;channel.outputUncertain = false;channel.snapshot = {status:0,measured:[0,0]};};channel.read = async () => channel.status();
   env.publish();await env.stopTask;
   assert.ok(off > 0);assert.equal(env.motorIsolated,true);assert.equal(env.blocked,false);assert.equal(env.motor.run.stopConfirmed,true);assert.equal((await env.store.get('output-journal')).dirty,false);
+  assert.equal(env.coupled.run.stopConfirmed,true);
+  assert.match(env.coupled.run.stopErrors[0],/CAN link lost/);
+  let restarted=false;
+  env.coupled.sweep=async()=>{restarted=true;};
+  await env.coupled.start({mode:'torque_sweep',brake:{startNm:0,stepNm:.1,maxNm:1,intervalS:1}});
+  assert.equal(restarted,true,'a confirmed discharge must release the coupled start gate');
+  env.channels['brake-supply'].config={};
+  env.brake.stop=async()=>{throw new Error('brake OFF not confirmed');};
+  env.beginStop();await env.stopTask;
+  assert.equal(env.blocked,true);
+  assert.equal(env.coupled.run.stopConfirmed,false,'an unresolved brake failure must still block restart');
+
+});
+
+
+test('0.15 Nm sweep records a powered stall once and never appends post-stop zero',async t=>{
+  const env=await bench();let on=false,current=0;
+  const power={config:{protocol:'ru',voltageDecimals:2,currentDecimals:2},status(){return {connected:true,config:this.config,snapshot:{receivedAt:utc()-.01,status:128,settings:[1,2400,2000],measured:[2400,100]}};},async read(){return this.status();}};
+  const brake={config:{protocol:'ssj',voltageDecimals:2,currentDecimals:3},snapshot:{status:0},status(){return {connected:true,config:this.config,snapshot:{receivedAt:utc(),status:on?128:0,settings:[1,2400,current*1000],measured:[2400,0]}};},async output(value,settings){if(value)await this.setValues(settings);on=value;this.snapshot.status=on?128:0;return this.status();},async setValues(value){current=value.current;},async read(){return this.status();}};
+  env.channels={'motor-supply':power,'brake-supply':brake};
+  const stalled=()=>env.coupled.run.targetNm>=.3;
+  env.sensor={flushFrames(){},status:()=>({connected:true,snapshot:{receivedAt:utc(),torque:stalled()?.26:(env.coupled.run.targetNm||.02),speed:stalled()?0:100,torqueDecimals:2,speedDecimals:1}})};
+  env.device.bus={closed:false};env.device.wait=async predicate=>assert.equal(!!predicate(),true);
+  env.motor.status=()=>{const s=snapshot();s.motor.state=env.motor.run.running?2:0;s.motor.output_on=!!env.motor.run.running;s.feedback.speed_rpm=stalled()?0:100;return {connected:true,snapshot:s,run:env.motor.run};};
+  env.motor.start=async()=>{env.motor.run={running:true,phase:'running',mode:'maximum_output',maximumRequested:true,maximumRequestedAt:0};};
+  env.motor.stop=async()=>{env.motor.run.running=false;};
+  env.brake={run:{running:false},status:()=>({}),stop:async()=>brake.output(false)};
+  env.coupled=new CoupledCurrent(env);t.after(()=>clearInterval(env.recordings.timer));
+  await env.coupled.start({mode:'torque_sweep',motorMode:'maximum_output',brake:{startNm:0,stepNm:.15,maxNm:1,intervalS:.5}});
+  const deadline=Date.now()+3000;while(env.coupled.run.phase!=='awaiting_load'&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.equal(env.coupled.run.phase,'awaiting_load');assert.deepEqual(env.coupled.run.characteristicPoints,[]);
+  env.coupled.load({id:env.coupled.run.id});await env.coupled.task;
+  const points=env.coupled.run.characteristicPoints;
+  assert.deepEqual(points.map(p=>p.torque),[0,.15,.3]);assert.equal(points.at(-1).kind,'stall');assert.equal(points.at(-1).speed,0);assert.equal(points.at(-1).power,0);assert.equal(points.at(-1).measuredTorque,.26);
+  assert.ok(env.coupled.run.stopConfirmation.durationS>=5);
+  assert.ok(points.at(-1).receivedAt-env.coupled.run.loadStages.at(-1).startedAt>=5);
+  assert.equal(env.coupled.run.loadSteps,3,'zero-speed confirmation holds the existing stage');
+  assert.equal(env.coupled.run.stopConfirmed,true);assert.equal(on,false);
+  const report=(await env.recordings.history())[0];assert.equal(report.characteristicPoints.length,env.coupled.run.characteristicPoints.length);
+  assert.equal(report.characteristicRuns[0].id,env.coupled.run.id);assert.equal(report.characteristicRuns[0].loadStartedAt,env.coupled.run.loadStartedAt);
+  assert.equal(report.counts.characteristic_point,report.characteristicPoints.length);assert.equal(report.counts.post_stop_tail_end,1);
 });

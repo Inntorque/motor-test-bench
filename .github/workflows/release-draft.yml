@@ -1,0 +1,74 @@
+name: Prepare approved release draft
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing reviewed release tag, such as v1.1.0
+        required: true
+        type: string
+      confirmation:
+        description: Type CREATE_DRAFT after obtaining release approval
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-draft
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.event_name == 'push' || (inputs.confirmation == 'CREATE_DRAFT' && startsWith(inputs.tag, 'v'))
+    uses: ./.github/workflows/desktop-verify.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+  draft:
+    needs: verify
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.4'
+          package-manager-cache: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Verify tag matches both application versions
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; const a=JSON.parse(fs.readFileSync("package.json")), b=JSON.parse(fs.readFileSync("desktop/package.json")); if(!/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(process.env.RELEASE_TAG)||process.env.RELEASE_TAG!=="v"+a.version||a.version!==b.version) throw Error("release tag/version mismatch");'
+      - run: npm ci
+      - run: npm run desktop:setup
+      - run: npm run build
+      - run: echo "INNTORQUE_SIGNING_KEY_FILE=$RUNNER_TEMP/inntorque-release-private.pem" >> "$GITHUB_ENV"
+      - name: Load protected signing key
+        env:
+          RELEASE_PRIVATE_KEY: ${{ secrets.INNTORQUE_RELEASE_PRIVATE_KEY }}
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; if(!process.env.RELEASE_PRIVATE_KEY) throw Error("missing protected release key"); fs.writeFileSync(process.env.INNTORQUE_SIGNING_KEY_FILE,process.env.RELEASE_PRIVATE_KEY,{mode:0o600,flag:"wx"});'
+      - run: node scripts/release.mjs
+        env:
+          BENCH_PLATFORM: linux
+      - run: node scripts/release.mjs
+        env:
+          BENCH_PLATFORM: win32
+      - run: node scripts/verify_release.mjs
+      - name: Create draft only; publishing is a separate approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_TAG" --verify-tag --draft --title "Inntorque $RELEASE_TAG" --notes-file "docs/releases/${RELEASE_TAG#v}.md" artifacts/releases/"$RELEASE_TAG"/*.zip artifacts/releases/"$RELEASE_TAG"/*.json
+      - name: Remove signing material
+        if: always()
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; if(process.env.INNTORQUE_SIGNING_KEY_FILE)fs.rmSync(process.env.INNTORQUE_SIGNING_KEY_FILE,{force:true});'

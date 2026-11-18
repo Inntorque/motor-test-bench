@@ -22,25 +22,39 @@ export function gsBitTiming(capabilities, bitrate) {
 export class DeviceAccess {
   declare changed: () => void;
   declare emit: (message: MainToWorker, transfer?: Transferable[]) => void;
+  declare desktop: boolean;
 
   devices = new Map(); next = 1;
-  constructor(emit: (message: MainToWorker, transfer?: Transferable[]) => void, changed = () => {}) { this.emit = emit; this.changed = changed; }
+  constructor(emit: (message: MainToWorker, transfer?: Transferable[]) => void, changed = () => {}, desktop = false) { this.emit = emit; this.changed = changed; this.desktop = desktop; }
   register(device, kind) {
-    for (const [id,entry] of this.devices) if (entry.device === device) return id;
+    for (const [id,entry] of this.devices) if (entry.device === device) {
+      if (entry.available === false) { entry.available = true; this.changed(); }
+      return id;
+    }
     const id = `${kind}-${crypto.randomUUID()}`;
     this.devices.set(id,{device,kind,queue:new SerialQueue(),name:`${kind === 'usb' ? device.productName || 'gs_usb' : '串口'} ${this.next++}`});
     this.changed(); return id;
   }
   async initialize() {
-    for (const port of await navigator.serial?.getPorts() || []) this.register(port,'serial');
-    for (const device of await navigator.usb?.getDevices() || []) {
-      if (GS_FILTERS.some(filter => device.vendorId === filter.vendorId && device.productId === filter.productId)) this.register(device,'usb');
+    await this.discover();
+    if (this.desktop) {
+      navigator.serial?.addEventListener('connect',event => this.register(event.target,'serial'));
+      navigator.usb?.addEventListener('connect',event => {
+        if (GS_FILTERS.some(filter => event.device.vendorId === filter.vendorId && event.device.productId === filter.productId)) this.register(event.device,'usb');
+      });
     }
     navigator.serial?.addEventListener('disconnect',event => this.disconnected(event.target));
     navigator.usb?.addEventListener('disconnect',event => this.disconnected(event.device));
   }
+  async discover() {
+    for (const port of await navigator.serial?.getPorts() || []) this.register(port,'serial');
+    for (const device of await navigator.usb?.getDevices() || []) {
+      if (GS_FILTERS.some(filter => device.vendorId === filter.vendorId && device.productId === filter.productId)) this.register(device,'usb');
+    }
+  }
   disconnected(device) {
     for (const [id,entry] of this.devices) if (entry.device === device) {
+      if (this.desktop) entry.available = false;
       entry.open = false; this.emit({kind:'io-error',device:id,error:'设备已拔出'});
     }
     this.changed();
@@ -54,16 +68,16 @@ export class DeviceAccess {
     return this.register(await navigator.usb.requestDevice({filters:GS_FILTERS}),'usb');
   }
   ports() {
-    return [...this.devices].map(([port,entry]) => {
+    return [...this.devices].filter(([,entry]) => entry.available !== false).map(([port,entry]) => {
       const info = entry.kind === 'serial' ? entry.device.getInfo() : {usbVendorId:entry.device.vendorId,usbProductId:entry.device.productId};
       const device = {port,kind:entry.kind,vid:info.usbVendorId,pid:info.usbProductId,opened:!!entry.open}, transport = canInterface(device);
       return {...device,canInterface:transport,description:`${transport === 'slcan' ? 'CANable2 / SLCAN' : entry.name} · ${[device.vid,device.pid].map(id => (id || 0).toString(16).padStart(4,'0')).join(':')}`};
     });
   }
   async call(method, args) {
-    if (method === 'ports') return this.ports();
+    if (method === 'ports') { if (this.desktop) await this.discover(); return this.ports(); }
     const entry = this.devices.get(args.device);
-    if (!entry) throw new Error('请先点击“授权串口”或“授权 USB-CAN”，再选择对应设备');
+    if (!entry) throw new Error(this.desktop ? '设备接口不可用，请刷新设备列表并重新选择' : '请先点击“授权串口”或“授权 USB-CAN”，再选择对应设备');
     const device = entry.device;
     if (method === 'serial-open') {
       if (entry.open) throw new Error('该串口已被其他设备通道使用');

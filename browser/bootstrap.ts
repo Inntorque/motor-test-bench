@@ -1,36 +1,41 @@
 import type {AppId, WorkerToMain} from './messages.ts';
 import {DeviceAccess} from './hardware.ts';
 import {DeviceEvent} from './events.ts';
-import {isFocApp} from './messages.ts';
 const script = document.currentScript as HTMLScriptElement;
 const app = script.dataset.app as AppId;
-const foc = isFocApp(app);
+const desktop = window.inntorqueDesktop;
+const readyText = desktop ? '应用已就绪 · 本机设备直连' : '网页已就绪 · 无需本机服务';
+let showingSafety = false;
+if (desktop) document.documentElement.classList.add('desktop-app');
 window.INNTORQUE_BROWSER_DIRECT = true;
 const workerUrl = new URL('worker.js',script.src);
 workerUrl.search = new URL(script.src).search;
 const worker = new Worker(workerUrl,{type:'module',name:`inntorque-${app}`});
 const fetchNetwork = window.fetch.bind(window), NativeEventSource = window.EventSource;
-const pending = new Map(), streams = new Set<EventTarget>(); let nextRequest = 0,canDevice = '',node = app === 'dynamometer' ? 1 : 0;
+const pending = new Map(), streams = new Set<EventTarget>(); let nextRequest = 0,canDevice = '',node = 1;
 let resolveReady,rejectReady;
 const ready = new Promise((resolve,reject) => {resolveReady = resolve;rejectReady = reject;});
 const bar = document.createElement('div'); bar.id = 'inntorque-browser-access';
-bar.innerHTML = '<a href="../../">返回总网关</a><span>浏览器直接连接</span><button type="button" data-serial>授权串口</button><button type="button" data-usb>授权 USB-CAN</button><label>CAN <select aria-label="CAN适配器"><option value="">自动选择</option></select></label><label>节点 <input aria-label="CAN节点" type="number" min="0" max="63" style="width:3.2em"></label><span role="status">正在初始化…</span>';
+bar.innerHTML = '<span>浏览器直接连接</span><button type="button" data-serial>授权串口</button><button type="button" data-usb>授权 USB-CAN</button><label>CAN <select aria-label="CAN适配器"><option value="">自动选择</option></select></label><label>节点 <input aria-label="CAN节点" type="number" min="0" max="63" style="width:3.2em"></label><span role="status">正在初始化…</span>';
+if (desktop) {
+  bar.querySelector('span').textContent = 'INNTORQUE · 测功机';
+  document.title = 'Inntorque 测功机';
+}
+let desktopActive = false;
+const mutations = new Set<number>();
+const updateDesktopActivity = () => desktop?.activity(desktopActive || mutations.size > 0);
 const css = document.createElement('style');
-css.textContent = '#inntorque-browser-access{position:relative;z-index:20;display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:8px 16px;background:#fff;border-bottom:1px solid #e1e8ed;color:#425466;font:13px system-ui,sans-serif}#inntorque-browser-access button,#inntorque-browser-access select,#inntorque-browser-access input{font:inherit;color:inherit;padding:5px 8px;border:1px solid #cfd9e2;border-radius:6px;background:#fff}#inntorque-browser-access a{color:#436b82;text-decoration:none}#inntorque-browser-access [role=status]{margin-left:auto;font-size:12px}';
+css.textContent = '#inntorque-browser-access{position:relative;z-index:20;display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:8px 16px;background:#fff;border-bottom:1px solid #e1e8ed;color:#425466;font:13px system-ui,sans-serif}#inntorque-browser-access button,#inntorque-browser-access select,#inntorque-browser-access input{font:inherit;color:inherit;padding:5px 8px;border:1px solid #cfd9e2;border-radius:6px;background:#fff}#inntorque-browser-access [role=status]{margin-left:auto;font-size:12px}';
 document.head.append(css);
 const status = bar.querySelector('[role=status]'), select = bar.querySelector('select'), nodeInput = bar.querySelector('input'); nodeInput.value = String(node);
-if (foc) {
-  select.parentElement.remove();
-  nodeInput.parentElement.remove();
-}
 bar.querySelector<HTMLButtonElement>('[data-serial]')!.title = 'CANable2（SLCAN）、ZQWL 与 USB-RS485 均使用串口授权';
 bar.querySelector<HTMLButtonElement>('[data-usb]')!.title = '仅 gs_usb / candleLight；CANable2 串口固件请使用“授权串口”';
 select.onchange = () => {canDevice = select.value;}; nodeInput.onchange = () => {node = Number(nodeInput.value);};
 const access = new DeviceAccess((message,transfer) => worker.postMessage(message,transfer || []),() => {
   refreshPorts();
   window.dispatchEvent(new Event('inntorque-ports-changed'));
-});
-if (app === 'dynamometer') {
+},Boolean(desktop));
+if (!desktop) {
   window.inntorqueSelectRs485 = async () => {
     const id = await access.authorizeSerial();
     if (access.ports().find(port => port.port === id)?.canInterface) throw new Error('请选择 USB-RS485 转接器');
@@ -38,35 +43,39 @@ if (app === 'dynamometer') {
   };
 }
 function refreshPorts() {
-  const target = foc ? document.querySelector<HTMLSelectElement>('#channel') : select;
+  const target = select;
   if (!target) return;
   const previous = target.value;
-  const ports = access.ports().filter(port => !foc || port.canInterface);
+  const ports = access.ports();
   target.replaceChildren(new Option('自动选择',''),...ports.map(port => new Option(port.description,port.port)));
   if (ports.some(port => port.port === previous)) target.value = previous;
 }
-for (const [selector,authorize] of [['[data-serial]',() => access.authorizeSerial()],['[data-usb]',() => access.authorizeUsb()]] as const) {
+if (!desktop) for (const [selector,authorize] of [['[data-serial]',() => access.authorizeSerial()],['[data-usb]',() => access.authorizeUsb()]] as const) {
   bar.querySelector<HTMLButtonElement>(selector)!.onclick = async () => {
     try {
-      const id = await authorize();status.textContent = '已授权，请选择对应接口并点击连接';
+      const id = await authorize();status.textContent = '已授权 · 可继续授权其他转接器，或点击一键连接';
       if (access.ports().find(port => port.port === id)?.canInterface) {
-        if (foc) document.querySelector<HTMLSelectElement>('#channel').value = id;
-        else {canDevice = id;select.value = id;}
+        canDevice = id;select.value = id;
       }
     }
     catch (error) {status.textContent = error.name === 'NotFoundError' ? '未选择设备；CANable2 / ZQWL 请使用“授权串口”' : error.message;}
   };
+}
+if (desktop) {
+  bar.querySelector('[data-serial]').remove();
+  bar.querySelector('[data-usb]').remove();
 }
 const mount = () => {document.body.prepend(bar);refreshPorts();};
 if (document.body) mount(); else document.addEventListener('DOMContentLoaded',mount,{once:true});
 worker.addEventListener('message',async event => {
   const message = event.data as WorkerToMain;
   if (message.kind === 'io-call') {
-    try {const value = message.method === 'can-config' ? {device:canDevice,node} : await access.call(message.method,message.args);worker.postMessage({kind:'io-result',id:message.id,value});}
+    try {const value = message.method === 'archive-write' && desktop ? await desktop.saveData(message.args.archive) : message.method === 'can-config' ? {device:canDevice,node} : await access.call(message.method,message.args);worker.postMessage({kind:'io-result',id:message.id,value});}
     catch (error) {worker.postMessage({kind:'io-result',id:message.id,error:error.message});}
-  } else if (message.kind === 'ready') {status.textContent = '网页已就绪 · 无需本机服务';resolveReady();}
+  } else if (message.kind === 'ready') {status.textContent = readyText;resolveReady();}
   else if (message.kind === 'fatal') {status.textContent = message.error;rejectReady(new Error(message.error));}
   else if (message.kind === 'response') {
+    mutations.delete(message.id); updateDesktopActivity();
     const item = pending.get(message.id); if (!item) return;
     pending.delete(message.id);item.cleanup?.();
     const result = message.result as {file?: boolean; type?: string; body?: BlobPart};
@@ -82,7 +91,12 @@ worker.addEventListener('message',async event => {
     if (message.event === 'state') {
       const safety = message.data.control;
       bar.dataset.active = String(!!message.data.test?.running || !!message.data.devices?.['current-motor']?.snapshot?.motor?.output_on || (Object.values(message.data.devices || {}) as {snapshot?: {status?: number}}[]).some(device => device.snapshot?.status & 128));
-      if (safety?.blocked) status.textContent = safety.reason || '输出关闭未确认';
+      if (safety?.blocked) {status.textContent = safety.reason || '输出关闭未确认';showingSafety = true;}
+      else if (showingSafety) {status.textContent = readyText;showingSafety = false;}
+      if (desktop) {
+        desktopActive = !!message.data.desktopBusy;
+        updateDesktopActivity();
+      }
     }
   }
 });
@@ -97,9 +111,19 @@ window.fetch = (input,options = {}) => {
     signal?.addEventListener('abort',abort,{once:true});
     pending.set(id,{resolve,reject,cleanup:() => signal?.removeEventListener('abort',abort)});
     const method = (options.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    if (desktop && method === 'POST' && !url.pathname.endsWith('/heartbeat')) { mutations.add(id); updateDesktopActivity(); }
     let body = {}; try {body = options.body ? JSON.parse(options.body as string) : {};} catch {}
-    ready.then(() => {if (pending.has(id)) worker.postMessage({kind:'request',id,path:url.pathname + url.search,method,body,headers:Object.fromEntries(new Headers(options.headers || (input instanceof Request ? input.headers : {})))});},error => {pending.delete(id);reject(error);});
+    ready.then(() => {
+      if (pending.has(id)) worker.postMessage({kind:'request',id,path:url.pathname + url.search,method,body,headers:Object.fromEntries(new Headers(options.headers || (input instanceof Request ? input.headers : {})))});
+      else { mutations.delete(id); updateDesktopActivity(); }
+    },error => {pending.delete(id);mutations.delete(id);updateDesktopActivity();reject(error);});
   });
+};
+if (desktop) window.inntorqueCanClose = async (finish=false) => {
+  const response = await fetch('/api/desktop/close-ready?finish='+(finish ? 1 : 0));
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || '退出前数据保存未完成');
+  return result.ready;
 };
 window.EventSource = class BrowserEventSource extends EventTarget {
   readyState = 0;
@@ -136,23 +160,6 @@ document.addEventListener('click',event => {
   if (!link || !new URL(link.href,location.href).pathname.startsWith('/api/')) return;
   event.preventDefault();void downloadLink(link);
 });
-window.addEventListener('beforeunload',event => {if (bar.dataset.active === 'true') {event.preventDefault();event.returnValue = '';}});
-worker.postMessage({kind:'init',app});
+window.addEventListener('beforeunload',event => {if (!desktop && bar.dataset.active === 'true') {event.preventDefault();event.returnValue = '';}});
+worker.postMessage({kind:'init',app,desktop:Boolean(desktop)});
 void access.initialize().catch(error => {status.textContent = error.message;});
-if (app !== 'dynamometer' && !foc) {
-  const recordings = document.createElement('select');recordings.setAttribute('aria-label','运行记录');recordings.innerHTML = '<option value="">运行记录</option>';
-  const refresh = async () => {
-    const {records} = await (await fetch('/api/browser-recordings')).json(), previous = recordings.value;
-    recordings.replaceChildren(new Option('运行记录',''),...records.map(report => new Option(new Date(report.startedAt * 1000).toLocaleString() + ` · 模式 ${report.mode}`,report.id)));
-    if ([...recordings.options].some(option => option.value === previous)) recordings.value = previous;
-  };
-  recordings.addEventListener('focus',() => {void refresh();});bar.append(recordings);
-  for (const [title,format] of [['CSV','run.csv'],['JSONL','timeline.jsonl'],['冻结轨迹','maximum_trace.csv']]) {
-    const button = document.createElement('button');button.textContent = title;
-    button.onclick = () => {
-      if (!recordings.value) {status.textContent = '请先选择运行记录';return;}
-      const link = document.createElement('a');link.href = `/api/browser-recordings/file?id=${recordings.value}&format=${format}`;link.download = recordings.value + '-' + format;void downloadLink(link);
-    };bar.append(button);
-  }
-  void ready.then(refresh);
-}
